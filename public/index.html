@@ -1,0 +1,432 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VidToTab</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  color-scheme: light dark;
+  --bg: #f6f6f8;
+  --card: #ffffff;
+  --text: #1c1c22;
+  --muted: #6e6e7a;
+  --border: #e3e3ea;
+  --accent: #4f46e5;
+  --accent-ink: #ffffff;
+  --accent-soft: #eceefc;
+  --danger: #a11d1d;
+  --danger-bg: #fde4e4;
+  --amber: #8a5a08;
+  --amber-bg: #fbf0d3;
+  --shadow: 0 1px 3px rgba(0, 0, 0, .06);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #101014;
+    --card: #1b1b22;
+    --text: #ececf2;
+    --muted: #9d9dab;
+    --border: #2d2d38;
+    --accent: #8a8cfa;
+    --accent-ink: #15152e;
+    --accent-soft: #26264a;
+    --danger: #f6a1a1;
+    --danger-bg: #3b1515;
+    --amber: #f0c46a;
+    --amber-bg: #372a10;
+    --shadow: 0 1px 3px rgba(0, 0, 0, .4);
+  }
+}
+[hidden] { display: none !important; }
+body {
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.55;
+}
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+input[type="radio"] { accent-color: var(--accent); }
+a { color: var(--accent); }
+
+header {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 26px 20px 4px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.brand { font-weight: 700; font-size: 20px; letter-spacing: -.02em; }
+.brand span { color: var(--accent); }
+main { max-width: 800px; margin: 0 auto; padding: 10px 20px 110px; }
+section { margin-top: 16px; }
+
+/* stepper */
+#stepper { display: flex; gap: 2px; list-style: none; flex-wrap: wrap; }
+#stepper button {
+  display: flex; align-items: center; gap: 7px;
+  border: none; background: none; color: var(--muted);
+  font: inherit; font-size: 14px; padding: 6px 11px;
+  border-radius: 999px; cursor: pointer;
+}
+#stepper button:disabled { opacity: .4; cursor: default; }
+#stepper .num {
+  width: 21px; height: 21px; border-radius: 50%;
+  background: var(--border); color: var(--text);
+  display: grid; place-items: center;
+  font-size: 11.5px; font-weight: 600;
+}
+#stepper li.active button { color: var(--text); background: var(--accent-soft); font-weight: 600; }
+#stepper li.active .num { background: var(--accent); color: var(--accent-ink); }
+
+/* text */
+h1 { font-size: 29px; line-height: 1.2; letter-spacing: -.02em; margin: 16px 0 10px; }
+h2 { font-size: 19px; line-height: 1.35; margin: 4px 0 6px; }
+.sub { color: var(--muted); font-size: 16px; max-width: 58ch; margin-bottom: 20px; }
+.quiet { color: var(--muted); font-size: 14px; }
+p { margin: 6px 0; }
+
+/* buttons */
+button { font: inherit; color: inherit; }
+.btn {
+  padding: 8px 16px; border-radius: 9px;
+  border: 1px solid var(--border);
+  background: var(--card); color: var(--text);
+  cursor: pointer; font-size: 14.5px;
+}
+.btn:hover { border-color: var(--muted); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+.btn.primary:hover { filter: brightness(1.08); }
+.btn:disabled { opacity: .5; cursor: default; filter: none; }
+.btn.big { padding: 10px 24px; font-size: 16px; }
+.btn.small { padding: 4px 11px; font-size: 13px; border-radius: 7px; }
+.linklike {
+  background: none; border: none; padding: 0;
+  color: var(--accent); cursor: pointer;
+  text-decoration: underline; text-underline-offset: 2px;
+}
+
+/* layout helpers */
+.row { display: flex; gap: 10px; align-items: center; }
+.spread { justify-content: space-between; }
+.wrap { flex-wrap: wrap; }
+
+/* cards, banners, notes */
+.card {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 12px; padding: 14px 16px; margin: 14px 0;
+  box-shadow: var(--shadow);
+}
+.banner.red {
+  position: relative;
+  background: var(--danger-bg); color: var(--danger);
+  border-radius: 12px; padding: 12px 42px 12px 16px; margin: 12px 0;
+}
+.banner.red pre {
+  white-space: pre-wrap; word-break: break-word;
+  font-size: 12px; margin-top: 6px;
+  max-height: 220px; overflow: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.banner.red summary { cursor: pointer; }
+.banner.red .linklike { color: inherit; font-weight: 600; }
+.banner .x {
+  position: absolute; top: 8px; right: 8px;
+  background: none; border: none; color: inherit;
+  cursor: pointer; font-size: 16px; line-height: 1; padding: 4px;
+}
+.note.amber {
+  display: flex; gap: 10px; align-items: baseline;
+  background: var(--amber-bg); color: var(--amber);
+  border-radius: 10px; padding: 10px 14px; margin: 12px 0;
+  font-size: 14.5px;
+}
+.note.amber .x { margin-left: auto; background: none; border: none; color: inherit; cursor: pointer; flex: none; }
+.note.amber .linklike { color: inherit; font-weight: 600; }
+code {
+  background: rgba(127, 127, 127, .13);
+  padding: 3px 8px; border-radius: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13.5px;
+}
+.cmdrow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 6px; }
+
+/* step 1 */
+.urlrow { display: flex; gap: 10px; margin: 8px 0 10px; }
+.urlrow input {
+  flex: 1; min-width: 0;
+  padding: 11px 14px; border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--card); color: var(--text);
+  font: inherit; font-size: 16px;
+}
+.urlrow input::placeholder { color: var(--muted); }
+.shimmer {
+  border-radius: 6px; height: 14px; margin: 9px 0;
+  background: linear-gradient(90deg, var(--border) 25%, var(--bg) 50%, var(--border) 75%);
+  background-size: 200% 100%;
+  animation: shim 1.1s linear infinite;
+}
+.shimmer.short { width: 40%; }
+@keyframes shim { to { background-position: -200% 0; } }
+.metacard { display: flex; gap: 14px; align-items: center; }
+#metaThumb { width: 136px; max-width: 35%; height: auto; border-radius: 8px; display: block; }
+.metatitle { font-weight: 600; }
+
+/* progress bars */
+.bar { height: 8px; background: var(--border); border-radius: 999px; overflow: hidden; margin: 16px 0 8px; }
+.bar > div { height: 100%; width: 0%; background: var(--accent); border-radius: 999px; transition: width .25s ease; }
+
+/* step 2: video + region */
+#videoWrap {
+  position: relative; overflow: hidden;
+  border-radius: 12px; background: #000;
+  margin: 14px 0 10px;
+  box-shadow: var(--shadow);
+}
+#video { display: block; width: 100%; height: auto; }
+#overlay { position: absolute; inset: 0; pointer-events: none; touch-action: none; }
+#overlay.selecting { pointer-events: auto; cursor: crosshair; }
+#rect {
+  position: absolute;
+  border: 1.5px solid #fff;
+  outline: 1px solid rgba(0, 0, 0, .6);
+  cursor: move;
+}
+#overlay.selecting #rect { box-shadow: 0 0 0 100vmax rgba(0, 0, 0, .55); }
+#overlay:not(.selecting) .h { display: none; }
+.h {
+  position: absolute; width: 12px; height: 12px;
+  background: #fff; border: 2px solid var(--accent); border-radius: 3px;
+}
+.h[data-h="nw"] { left: -7px; top: -7px; cursor: nwse-resize; }
+.h[data-h="n"]  { left: calc(50% - 6px); top: -7px; cursor: ns-resize; }
+.h[data-h="ne"] { right: -7px; top: -7px; cursor: nesw-resize; }
+.h[data-h="w"]  { left: -7px; top: calc(50% - 6px); cursor: ew-resize; }
+.h[data-h="e"]  { right: -7px; top: calc(50% - 6px); cursor: ew-resize; }
+.h[data-h="sw"] { left: -7px; bottom: -7px; cursor: nesw-resize; }
+.h[data-h="s"]  { left: calc(50% - 6px); bottom: -7px; cursor: ns-resize; }
+.h[data-h="se"] { right: -7px; bottom: -7px; cursor: nwse-resize; }
+#cropPreviewWrap { margin: 14px 0 6px; }
+#cropPreview {
+  display: block; max-width: 100%; height: auto;
+  border: 1px solid var(--border); border-radius: 8px;
+  margin-top: 6px; background: #000;
+}
+#startLine { margin: 12px 0; }
+#analyzeRow { margin-top: 14px; }
+
+/* keyboard hints */
+.keyhint { font-size: 12.5px; color: var(--muted); }
+kbd {
+  border: 1px solid var(--border); border-bottom-width: 2px;
+  border-radius: 4px; padding: 0 5px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px; background: var(--card);
+}
+
+/* step 3 */
+.found { font-weight: 600; margin-top: 18px; }
+#liveStack img {
+  display: block; width: 100%; max-width: 440px; height: auto;
+  border: 1px solid var(--border); border-radius: 8px;
+  margin-top: 10px; background: #fff;
+}
+
+/* step 4: review */
+.reviewhead { margin-bottom: 6px; }
+.reviewhead h2 { margin: 0; font-size: 21px; }
+#reviewList { margin-top: 14px; }
+.capRow {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 12px; padding: 10px; margin-bottom: 14px;
+  box-shadow: var(--shadow);
+}
+.capRow.selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.capRow img { display: block; width: 100%; height: auto; border-radius: 6px; background: #fff; }
+.capBar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 9px; }
+.badge {
+  font-size: 12.5px; padding: 3px 10px; border-radius: 999px;
+  border: none; background: var(--accent-soft); color: var(--text);
+}
+button.badge { cursor: pointer; }
+.badge.time {
+  font-variant-numeric: tabular-nums; font-weight: 600;
+  background: var(--accent-soft); color: var(--accent);
+}
+.badge.time:hover { filter: brightness(.94); }
+.badge.time.short { background: var(--amber-bg); color: var(--amber); }
+.badge.chip { background: transparent; border: 1px dashed var(--border); color: var(--muted); }
+.badge.action { background: transparent; border: 1px solid var(--border); }
+.badge.action:hover { border-color: var(--muted); }
+.del {
+  margin-left: auto; opacity: 0;
+  background: transparent; border: none; color: var(--muted);
+  cursor: pointer; font-size: 15px; padding: 1px 8px; border-radius: 6px;
+}
+.capRow:hover .del, .capRow.selected .del { opacity: 1; }
+.del:hover { color: var(--danger); background: var(--danger-bg); }
+#detect { margin-top: 30px; border-top: 1px solid var(--border); padding-top: 14px; }
+#detect summary { cursor: pointer; color: var(--muted); font-size: 14px; }
+#detect label { display: block; padding: 7px 2px 0; font-size: 14.5px; cursor: pointer; }
+.footerhint { margin-top: 18px; text-align: center; }
+
+/* toast */
+#toast {
+  position: fixed; left: 50%; transform: translateX(-50%); bottom: 26px;
+  background: #26262e; color: #fff;
+  padding: 10px 18px; border-radius: 999px;
+  display: flex; gap: 16px; align-items: center;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, .35);
+  font-size: 14.5px; z-index: 10;
+}
+#toast button { color: #a5b4fc; background: none; border: none; font-weight: 700; cursor: pointer; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">VidTo<span>Tab</span></div>
+  <ol id="stepper">
+    <li><button type="button" data-step="1"><span class="num">1</span>Source</button></li>
+    <li><button type="button" data-step="2" disabled><span class="num">2</span>Region</button></li>
+    <li><button type="button" data-step="3" disabled><span class="num">3</span>Processing</button></li>
+    <li><button type="button" data-step="4" disabled><span class="num">4</span>Review</button></li>
+  </ol>
+</header>
+
+<main>
+  <div id="errorBanner" class="banner red" hidden>
+    <button type="button" id="errorDismiss" class="x" aria-label="Dismiss error">&times;</button>
+    <p id="errorMsg"></p>
+    <details id="errorDetails" hidden><summary>details</summary><pre id="errorDetailText"></pre></details>
+    <p>Or download the video yourself and <button type="button" class="linklike" id="errEscape">choose a local file</button>.</p>
+  </div>
+
+  <section id="step1">
+    <div id="preflight" class="note amber" hidden>
+      <div style="flex:1">
+        <p><strong>Missing tools:</strong> <span id="preflightMissing"></span>. Install with:</p>
+        <p class="cmdrow">
+          <code>brew install yt-dlp ffmpeg</code>
+          <button type="button" class="btn small" id="copyBrew">Copy</button>
+          <button type="button" class="btn small" id="recheck">Re-check</button>
+        </p>
+      </div>
+    </div>
+    <h1>Turn a tab video into a songsheet</h1>
+    <p class="sub">Paste a link to a video that shows guitar tab on screen. VidToTab finds every distinct tab screen and stacks them into a printable sheet.</p>
+    <form id="urlForm" class="urlrow">
+      <input id="urlInput" type="url" placeholder="Paste a YouTube link" autocomplete="off" spellcheck="false">
+      <button type="submit" class="btn primary">Fetch</button>
+    </form>
+    <p class="quiet">or <button type="button" class="linklike" id="chooseFile">choose a local video file</button> — or drop one anywhere on this page</p>
+    <input id="fileInput" type="file" accept="video/*" hidden>
+    <div id="fetching" class="card" hidden>
+      <p class="quiet">Fetching info…</p>
+      <div class="shimmer"></div>
+      <div class="shimmer short"></div>
+    </div>
+    <div id="metaCard" class="card metacard" hidden>
+      <img id="metaThumb" alt="" hidden>
+      <div>
+        <p id="metaTitle" class="metatitle"></p>
+        <p id="metaDuration" class="quiet"></p>
+      </div>
+    </div>
+    <div id="dlProgress" hidden>
+      <div class="bar"><div id="dlBarFill"></div></div>
+      <div class="row spread">
+        <span id="dlLabel" class="quiet"></span>
+        <button type="button" class="btn" id="dlCancel">Cancel</button>
+      </div>
+    </div>
+  </section>
+
+  <section id="step2" hidden>
+    <h2>Pause on a frame where the tab is fully visible, then drag a box around it.</h2>
+    <p class="quiet">Include only the notation — exclude fretboard animations, hands, and titles.</p>
+    <div id="videoWrap">
+      <video id="video" controls playsinline preload="metadata"></video>
+      <div id="overlay">
+        <div id="rect" hidden>
+          <div class="h" data-h="nw"></div><div class="h" data-h="n"></div><div class="h" data-h="ne"></div>
+          <div class="h" data-h="w"></div><div class="h" data-h="e"></div>
+          <div class="h" data-h="sw"></div><div class="h" data-h="s"></div><div class="h" data-h="se"></div>
+        </div>
+      </div>
+    </div>
+    <div class="row spread wrap">
+      <div class="row">
+        <button type="button" class="btn primary" id="selectAreaBtn" disabled>Select tab area</button>
+        <button type="button" class="btn" id="backToScrub" hidden>Back to scrubbing</button>
+      </div>
+      <span class="keyhint"><kbd>←</kbd><kbd>→</kbd> 5 s &middot; <kbd>,</kbd><kbd>.</kbd> frame step &middot; arrows nudge box, <kbd>Shift</kbd>+arrows resize</span>
+    </div>
+    <div id="cropPreviewWrap" hidden>
+      <p class="quiet">What the analyzer will see:</p>
+      <canvas id="cropPreview"></canvas>
+    </div>
+    <p id="startLine" class="quiet">Analysis starts at <strong id="startAt">0:00</strong><span id="startCtx"> (current position)</span> — <button type="button" class="linklike" id="startZeroBtn">start from 0:00 instead</button></p>
+    <p id="longWarn" class="note amber" hidden></p>
+    <div class="row" id="analyzeRow">
+      <button type="button" class="btn primary big" id="analyzeBtn" disabled>Analyze</button>
+      <span id="analyzeHint" class="quiet">Draw a box around the tab first.</span>
+    </div>
+  </section>
+
+  <section id="step3" hidden>
+    <h2 id="stageLabel">Extracting frames…</h2>
+    <div class="bar"><div id="procBarFill"></div></div>
+    <div class="row spread">
+      <span id="procPct" class="quiet"></span>
+      <button type="button" class="btn" id="procCancel">Cancel</button>
+    </div>
+    <div id="warnings"></div>
+    <p id="foundCount" class="found" hidden></p>
+    <div id="liveStack"></div>
+  </section>
+
+  <section id="step4" hidden>
+    <div class="row spread wrap reviewhead">
+      <div>
+        <h2 id="rvTitle"></h2>
+        <p class="quiet">
+          <a id="rvSource" target="_blank" rel="noopener" hidden>source video</a><span id="rvDot" hidden> &middot; </span><span id="rvCount"></span>
+        </p>
+      </div>
+      <div class="row">
+        <button type="button" class="btn primary" id="exportPdf">Export PDF</button>
+        <button type="button" class="btn" id="exportPng">Export PNG</button>
+      </div>
+    </div>
+    <div id="diagCard" class="card" hidden>
+      <p><strong id="diagText">Only one distinct screen found.</strong> If that's wrong:</p>
+      <div class="row" style="margin-top:8px">
+        <button type="button" class="btn" id="diagAdjust">Adjust region</button>
+        <button type="button" class="btn" id="diagMore">More captures</button>
+      </div>
+    </div>
+    <div id="reviewList"></div>
+    <details id="detect">
+      <summary>Detection settings</summary>
+      <label><input type="radio" name="sens" value="0.25"> Seeing duplicates? → Fewer captures</label>
+      <label><input type="radio" name="sens" value="0.5" checked> Default</label>
+      <label><input type="radio" name="sens" value="0.75"> Missing pages? → More captures</label>
+    </details>
+    <p class="keyhint footerhint"><kbd>j</kbd>/<kbd>k</kbd> or <kbd>↑</kbd>/<kbd>↓</kbd> select &middot; <kbd>x</kbd>/<kbd>Del</kbd> delete &middot; <kbd>u</kbd> undo &middot; <kbd>Enter</kbd> seek to source</p>
+  </section>
+</main>
+
+<div id="toast" hidden>
+  <span id="toastMsg"></span>
+  <button type="button" id="toastUndo">Undo</button>
+</div>
+
+<script src="/app.js" defer></script>
+</body>
+</html>
