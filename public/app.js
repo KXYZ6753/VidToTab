@@ -71,7 +71,7 @@
     sensitivity: 0.5,
     lastAnalyze: null,     // { rect (native px), startTime } of last POST /api/analyze
     captures: [],
-    items: [],             // review rows (captures + unstitched parts), delete = flag
+    items: [],             // review rows (one per capture), delete = flag
     selected: -1,
     deletedStamps: [],     // {t0,t1} spans of deleted rows; survive re-runs (both ends ±1s)
     undoStack: [],
@@ -556,9 +556,8 @@
     return a;
   }
 
-  // Both span ends must match: a stamp from a deleted unstitched PART shares
-  // tStart with its re-stitched strip, and matching tStart alone would silently
-  // delete the whole strip (including parts the user explicitly kept).
+  // Both span ends must match so distinct captures that happen to share a
+  // tStart aren't collapsed by a single stamp.
   const isStamped = (t0, t1) =>
     state.deletedStamps.some((s) => Math.abs(s.t0 - t0) <= 1 && Math.abs(s.t1 - t1) <= 1);
 
@@ -571,7 +570,6 @@
       tStart: c.tStart,
       tEnd: c.tEnd,
       alsoAt: c.alsoAt || [],
-      parts: (c.parts && c.parts.length > 1) ? c.parts : null,
       deleted: isStamped(c.tStart, c.tEnd),
     }));
     state.selected = -1;
@@ -621,14 +619,6 @@
       badge.title = (span < 2 ? 'Very short — possible artifact. ' : '') + 'Jump to this moment in the video';
       badge.addEventListener('click', (e) => { e.stopPropagation(); seekToSource(it.tStart); });
       bar.appendChild(badge);
-
-      if (it.parts) {
-        bar.appendChild(el('span', 'badge', 'stitched from ' + it.parts.length + ' screens'));
-        const un = el('button', 'badge action', 'Unstitch');
-        un.type = 'button';
-        un.addEventListener('click', (e) => { e.stopPropagation(); unstitch(idx); });
-        bar.appendChild(un);
-      }
 
       for (const t of it.alsoAt) bar.appendChild(el('span', 'badge chip', 'also at ' + fmtTime(t)));
 
@@ -692,25 +682,6 @@
       (s) => Math.abs(s.t0 - it.tStart) <= 1 && Math.abs(s.t1 - it.tEnd) <= 1);
     if (i >= 0) state.deletedStamps.splice(i, 1);
     hideToast();
-    renderReview();
-  }
-
-  function unstitch(idx) {
-    const it = state.items[idx];
-    if (!it || !it.parts) return;
-    const parts = it.parts.map((p, i) => ({
-      key: it.key + '-part' + i,
-      png: p.png,
-      w: it.w,       // parts share the strip's width; height read from the image
-      h: 0,
-      tStart: p.tStart,
-      tEnd: p.tEnd,
-      alsoAt: [],
-      parts: null,
-      deleted: isStamped(p.tStart, p.tEnd),
-    }));
-    state.items.splice(idx, 1, ...parts);
-    state.selected = -1;
     renderReview();
   }
 

@@ -139,15 +139,6 @@ async function run(videoPath, opts, onProgress, job) {
     const png = `${runTag}-${id}.png`;
     await encodePng(d.rgb, d.w, d.h, path.join(workDir, png));
     const cap = { id, type: d.type, png, w: d.w, h: d.h, tStart: d.tStart, tEnd: d.tEnd, alsoAt: d.alsoAt };
-    if (d.type === 'strip') {
-      cap.parts = [];
-      for (let j = 0; j < d.parts.length; j++) {
-        const p = d.parts[j];
-        const ppng = `${runTag}-${id}-part${j}.png`;
-        await encodePng(p.rgb, p.w, p.h, path.join(workDir, ppng));
-        cap.parts.push({ png: ppng, w: p.w, h: p.h, tStart: p.tStart, tEnd: p.tEnd, dy: p.dy });
-      }
-    }
     captures.push(cap);
     onProgress({ phase: 'capture', capture: cap });
     onProgress({ phase: 'composite', pct: 80 + ((i + 1) / drafts.length) * 20 });
