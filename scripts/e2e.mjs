@@ -1,0 +1,279 @@
+// Browser end-to-end test: drives a real browser through the whole VidToTab flow over CDP.
+//
+//   npm run e2e                        file upload flow against `node server.js`
+//   npm run e2e -- --url <youtube>     paste-a-link flow instead of a file
+//   npm run e2e -- --app <binary>      drive a packaged app instead of starting the server
+//   npm run e2e -- --keep              keep screenshots and downloads
+//
+// Screenshots, downloads and a log land in .e2e/ (or $E2E_OUT). Exits non-zero on failure.
+import { spawn } from 'node:child_process';
+import fs from 'node:fs';
+import net from 'node:net';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const argv = process.argv.slice(2);
+const arg = (name) => { const i = argv.indexOf(name); return i >= 0 ? argv[i + 1] : null; };
+const flag = (name) => argv.includes(name);
+
+const OUT = process.env.E2E_OUT || path.join(ROOT, '.e2e');
+const VIDEO = process.env.E2E_VIDEO || path.join(ROOT, '.cache/eval/yT9gKKwBeVw/video.mp4');
+const YT_URL = arg('--url');
+const APP_BIN = arg('--app');
+const KEEP = flag('--keep');
+
+const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+const freePort = () => new Promise((resolve, reject) => {
+  const s = net.createServer();
+  s.on('error', reject);
+  s.listen(0, '127.0.0.1', () => { const { port } = s.address(); s.close(() => resolve(port)); });
+});
+
+function findChrome() {
+  if (process.env.CHROME_PATH) return process.env.CHROME_PATH;
+  const candidates = process.platform === 'darwin'
+    ? ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+       '/Applications/Chromium.app/Contents/MacOS/Chromium',
+       '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge']
+    : process.platform === 'win32'
+      ? ['C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+         'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+         'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe']
+      : ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium',
+         '/usr/bin/chromium-browser', '/snap/bin/chromium'];
+  const found = candidates.find((p) => fs.existsSync(p));
+  if (!found) throw new Error('No Chrome/Chromium found. Set CHROME_PATH.');
+  return found;
+}
+
+if (!YT_URL && !fs.existsSync(VIDEO)) {
+  console.error(`Test video missing: ${VIDEO}\nRun \`npm run eval\` once to download it, or pass E2E_VIDEO=/path/to/video.mp4, or use --url <youtube link>.`);
+  process.exit(2);
+}
+fs.rmSync(OUT, { recursive: true, force: true });
+fs.mkdirSync(path.join(OUT, 'downloads'), { recursive: true });
+
+// ---------------------------------------------------------------- app + browser
+const children = [];
+let appUrl, debugPort;
+
+if (APP_BIN) {
+  // Packaged app: it starts its own server and exposes CDP when VIDTOTAB_CDP_PORT is set.
+  debugPort = await freePort();
+  const app = spawn(APP_BIN, [], { env: { ...process.env, VIDTOTAB_CDP_PORT: String(debugPort) }, stdio: ['ignore', 'pipe', 'pipe'] });
+  children.push(app);
+  app.stdout.on('data', (d) => process.stdout.write('[app] ' + d));
+  app.stderr.on('data', (d) => process.stderr.write('[app] ' + d));
+} else {
+  const port = Number(process.env.PORT) || await freePort();
+  appUrl = `http://127.0.0.1:${port}/`;
+  const srv = spawn(process.execPath, ['server.js'], { cwd: ROOT, env: { ...process.env, PORT: String(port) }, stdio: ['ignore', 'pipe', 'pipe'] });
+  children.push(srv);
+  const srvLog = fs.createWriteStream(path.join(OUT, 'server.log'));
+  srv.stdout.on('data', (d) => srvLog.write(d));
+  srv.stderr.on('data', (d) => { srvLog.write(d); process.stderr.write('[srv] ' + d); });
+  await Promise.race([
+    new Promise((r) => srv.stdout.on('data', (d) => { if (String(d).includes('running at')) r(); })),
+    sleep(20000).then(() => { throw new Error('server did not start within 20s'); }),
+  ]);
+
+  debugPort = await freePort();
+  children.push(spawn(findChrome(), [
+    '--headless=new', `--remote-debugging-port=${debugPort}`, `--user-data-dir=${path.join(OUT, 'profile')}`,
+    '--no-first-run', '--no-default-browser-check', '--disable-gpu', '--hide-scrollbars',
+    '--autoplay-policy=no-user-gesture-required', 'about:blank'], { stdio: 'ignore' }));
+}
+
+let target;
+for (let i = 0; i < 120; i++) {
+  try {
+    const list = await (await fetch(`http://127.0.0.1:${debugPort}/json/list`)).json();
+    target = list.find((t) => t.type === 'page' && (!APP_BIN || /^https?:\/\/(127\.0\.0\.1|localhost)/.test(t.url)));
+    if (target) break;
+  } catch { /* not up yet */ }
+  await sleep(250);
+}
+if (!target) throw new Error('No debuggable page found');
+if (APP_BIN) appUrl = target.url;
+
+const ws = new WebSocket(target.webSocketDebuggerUrl);
+await new Promise((r) => ws.addEventListener('open', r));
+let seq = 0;
+const pending = new Map();
+const listeners = [];
+ws.addEventListener('message', (m) => {
+  const msg = JSON.parse(m.data);
+  if (msg.id && pending.has(msg.id)) {
+    const p = pending.get(msg.id); pending.delete(msg.id);
+    msg.error ? p.reject(new Error(JSON.stringify(msg.error))) : p.resolve(msg.result);
+  } else if (msg.method) for (const l of listeners) l(msg);
+});
+const send = (method, params = {}) => new Promise((resolve, reject) => {
+  const id = ++seq; pending.set(id, { resolve, reject });
+  ws.send(JSON.stringify({ id, method, params }));
+});
+const evalJs = async (expr) => (await send('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true })).result.value;
+const waitFor = async (expr, ms = 120000, label = expr) => {
+  const t0 = Date.now();
+  for (;;) {
+    if (await evalJs(expr)) return;
+    if (Date.now() - t0 > ms) throw new Error(`timeout waiting for ${label}`);
+    await sleep(250);
+  }
+};
+const shot = async (name, full = false) => {
+  let clip;
+  if (full) {
+    const m = await send('Page.getLayoutMetrics');
+    clip = { x: 0, y: 0, width: m.cssContentSize.width, height: Math.min(m.cssContentSize.height, 5000), scale: 1 };
+  }
+  const r = await send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: full, ...(clip ? { clip } : {}) });
+  fs.writeFileSync(path.join(OUT, `${name}.png`), Buffer.from(r.data, 'base64'));
+  log('shot', name);
+};
+
+const problems = [];
+listeners.push((m) => {
+  if (m.method === 'Runtime.exceptionThrown') problems.push('exception: ' + (m.params.exceptionDetails.exception?.description || m.params.exceptionDetails.text));
+  if (m.method === 'Runtime.consoleAPICalled' && m.params.type === 'error') problems.push('console.error: ' + m.params.args.map((a) => a.value ?? a.description).join(' '));
+  if (m.method === 'Log.entryAdded' && m.params.entry.level === 'error') problems.push('log: ' + m.params.entry.text + ' ' + (m.params.entry.url || ''));
+});
+
+const downloads = () => fs.readdirSync(path.join(OUT, 'downloads')).filter((f) => !f.endsWith('.crdownload'));
+let failure = null;
+
+// ---------------------------------------------------------------- the flow
+try {
+  await send('Page.enable'); await send('Runtime.enable'); await send('Log.enable'); await send('DOM.enable');
+  await send('Browser.setDownloadBehavior', { behavior: 'allow', downloadPath: path.join(OUT, 'downloads'), eventsEnabled: true })
+    .catch(() => send('Page.setDownloadBehavior', { behavior: 'allow', downloadPath: path.join(OUT, 'downloads') }));
+  const desktop = () => send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
+  const scheme = (v) => send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: v }] });
+  await desktop(); await scheme('light');
+  await send('Page.navigate', { url: appUrl });
+  await waitFor(`document.readyState === 'complete' && !!document.getElementById('urlForm')`, 20000, 'app loaded');
+  await sleep(600);
+  await shot('1-source-light');
+
+  if (YT_URL) {
+    log('source: youtube link', YT_URL);
+    await evalJs(`(() => {
+      const f = document.getElementById('urlForm');
+      const i = f.querySelector('input[type=url], input[type=text], input');
+      i.value = ${JSON.stringify(YT_URL)};
+      i.dispatchEvent(new Event('input', { bubbles: true }));
+      f.requestSubmit ? f.requestSubmit() : f.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    })()`);
+    await waitFor(`!document.getElementById('sourceCard').hidden`, 30000, 'source card');
+    await shot('1b-downloading-light');
+    await waitFor(`!document.getElementById('step2').hidden`, 420000, 'step 2 (download + detect)');
+  } else {
+    log('source: file upload', VIDEO);
+    const doc = await send('DOM.getDocument');
+    const { nodeId } = await send('DOM.querySelector', { nodeId: doc.root.nodeId, selector: '#fileInput' });
+    await send('DOM.setFileInputFiles', { nodeId, files: [VIDEO] });
+    await waitFor(`!document.getElementById('sourceCard').hidden`, 10000, 'source card');
+    await sleep(300);
+    await shot('1b-uploading-light');
+    await waitFor(`!document.getElementById('step2').hidden`, 120000, 'step 2');
+  }
+
+  await waitFor(`/is-(found|none|low)/.test(document.getElementById('detectStatus').className)`, 60000, 'detection');
+  await waitFor(`document.getElementById('video').readyState >= 2`, 20000, 'video frame');
+  await sleep(1200);
+  log('detect:', await evalJs(`document.getElementById('detectTitle').textContent`));
+  await shot('2-region-light');
+  await evalJs(`document.getElementById('adjustBtn').click()`);
+  await sleep(400);
+  await shot('2b-adjust-light');
+  await evalJs(`document.getElementById('adjustBtn').click()`);
+
+  await evalJs(`document.getElementById('analyzeBtn').click()`);
+  await waitFor(`!document.getElementById('step3').hidden`, 20000, 'step 3');
+  await sleep(2500);
+  await shot('3-scan-light');
+  await waitFor(`!document.getElementById('step4').hidden`, 300000, 'step 4');
+  await sleep(1500);
+  const pages = await evalJs(`document.getElementById('rvCount').textContent`);
+  log('review:', pages, '| title:', await evalJs(`document.getElementById('titleInput').value`));
+  if (!/[1-9]/.test(pages)) throw new Error(`no pages captured: ${pages}`);
+  await shot('4-review-light');
+  await shot('4-review-light-full', true);
+
+  await evalJs(`document.querySelector('#lookSeg [data-look=color]').click()`);
+  await sleep(1200);
+  await shot('4b-review-original-light');
+  await evalJs(`document.querySelector('#lookSeg [data-look=clean]').click()`);
+
+  // delete + undo
+  const n0 = await evalJs(`document.querySelectorAll('.sheet-item').length`);
+  await evalJs(`document.querySelector('.sheet-item .icon-btn').click()`);
+  await sleep(300);
+  const n1 = await evalJs(`document.querySelectorAll('.sheet-item').length`);
+  if (n1 !== n0 - 1) throw new Error(`delete did not remove a page (${n0} -> ${n1})`);
+  await shot('4c-deleted-toast');
+  await evalJs(`document.getElementById('toastUndo').click()`);
+  await sleep(200);
+  const n2 = await evalJs(`document.querySelectorAll('.sheet-item').length`);
+  if (n2 !== n0) throw new Error(`undo did not restore the page (${n1} -> ${n2})`);
+  log('delete/undo ok:', `${n0} -> ${n1} -> ${n2}`);
+
+  // title with non-Latin characters, then both exports
+  await evalJs(`(() => { const i = document.getElementById('titleInput'); i.value = 'Crossing Field 「クロスファイア」 테스트'; i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await evalJs(`document.getElementById('exportPdf').click()`);
+  for (let i = 0; i < 120 && !downloads().some((f) => f.endsWith('.pdf')); i++) await sleep(250);
+  if (!downloads().some((f) => f.endsWith('.pdf'))) throw new Error('PDF export produced no download');
+  await evalJs(`document.getElementById('exportPng').click()`);
+  for (let i = 0; i < 120 && !downloads().some((f) => f.endsWith('.png')); i++) await sleep(250);
+  if (!downloads().some((f) => f.endsWith('.png'))) throw new Error('PNG export produced no download');
+  log('downloads:', downloads());
+
+  // dark scheme and the earlier steps
+  await scheme('dark');
+  await sleep(400);
+  await shot('4d-review-dark');
+  await evalJs(`document.querySelector('#stepper [data-step="2"]').click()`);
+  await sleep(700);
+  await shot('2c-region-dark');
+  await evalJs(`document.querySelector('#stepper [data-step="1"]').click()`);
+  await sleep(400);
+  await shot('1c-source-dark');
+
+  // phone width: nothing may overflow horizontally
+  await send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
+  await scheme('light');
+  for (const [step, name] of [['1', '5-phone-source'], ['4', '5b-phone-review'], ['2', '5c-phone-region']]) {
+    await evalJs(`document.querySelector('#stepper [data-step="${step}"]').click()`);
+    await sleep(700);
+    const over = await evalJs(`document.documentElement.scrollWidth - innerWidth`);
+    log(`phone overflow step ${step}: ${over}px`);
+    if (over > 1) problems.push(`horizontal overflow on step ${step}: ${over}px`);
+    await shot(name);
+  }
+
+  // reload mid-review: state comes back, and a re-scan does not need the box redrawn
+  await desktop();
+  await send('Page.reload');
+  await waitFor(`!document.getElementById('step4').hidden`, 30000, 'review after reload');
+  log('after reload:', await evalJs(`document.getElementById('rvCount').textContent`));
+  await evalJs(`document.querySelector('#sensSeg [data-sens="0.75"]').click()`);
+  await waitFor(`!document.getElementById('step3').hidden || !document.getElementById('step4').hidden`, 20000, 'rescan started');
+  await waitFor(`!document.getElementById('step4').hidden && document.getElementById('stepper').querySelector('[data-step="3"]').disabled`, 300000, 'rescan done');
+  log('after rescan at 0.75:', await evalJs(`document.getElementById('rvCount').textContent`));
+} catch (e) {
+  failure = e;
+  log('E2E FAILED:', e.message);
+  await shot('zz-failure').catch(() => {});
+} finally {
+  log('page problems:', problems.length ? problems : 'none');
+  try { ws.close(); } catch { /* already closed */ }
+  for (const c of children) { try { c.kill('SIGKILL'); } catch { /* gone */ } }
+  const ok = !failure && problems.length === 0;
+  log(ok ? 'E2E PASSED' : 'E2E FAILED', `— output in ${OUT}`);
+  if (ok && !KEEP) fs.rmSync(path.join(OUT, 'profile'), { recursive: true, force: true });
+  setTimeout(() => process.exit(ok ? 0 : 1), 500);
+}

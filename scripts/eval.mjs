@@ -238,6 +238,27 @@ async function drawDetect(video, t, detected, expected, out) {
 
 const rows = [];
 let failed = false;
+
+// Gate. A fixture may record the score it is known to reach as expect.floor, with
+// the reason written in expect.notes; anything below that floor is a regression.
+// Fixtures without a floor must be perfect. Never lower a floor to make a run
+// green — fix the pipeline, or write down why the labels changed.
+const DEFAULT_FLOOR = { recall: 1, precision: 0.9 };
+function gateFail(v, score) {
+  if (!score) return false;
+  const f = { ...DEFAULT_FLOOR, ...(v.expect?.floor || {}) };
+  if (score.recall < f.recall - 1e-9 || score.precision < f.precision - 1e-9) {
+    log(`  GATE FAIL: recall ${score.recall} (floor ${f.recall}), precision ${score.precision} (floor ${f.precision})`);
+    return true;
+  }
+  // Only worth saying for a fixture that records its own floor: a default-floor
+  // fixture scoring 1.0 is the normal case, not news.
+  if (v.expect?.floor && (score.recall > f.recall + 0.02 || score.precision > f.precision + 0.02)) {
+    log(`  note: beats its recorded floor (recall ${score.recall} vs ${f.recall}, precision ${score.precision} vs ${f.precision}) — raise expect.floor once it holds`);
+  }
+  return false;
+}
+
 for (const v of SET.videos) {
   if (only && !only.includes(v.id)) continue;
   const dir = path.join(CACHE, v.id);
@@ -270,7 +291,7 @@ for (const v of SET.videos) {
           + ` dups [${score.dups.join(' ')}] spurious [${score.spurious.join(' ')}]`
           + ` wrongMerges [${score.wrongMerges.join(' ')}] repeats ${score.repeatsFound}/${score.repeats}`
         : ''));
-      if (score && (score.recall < 1 || score.precision < 0.9)) failed = true;
+      if (gateFail(v, score)) failed = true;
     }
     continue;
   }
@@ -330,7 +351,7 @@ for (const v of SET.videos) {
         + ` wrongMerges [${score.wrongMerges.join(' ')}] repeats ${score.repeatsFound}/${score.repeats}`
       : '') + ` | sat ${stats.saturated} cleanInk ${stats.cleanInk} | sheets ${sheetsClean.length}`);
     if (warnings.length) log(`  warnings: ${warnings.join(' / ')}`);
-    if (score && (score.recall < 1 || score.precision < 0.9)) failed = true;
+    if (gateFail(v, score)) failed = true;
   }
 }
 

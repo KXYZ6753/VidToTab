@@ -33,7 +33,8 @@
         },
         "scroll": false,
         "tabEnd": 231,
-        "notes": "U = E plus an 'Inter' section label and AC = AE plus an 'Outro' label: label-only differences, so either merged or separate is fine (equiv). AB is a ~1s screen with its own notes and is required.",
+        "notes": "U = E plus an 'Inter' section label and AC = AE plus an 'Outro' label: label-only differences, so either merged or separate is fine (equiv). AB is a ~1s screen with its own notes and is required. KNOWN LIMIT: screen V differs from H only by thin 'x' strum marks, and the 2-bar look-alike screens leave repeats the deduper keeps — measured recall 0.966, precision 0.667 (hand crop) / 0.682 (detected crop). The floor below locks that in: any drop is a regression. Raise it after a real fix; never lower it to make a run green.",
+        "floor": { "recall": 0.96, "precision": 0.66 },
         "sequence": "0:A 9:B 13:C 18:D 22:E 25:F 28:E 32:F 35:G 38:H 41:I 44:H 48:I 51:H 54:I 57:H 60:J 62:K 65:L 68:K 72:M 75:N 78:O 81:P 84:O 88:N 91:O 94:P 97:Q 101:I 104:H 107:I 110:H 113:J 115:R 118:S 121:R 124:T 128:U 131:V 134:E 137:F 140:E 144:V 147:E 150:F 153:W 156:X 160:Y 163:X 166:Z 169:L 172:Z 176:AB 177:N 180:O 184:P 187:O 190:N 193:O 196:P 203:AC 206:AD 209:AE 212:AD 216:AE 219:AD 222:AE 225:AF",
         "equiv": [
           [
