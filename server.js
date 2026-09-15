@@ -7,7 +7,7 @@ import { spawn } from 'node:child_process';
 import { PDFDocument, PDFString, StandardFonts, rgb } from 'pdf-lib';
 import { runPipeline, cancelPipeline } from './pipeline/index.js';
 import { detectRegion } from './pipeline/detect.js';
-import { YT_DOWNLOAD_ARGS, YT_CLIENT_FALLBACKS } from './pipeline/config.js';
+import { YT_BASE_ARGS, YT_DOWNLOAD_ARGS, YT_CLIENT_FALLBACKS } from './pipeline/config.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(ROOT, 'public');
@@ -195,10 +195,22 @@ async function probe(file) {
     const [n, d] = String(s || '').split('/').map(Number);
     return n > 0 && d > 0 ? n / d : 0;
   };
+  // ffmpeg applies the display matrix when it decodes, and so does the browser,
+  // so report the size as displayed. Without this a portrait phone video is
+  // measured 1080x1920 while every decoded frame arrives 1920x1080, and the tab
+  // box is drawn in the wrong coordinate space. Current ffmpeg no longer writes
+  // the legacy `rotate` tag — the angle only shows up as Display Matrix side
+  // data — but the tag is still read here for files made by older tools.
+  const rotation = Math.abs(Number(
+    (v?.side_data_list || []).find((d) => d.rotation != null)?.rotation ?? v?.tags?.rotate ?? 0,
+  ) % 180);
+  const swap = rotation === 90;
+  const vw = v?.width || 0, vh = v?.height || 0;
   return {
     duration: Number(j.format?.duration) || 0,
-    width: v?.width || 0,
-    height: v?.height || 0,
+    width: swap ? vh : vw,
+    height: swap ? vw : vh,
+    rotation,
     fps: Math.round((rate(v?.avg_frame_rate) || rate(v?.r_frame_rate)) * 100) / 100,
     vcodec: v?.codec_name || '',
     acodec: a?.codec_name || '',
@@ -209,11 +221,22 @@ async function probe(file) {
 // ---------------------------------------------------------------- flows
 
 async function urlFlow(my, url) {
-  const info = await runProc(my, 'yt-dlp', ['-j', '--no-playlist', '--', url]);
+  const info = await runProc(my, 'yt-dlp', ['-j', ...YT_BASE_ARGS, '--', url]);
   if (bail(my)) return;
   if (info.code !== 0) return flowError(my, friendlyYtError(info.err, 'Could not read that link.'), info.err);
   let j;
-  try { j = JSON.parse(info.out); } catch { return flowError(my, 'Unexpected response from yt-dlp.', info.out.slice(0, 300)); }
+  // A playlist link prints one JSON object per line, which used to fail the
+  // parse and report "Unexpected response" for a link that is simply the wrong
+  // kind. Read the first object and say what to do instead.
+  try { j = JSON.parse(info.out.trim().split('\n')[0] || '{}'); }
+  catch { return flowError(my, 'Unexpected response from yt-dlp.', info.out.slice(0, 300)); }
+  if (j._type === 'playlist' || j.entries) {
+    return flowError(my, 'That link is a playlist. Open one video from it and paste that link instead.');
+  }
+  // A live stream never finishes: yt-dlp would keep recording until cancelled.
+  if (j.is_live) {
+    return flowError(my, 'That video is live right now. Try again once the stream has ended.');
+  }
   my.meta = {
     title: j.title || url,
     url: j.webpage_url || url,

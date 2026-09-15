@@ -129,7 +129,9 @@ export function probeVideo(input) {
   return new Promise((resolve) => {
     const child = track('ffprobe',
       ['-v', 'error', '-select_streams', 'v:0',
-        '-show_entries', 'stream=codec_name,width,height,avg_frame_rate,r_frame_rate:format=duration',
+        // stream_side_data carries the display matrix; without asking for it
+        // ffprobe emits an empty side_data_list and rotation looks absent.
+        '-show_entries', 'stream=codec_name,width,height,avg_frame_rate,r_frame_rate:stream_side_data=rotation:format=duration',
         '-of', 'json', input],
       ['ignore', 'pipe', 'ignore']);
     let out = '';
@@ -142,10 +144,19 @@ export function probeVideo(input) {
         const s = j.streams?.[0];
         if (!s) return resolve(null);
         const d = parseFloat(j.format?.duration);
+        // Displayed size, not stored size: ffmpeg applies the display matrix
+        // when it decodes, so a portrait phone video stored 1920x1080 yields
+        // 1080x1920 frames. Reporting the stored size puts every crop, scale
+        // and detection box in the wrong coordinate space.
+        const rotation = Math.abs(Number(
+          (s.side_data_list || []).find((x) => x.rotation != null)?.rotation ?? 0,
+        ) % 180);
+        const swap = rotation === 90;
         resolve({
           codec: s.codec_name || '',
-          width: s.width || 0,
-          height: s.height || 0,
+          width: (swap ? s.height : s.width) || 0,
+          height: (swap ? s.width : s.height) || 0,
+          rotation,
           fps: parseRate(s.avg_frame_rate) || parseRate(s.r_frame_rate),
           duration: Number.isFinite(d) ? d : null,
         });
@@ -211,6 +222,27 @@ async function selfCheck() {
     assert.equal(info.fps, 10);
     assert.ok(Math.abs(info.duration - 3) < 0.2);
     assert.equal(await probeVideo(path.join(dir, 'missing.mp4')), null);
+
+    // Rotated video: ffmpeg applies the display matrix on decode, so probeVideo
+    // has to report the displayed size or every crop lands in the wrong space.
+    // Skipped when the local ffmpeg cannot write a display matrix, so this
+    // never fails over an unrelated build difference.
+    const flat = path.join(dir, 'flat.mp4');
+    const rot = path.join(dir, 'rot.mp4');
+    const ff = (args) => new Promise((resolve) => {
+      const c = spawn('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', ...args], { stdio: 'ignore' });
+      c.once('error', () => resolve(false));
+      c.once('close', (code) => resolve(code === 0));
+    });
+    const madeFlat = await ff(['-f', 'lavfi', '-i', 'testsrc=size=64x48:rate=10:duration=1', '-c:v', 'mpeg4', flat]);
+    const madeRot = madeFlat && await ff(['-display_rotation', '90', '-i', flat, '-c', 'copy', rot]);
+    if (madeRot) {
+      const r = await probeVideo(rot);
+      if (r?.rotation === 90) {
+        assert.equal(r.width, 48, 'rotated video reports the displayed width');
+        assert.equal(r.height, 64, 'rotated video reports the displayed height');
+      }
+    }
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

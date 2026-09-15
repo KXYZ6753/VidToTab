@@ -7,11 +7,20 @@
 export const YT_FMT = 'bv*[height<=1080][ext=mp4]+ba[ext=m4a]/b[height<=1080][ext=mp4]/b[height<=1080]';
 export const YT_SORT = 'res:1080,fps,tbr';
 
+// Args for every yt-dlp call, metadata probes included. --ignore-config keeps a
+// user's own yt-dlp.conf (an -o template, a -P download path) from sending the
+// file somewhere the server will never find it, and the timeouts stop a stalled
+// connection from hanging a job indefinitely — `-j` had no timeout at all.
+export const YT_BASE_ARGS = [
+  '--ignore-config', '--no-playlist',
+  '--socket-timeout', '20', '--retries', '3', '--fragment-retries', '3',
+];
+
 // Download args shared by server and eval. The single-file fallback can be
 // webm; --remux-video guarantees an .mp4 container (output template must end
 // in .%(ext)s for that to take effect).
 export const YT_DOWNLOAD_ARGS = [
-  '--no-playlist', '-f', YT_FMT, '-S', YT_SORT,
+  ...YT_BASE_ARGS, '-f', YT_FMT, '-S', YT_SORT,
   '--merge-output-format', 'mp4', '--remux-video', 'mp4',
 ];
 
