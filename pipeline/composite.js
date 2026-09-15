@@ -1,28 +1,20 @@
-// Pass 2: sample-time selection, per-pixel temporal median, run-homogeneity split.
+// Pass 2 renderers: a page's sample frames (full-res rgb24) become
+//   clean — gray, black ink on white paper: dark panels inverted, highlights
+//           and cursors gone (print default);
+//   color  — the original look with tinted samples (measure highlights,
+//            cursor bars, notes recolored as they're played) rejected per pixel.
 import { pathToFileURL } from 'node:url';
+import { dilate3, inkPlane, localGain, morph, removeSmall, topHat } from './ink.js';
 
-export const K_MEDIAN = 7;
-
-export function oddFloor(n) {
-  n = Math.floor(n);
-  return n % 2 === 0 ? n - 1 : n;
+// Up to K indices spread evenly over the candidate list (time order).
+export function pickSampleFrames(candidates, K = 11) {
+  if (candidates.length <= K) return [...candidates];
+  const out = new Set();
+  for (let i = 0; i < K; i++) out.add(candidates[Math.round((i * (candidates.length - 1)) / (K - 1))]);
+  return [...out].sort((a, b) => a - b);
 }
 
-export function pickK(nFrames) {
-  return Math.max(1, Math.min(K_MEDIAN, oddFloor(nFrames - 2)));
-}
-
-// K timestamps evenly spread across [tStart + 1/fps, tEnd - 1/fps].
-export function pickSampleTimes(tStart, tEnd, K, fps = 4) {
-  const a = tStart + 1 / fps, b = tEnd - 1 / fps;
-  if (K <= 1 || b <= a) return [(tStart + tEnd) / 2];
-  const times = [];
-  for (let i = 0; i < K; i++) times.push(a + (i * (b - a)) / (K - 1));
-  return times;
-}
-
-// Per-index median across equal-length buffers (rgb or gray alike).
-// K==1/2 -> first frame as-is (short run: accept a possible playhead bar).
+// Per-pixel median across equal-length buffers (kept for fallbacks/tests).
 export function medianComposite(frames) {
   const K = frames.length;
   if (K <= 2) return Uint8Array.from(frames[0]);
@@ -32,127 +24,191 @@ export function medianComposite(frames) {
   const mid = K >> 1;
   for (let i = 0; i < len; i++) {
     for (let k = 0; k < K; k++) vals[k] = frames[k][i];
-    for (let a = 1; a < K; a++) { // insertion sort: K <= 7
-      const v = vals[a];
-      let b = a - 1;
-      while (b >= 0 && vals[b] > v) { vals[b + 1] = vals[b]; b--; }
-      vals[b + 1] = v;
-    }
+    sortSmall(vals, K);
     out[i] = vals[mid];
   }
   return out;
 }
 
+function sortSmall(a, n) {
+  for (let i = 1; i < n; i++) {
+    const v = a[i];
+    let j = i - 1;
+    while (j >= 0 && a[j] > v) { a[j + 1] = a[j]; j--; }
+    a[j + 1] = v;
+  }
+}
+
 export function toGray(rgb) {
   const n = rgb.length / 3;
   const g = new Uint8Array(n);
-  for (let i = 0, j = 0; i < n; i++, j += 3) {
-    g[i] = (rgb[j] * 77 + rgb[j + 1] * 150 + rgb[j + 2] * 29) >> 8;
-  }
+  for (let i = 0, j = 0; i < n; i++, j += 3) g[i] = (rgb[j] * 77 + rgb[j + 1] * 150 + rgb[j + 2] * 29) >> 8;
   return g;
 }
 
-export function mad(a, b) {
-  let s = 0;
-  for (let i = 0; i < a.length; i++) s += Math.abs(a[i] - b[i]);
-  return s / a.length;
-}
-
-// Fraction of pixels differing by more than T after global-luma-bias removal.
-// Sparse-content safe: a page flip on a mostly-white tab moves FEW pixels but
-// each moves a LOT — raw MAD dilutes toward zero on such content, a count
-// does not. This is the one comparison metric used pipeline-wide.
-export function diffFrac(a, b, T = 24) {
-  const n = a.length;
-  if (n === 0) return 1;
-  let sum = 0;
-  for (let i = 0; i < n; i++) sum += b[i] - a[i];
-  const bias = Math.max(-16, Math.min(16, sum / n));
-  let changed = 0;
-  for (let i = 0; i < n; i++) if (Math.abs(b[i] - a[i] - bias) > T) changed++;
-  return changed / n;
-}
-
-// Run-homogeneity safety net: median of first ceil(n/2) vs last ceil(n/2) gray
-// frames; if they disagree the run hid a scroll -> split at midpoint, recurse.
-// Halves must keep >= 3 frames, so only n >= 6 can split.
-// Returns inclusive [start, end] index ranges partitioning frames[].
-export function splitHomogeneous(grayFrames, threshold = 0.02) {
-  const ranges = [];
-  const rec = (s, e) => {
-    const n = e - s + 1;
-    if (n >= 6) {
-      const half = Math.ceil(n / 2);
-      const a = medianComposite(grayFrames.slice(s, s + half));
-      const b = medianComposite(grayFrames.slice(e + 1 - half, e + 1));
-      if (diffFrac(a, b) > threshold) {
-        const m = s + (n >> 1);
-        rec(s, m - 1);
-        rec(m, e);
-        return;
-      }
+// calib: {polarity, rH (half-res), dN, C, tau}.
+export function renderClean(samples, w, h, calib) {
+  const K = samples.length, n = w * h;
+  const r = Math.max(2, 2 * calib.rH);
+  const { C, tau } = calib;
+  const tmp = new Uint8Array(n);
+  const planes = samples.map((rgb) => {
+    const th = topHat(inkPlane(rgb, w, h, calib.polarity), w, h, r, new Uint8Array(n), tmp);
+    return localGain(th, w, h, r, C, new Uint8Array(n), tmp);
+  });
+  // 65th-percentile rank: a cursor or playhead crossing a pixel in a few
+  // samples can't lift it; ink dimmed in a few samples can't erase it.
+  const rankIdx = Math.floor(0.65 * (K - 1));
+  const need = Math.ceil(0.6 * K);
+  const gateT = 0.9 * tau;
+  const vals = new Uint8Array(K);
+  const v = new Uint8Array(n), gate = new Uint8Array(n);
+  for (let i = 0; i < n; i++) {
+    let above = 0;
+    for (let k = 0; k < K; k++) {
+      const x = planes[k][i];
+      vals[k] = x;
+      if (x > gateT) above++;
     }
-    ranges.push([s, e]);
-  };
-  if (grayFrames.length > 0) rec(0, grayFrames.length - 1);
-  return ranges;
+    sortSmall(vals, K);
+    v[i] = vals[rankIdx];
+    gate[i] = above >= need ? 1 : 0;
+  }
+  removeSmall(gate, w, h, Math.max(3, Math.round(0.02 * calib.dN * calib.dN)));
+  const keep = dilate3(gate, w, h); // keep anti-aliased glyph edges
+  const out = new Uint8Array(n).fill(255);
+  const lo = 0.15 * C, span = 0.75 * C;
+  for (let i = 0; i < n; i++) {
+    if (!keep[i]) continue;
+    const a = Math.min(1, Math.max(0, (v[i] - lo) / span));
+    out[i] = Math.round(255 * (1 - a ** 0.8));
+  }
+  return out;
 }
+
+export function renderColor(samples, w, h, calib) {
+  const K = samples.length, n = w * h;
+  if (K === 1) return { rgb: Uint8Array.from(samples[0]), tintedAll: 0 };
+  const sats = samples.map((s) => {
+    const o = new Uint8Array(n);
+    for (let i = 0, j = 0; i < n; i++, j += 3) {
+      const r = s[j], g = s[j + 1], b = s[j + 2];
+      const mx = r > g ? (r > b ? r : b) : (g > b ? g : b);
+      const mn = r < g ? (r < b ? r : b) : (g < b ? g : b);
+      o[i] = mx - mn;
+    }
+    return o;
+  });
+  const satMin = new Uint8Array(n).fill(255);
+  for (const s of sats) for (let i = 0; i < n; i++) if (s[i] < satMin[i]) satMin[i] = s[i];
+  // Tinted = noticeably more saturated than this pixel's least saturated
+  // sample. Closing joins glyph holes inside a highlight; the 2-px dilation
+  // swallows 4:2:0 chroma bleed at its edges. Always-colored content (orange
+  // chord names) has a high minimum and is never rejected.
+  const rc = Math.max(1, Math.round(0.15 * calib.dN));
+  const tmp = new Uint8Array(n);
+  const tints = sats.map((s) => {
+    const m = new Uint8Array(n);
+    for (let i = 0; i < n; i++) m[i] = s[i] - satMin[i] > 28 ? 1 : 0;
+    const closed = morph(morph(m, w, h, rc, 'max', new Uint8Array(n), tmp), w, h, rc, 'min', new Uint8Array(n), tmp);
+    return morph(closed, w, h, 2, 'max', new Uint8Array(n), tmp);
+  });
+  const lumas = samples.map(toGray);
+  const out = new Uint8Array(3 * n);
+  const idx = new Uint8Array(K);
+  let tintedAll = 0;
+  for (let i = 0; i < n; i++) {
+    let m = 0;
+    for (let k = 0; k < K; k++) if (!tints[k][i]) idx[m++] = k;
+    let pick;
+    if (m === 0) {
+      tintedAll++;
+      pick = 0;
+      for (let k = 1; k < K; k++) if (sats[k][i] < sats[pick][i]) pick = k;
+    } else {
+      // median luma among untinted samples drops untinted transients (a white playhead)
+      for (let a = 1; a < m; a++) {
+        const key = idx[a], kv = lumas[key][i];
+        let b = a - 1;
+        while (b >= 0 && lumas[idx[b]][i] > kv) { idx[b + 1] = idx[b]; b--; }
+        idx[b + 1] = key;
+      }
+      pick = idx[(m - 1) >> 1];
+    }
+    const j = 3 * i, s = samples[pick];
+    out[j] = s[j];
+    out[j + 1] = s[j + 1];
+    out[j + 2] = s[j + 2];
+  }
+  return { rgb: out, tintedAll: tintedAll / n };
+}
+
+// ------------------------------------------------------------ self-check
 
 async function selfCheck() {
   const { strict: assert } = await import('node:assert');
-  const W = 60, H = 40;
-
-  // 1. Median erases a moving bar: 7 frames, red bar at non-overlapping x each.
-  const bg = new Uint8Array(W * H * 3);
-  for (let i = 0; i < W * H; i++) {
-    bg[3 * i] = bg[3 * i + 1] = bg[3 * i + 2] = 40 + ((i * 37) % 160);
-  }
-  const frames = [];
-  for (let k = 0; k < 7; k++) {
-    const f = Uint8Array.from(bg);
-    for (let y = 0; y < H; y++) {
-      for (let x = 6 * k; x < 6 * k + 3; x++) {
-        f[3 * (y * W + x)] = 255;
-        f[3 * (y * W + x) + 1] = 0;
-        f[3 * (y * W + x) + 2] = 0;
+  const W = 200, H = 80, n = W * H;
+  const calib = { polarity: 'dark', rH: 5, dN: 12, C: 210, tau: 80 };
+  const bg = [22, 22, 26];
+  const base = new Uint8Array(3 * n);
+  for (let i = 0; i < n; i++) base.set(bg, 3 * i);
+  const put = (f, x0, y0, x1, y1, c, a = 1) => {
+    for (let y = y0; y < y1; y++) {
+      for (let x = x0; x < x1; x++) {
+        const j = 3 * (y * W + x);
+        for (let k = 0; k < 3; k++) f[j + k] = Math.round(a * c[k] + (1 - a) * f[j + k]);
       }
     }
-    frames.push(f);
+  };
+  for (let i = 0; i < 6; i++) put(base, 10, 10 + 12 * i, 190, 12 + 12 * i, [160, 160, 160]);
+  const glyphs = [[30, 6], [70, 30], [110, 42], [150, 66]];
+  for (const [x, y] of glyphs) put(base, x, y, x + 4, y + 8, [235, 235, 235]);
+  const clean = () => Uint8Array.from(base);
+
+  // 11 samples: a blue measure highlight over x 20..90 in 6 of them (the case a
+  // plain median fails), an orange cursor bar at a new x in every sample.
+  const samples = [];
+  for (let k = 0; k < 11; k++) {
+    const f = clean();
+    if (k < 6) put(f, 20, 2, 90, 78, [40, 110, 220], 0.45);
+    put(f, 5 + k * 17, 0, 8 + k * 17, H, [255, 140, 0]);
+    samples.push(f);
   }
-  assert.deepEqual(medianComposite(frames), bg, 'median must erase the moving bar exactly');
 
-  // 2. Homogeneity split: 3 frames of A then 4 of B -> two ranges at the midpoint.
-  const gA = new Uint8Array(W * H).fill(10);
-  const gB = new Uint8Array(W * H).fill(200);
-  const ranges = splitHomogeneous([gA, gA, gA, gB, gB, gB, gB]);
-  assert.deepEqual(ranges, [[0, 2], [3, 6]]);
+  // 1. Clean print: white paper, dark glyphs and staff lines, no highlight
+  //    or cursor residue.
+  const cp = renderClean(samples, W, H, calib);
+  assert.equal(cp[5 * W + 5], 255, 'margin must be paper white');
+  assert.equal(cp[40 * W + 50], 255, 'highlight interior must be white');
+  assert.ok(cp[34 * W + 72] < 90, `glyph under highlight must print dark (${cp[34 * W + 72]})`);
+  assert.ok(cp[10 * W + 120] < 150, 'staff line must print');
+  let residue = 0;
+  for (let x = 0; x < W; x++) if (cp[50 * W + x] < 200 && !(x >= 110 && x < 114)) residue++;
+  assert.ok(residue <= 2, `cursor residue on a glyph-free row: ${residue}`);
 
-  // 3. Homogeneous run stays whole.
-  assert.deepEqual(splitHomogeneous([gA, gA, gA, gA, gA, gA, gA]), [[0, 6]]);
+  // 2. Color: highlight and cursor rejected -> matches the clean frame.
+  const { rgb } = renderColor(samples, W, H, calib);
+  const ref = clean();
+  let maxDiff = 0;
+  for (let i = 0; i < rgb.length; i++) maxDiff = Math.max(maxDiff, Math.abs(rgb[i] - ref[i]));
+  assert.ok(maxDiff <= 6, `color render must match the untinted page (maxDiff ${maxDiff})`);
 
-  // 4. K selection edges.
-  assert.equal(pickK(3), 1);
-  assert.equal(pickK(7), 5);
-  assert.equal(pickK(9), 7);
-  assert.equal(pickK(100), 7);
-  assert.equal(pickSampleTimes(0, 10, 1).length, 1);
-  const ts = pickSampleTimes(0, 10, 7, 4);
-  assert.equal(ts.length, 7);
-  assert.ok(Math.abs(ts[0] - 0.25) < 1e-9 && Math.abs(ts[6] - 9.75) < 1e-9);
+  // 3. Always-orange chord text survives color rejection.
+  const orange = samples.map((s) => { const f = Uint8Array.from(s); put(f, 150, 2, 170, 8, [250, 150, 30]); return f; });
+  const oc = renderColor(orange, W, H, calib).rgb;
+  const j = 3 * (4 * W + 160);
+  assert.ok(oc[j] > 200 && oc[j + 2] < 80, 'persistent colored notation must stay colored');
 
-  // 5. gray/mad basics.
-  const g = toGray(Uint8Array.from([255, 255, 255, 0, 0, 0]));
-  assert.ok(g[0] >= 253 && g[1] === 0);
-  assert.equal(mad(gA, gA), 0);
+  // 4. Light page polarity prints black on white too.
+  const light = samples.map((s) => Uint8Array.from(s, (v) => 255 - v));
+  const lp = renderClean(light, W, H, { ...calib, polarity: 'light' });
+  assert.equal(lp[5 * W + 5], 255);
+  assert.ok(lp[34 * W + 72] < 120);
 
-  // 6. diffFrac: sparse change counts, uniform luma drift does not.
-  const white = new Uint8Array(1000).fill(255);
-  const sparse = Uint8Array.from(white);
-  for (let i = 0; i < 30; i++) sparse[i * 33] = 0; // 3% of pixels flip to ink
-  assert.equal(diffFrac(white, white), 0);
-  assert.ok(diffFrac(white, sparse) > 0.025, 'sparse flip must register');
-  const drifted = white.map((v) => v - 12); // autoexposure-style global shift
-  assert.equal(diffFrac(white, Uint8Array.from(drifted)), 0, 'bias must be normalized away');
+  // 5. Sample picking and medians.
+  assert.deepEqual(pickSampleFrames([1, 2, 3], 11), [1, 2, 3]);
+  assert.equal(pickSampleFrames(Array.from({ length: 50 }, (_, i) => i), 11).length, 11);
+  assert.deepEqual(Array.from(medianComposite([[1], [9], [5]])), [5]);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

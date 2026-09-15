@@ -1,14 +1,23 @@
-// Pipeline orchestrator: pass 1 (decode -> frames.gray cache -> segmentation),
-// pass 2 (per-run temporal medians), assembly, PNG + manifest output.
-// Public API per contracts.md: runPipeline(videoPath, opts, onProgress), cancelPipeline().
+// Pipeline orchestrator.
+//   calibrate  keyframe samples of the crop -> polarity, staff spacing, contrast
+//   decode     ffmpeg fps=4 + crop -> half-res top-hat ink planes -> frames.ink
+//   pass 1     majority-filtered ink masks -> runs -> pages (analyze, assemble)
+//   pass 2     one sequential decode of the sample frames -> clean + color PNGs
+// Public API: runPipeline(videoPath, opts, onProgress), cancelPipeline().
 import { mkdir, open, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { createWriteStream } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { rawFrames, encodePng, probeDuration, killAllChildren } from './ffmpeg.js';
-import { FPS, downsample2x, pass1 } from './analyze.js';
-import { pickK, pickSampleTimes, medianComposite, splitHomogeneous, toGray } from './composite.js';
-import { assemble } from './assemble.js';
+import { encodePng, killAllChildren, probeVideo, rawFrames } from './ffmpeg.js';
+import { FPS, inkPass1, knobs } from './analyze.js';
+import { assemblePages } from './assemble.js';
+import { pickSampleFrames, renderClean, renderColor } from './composite.js';
+import { calibrateCrop } from './detect.js';
+import { inkHalf, localGain, topHat } from './ink.js';
+
+const CACHE_VERSION = 2;
+const K_SAMPLES = 11;
+const FALLBACK_INTERVAL = 4;
 
 let current = null;
 
@@ -54,116 +63,152 @@ function validate(videoPath, opts) {
   }
 }
 
+const fmtT = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+
 async function run(videoPath, opts, onProgress, job) {
   validate(videoPath, opts);
-  const { crop, startTime, endTime = null, sensitivity = 0.5, workDir } = opts;
+  const { crop, startTime, endTime = null, sensitivity = 0.5, workDir, polarity = null } = opts;
   await mkdir(workDir, { recursive: true });
   const w = crop.w & ~1, h = crop.h & ~1; // server guarantees even; floor defensively
   const w2 = w >> 1, h2 = h >> 1;
-  const grayPath = path.join(workDir, 'frames.gray');
+  const inkPath = path.join(workDir, 'frames.ink');
   const metaPath = path.join(workDir, 'frames.json');
   const checkCancel = () => {
     if (job.cancelled) throw userErr('Cancelled');
   };
+  const st = await stat(videoPath).catch(() => null);
+  if (st === null) throw userErr('The video file is missing');
 
-  // ---- pass 1: half-res gray cache (decode only when the cache doesn't match)
-  const wanted = { w2, h2, fps: FPS, startTime, endTime, crop: { x: crop.x, y: crop.y, w: crop.w, h: crop.h } };
-  let cache = await loadCacheMeta(metaPath, grayPath, wanted);
-  if (!cache) {
-    cache = await decodeToCache(videoPath, wanted, { w, h, grayPath, metaPath }, onProgress, checkCancel);
+  // ---- calibrate + decode (skipped when the cache matches: sensitivity re-runs)
+  const wanted = {
+    version: CACHE_VERSION, w2, h2, fps: FPS, startTime, endTime,
+    crop: { x: crop.x, y: crop.y, w: crop.w, h: crop.h },
+    video: { size: st.size, mtimeMs: Math.round(st.mtimeMs) },
+  };
+  let cache = await loadCacheMeta(metaPath, inkPath, wanted);
+  if (cache === null) {
+    onProgress({ phase: 'analyze', pct: 0, msg: 'calibrating' });
+    const info = await probeVideo(videoPath);
+    const calib = await calibrateCrop(videoPath, { x: crop.x, y: crop.y, w, h },
+      { startTime, endTime, duration: info?.duration ?? null, polarity });
+    checkCancel();
+    cache = await decodeToCache(videoPath, wanted, calib, { w, h, inkPath, metaPath, duration: info?.duration ?? null },
+      onProgress, checkCancel);
   } else {
     onProgress({ phase: 'analyze', pct: 90, msg: 'using cached frames' });
   }
-  const { frameCount } = cache;
+  const { frameCount, calib } = cache;
 
-  const makeFrames = () => grayFrameReader(grayPath, w2 * h2, frameCount, checkCancel);
-  const p1 = await pass1(makeFrames, w2, h2, {
-    sensitivity,
-    frameCount,
-    onPct: (f) => onProgress({ phase: 'analyze', pct: Math.min(100, 90 + 10 * f) }),
+  // ---- pass 1
+  const makeFrames = () => inkFrameReader(inkPath, w2 * h2, frameCount, checkCancel);
+  const p1 = await inkPass1(makeFrames, w2, h2, {
+    frameCount, calib, sensitivity,
+    onPct: (f) => onProgress({ phase: 'analyze', pct: Math.min(99, 90 + 10 * f), msg: 'finding screens' }),
   });
   checkCancel();
-  if (p1.webcamWarned) {
-    onProgress({
-      phase: 'warning',
-      msg: 'Constantly-moving region detected (webcam?) — excluded from change detection; consider redrawing the crop.',
-    });
+  if (p1.hotFrac > 0.6) {
+    onProgress({ phase: 'warning', msg: 'Most of this region is moving video, not tab — adjust the region if the results look wrong.' });
   }
   onProgress({ phase: 'analyze', pct: 100 });
 
-  if (p1.runs.length === 0) {
-    onProgress({ phase: 'warning', msg: 'No stable frames found — falling back to fixed-interval captures every 4 s.' });
-    return fallbackCaptures(videoPath, { crop, startTime, endTime, w, h, workDir }, onProgress, checkCancel);
+  const { pages, dropped } = assemblePages(p1.runs, {
+    w: w2, h: h2, knobs: knobs(sensitivity), inkFloor: p1.inkFloor, dH: calib.dH, fps: FPS, startTime, hasStaff: Boolean(calib.staff),
+  });
+  const debug = {
+    calib, frames: p1.frames, runs: p1.runs.length, hotFrac: round3(p1.hotFrac), staticFrac: round3(p1.staticFrac), dropped,
+  };
+  const ctx = { crop, w, h, startTime, endTime, workDir, calib, debug };
+  if (pages.length === 0) {
+    onProgress({
+      phase: 'warning',
+      msg: p1.runs.length
+        ? 'No tab screens recognised in this region — showing a capture every 4 s instead.'
+        : 'The tab never holds still in this region — showing a capture every 4 s instead.',
+    });
+    return fallbackCaptures(videoPath, ctx, onProgress, checkCancel);
   }
+  return renderPages(videoPath, pages, ctx, onProgress, checkCancel);
+}
 
-  // ---- pass 2: K-frame temporal median per run, homogeneity-split as needed
-  const composites = [];
-  for (let r = 0; r < p1.runs.length; r++) {
-    checkCancel();
-    const runSeg = p1.runs[r];
-    const tS = startTime + runSeg.startF / FPS;
-    const tE = startTime + runSeg.endF / FPS;
-    const K = pickK(runSeg.nFrames);
-    const times = pickSampleTimes(tS, tE, K, FPS);
-    const frames = await grabRgbFrames(videoPath, times, crop, w, h);
-    checkCancel();
-    if (frames.length === 0) continue;
-    const grays = frames.map(toGray);
-    for (const [a, b] of splitHomogeneous(grays)) {
-      composites.push({
-        rgb: medianComposite(frames.slice(a, b + 1)),
-        gray: medianComposite(grays.slice(a, b + 1)),
-        tStart: a === 0 ? tS : times[a],
-        tEnd: b === frames.length - 1 ? tE : times[b],
-      });
+const round3 = (v) => Math.round(v * 1000) / 1000;
+
+// ---- pass 2: decode once, collect each page's sample frames, render as each
+// page completes (captures stream to the UI; memory stays bounded).
+async function renderPages(videoPath, pages, { crop, w, h, startTime, endTime, workDir, calib, debug }, onProgress, checkCancel) {
+  const plan = pages.map((page) => ({ page, frames: pickSampleFrames(page.candidates, K_SAMPLES), samples: [] }));
+  const users = new Map();
+  plan.forEach((p, i) => {
+    for (const f of p.frames) {
+      if (!users.has(f)) users.set(f, []);
+      users.get(f).push(i);
     }
-    onProgress({ phase: 'composite', pct: ((r + 1) / p1.runs.length) * 80 });
-  }
-  if (composites.length === 0) {
-    onProgress({ phase: 'warning', msg: 'No composites could be extracted — falling back to fixed-interval captures.' });
-    return fallbackCaptures(videoPath, { crop, startTime, endTime, w, h, workDir }, onProgress, checkCancel);
-  }
-
-  // ---- assembly + output
-  onProgress({ phase: 'composite', pct: 80, msg: 'assembling' });
-  const drafts = assemble(composites, { w, h, maskHalf: p1.excludeMask });
+  });
+  const lastNeeded = Math.max(...users.keys());
+  const remaining = plan.map((p) => p.frames.length);
   // Run-unique filename prefix: a sensitivity re-run that gets cancelled
-  // midway must not have overwritten the previous run's PNGs (the UI restores
-  // the old capture list on cancel, and exports read these files by name).
+  // midway must not overwrite the previous run's PNGs (the UI keeps showing
+  // them, and exports read these files by name).
   const runTag = Date.now().toString(36);
   const captures = [];
-  for (let i = 0; i < drafts.length; i++) {
-    checkCancel();
-    const d = drafts[i];
+
+  const finish = async (i) => {
+    const p = plan[i];
+    const samples = p.samples;
+    p.samples = null;
+    if (!samples || samples.length === 0) return;
+    const clean = renderClean(samples, w, h, calib);
+    const color = renderColor(samples, w, h, calib);
     const id = `cap-${String(i).padStart(3, '0')}`;
-    const png = `${runTag}-${id}.png`;
-    await encodePng(d.rgb, d.w, d.h, path.join(workDir, png));
-    const cap = { id, type: d.type, png, w: d.w, h: d.h, tStart: d.tStart, tEnd: d.tEnd, alsoAt: d.alsoAt };
+    const png = `${runTag}-${id}.png`, pngColor = `${runTag}-${id}-color.png`;
+    await encodePng(clean, w, h, path.join(workDir, png), 'gray');
+    await encodePng(color.rgb, w, h, path.join(workDir, pngColor));
+    const cap = {
+      id, type: 'page', png, pngColor, w, h,
+      tStart: p.page.tStart, tEnd: p.page.tEnd, alsoAt: p.page.alsoAt, samples: samples.length,
+    };
     captures.push(cap);
     onProgress({ phase: 'capture', capture: cap });
-    onProgress({ phase: 'composite', pct: 80 + ((i + 1) / drafts.length) * 20 });
+  };
+
+  // Identical input seek + filter chain as the decode pass, so frame t here is
+  // exactly pass-1 frame t.
+  const vf = `fps=${FPS},crop=${w}:${h}:${crop.x}:${crop.y},format=rgb24`;
+  let t = 0;
+  for await (const frame of rawFrames(videoPath, { ss: startTime, to: endTime ?? undefined, vf, frameBytes: 3 * w * h, maxFrames: lastNeeded + 1 })) {
+    checkCancel();
+    const us = users.get(t);
+    if (us) {
+      for (const i of us) {
+        plan[i].samples.push(frame);
+        if (--remaining[i] === 0) await finish(i);
+      }
+    }
+    if (t % 20 === 0) {
+      onProgress({ phase: 'composite', pct: Math.min(99, (100 * t) / (lastNeeded + 1)), msg: `${captures.length} of ${plan.length} pages rendered` });
+    }
+    t++;
   }
-  await writeFile(path.join(workDir, 'manifest.json'), JSON.stringify({ captures }, null, 2));
+  for (let i = 0; i < plan.length; i++) if (plan[i].samples !== null) await finish(i); // decode came up short
+  checkCancel();
+  captures.sort((a, b) => a.tStart - b.tStart);
+  await writeFile(path.join(workDir, 'manifest.json'), JSON.stringify({ captures, debug }, null, 2));
   onProgress({ phase: 'composite', pct: 100 });
   return captures;
 }
 
-async function loadCacheMeta(metaPath, grayPath, wanted) {
+async function loadCacheMeta(metaPath, inkPath, wanted) {
   let meta;
   try {
     meta = JSON.parse(await readFile(metaPath, 'utf8'));
   } catch {
     return null;
   }
-  const c = meta?.crop;
-  if (!c || meta.w2 !== wanted.w2 || meta.h2 !== wanted.h2 || meta.fps !== wanted.fps
-    || meta.startTime !== wanted.startTime || (meta.endTime ?? null) !== wanted.endTime
-    || c.x !== wanted.crop.x || c.y !== wanted.crop.y || c.w !== wanted.crop.w || c.h !== wanted.crop.h
-    || !Number.isInteger(meta.frameCount) || meta.frameCount < 1) {
-    return null;
+  for (const key of ['version', 'w2', 'h2', 'fps', 'startTime', 'endTime', 'crop', 'video']) {
+    if (JSON.stringify(meta?.[key] ?? null) !== JSON.stringify(wanted[key] ?? null)) return null;
   }
+  if (!Number.isInteger(meta.frameCount) || meta.frameCount < 1 || !meta.calib) return null;
   try {
-    const st = await stat(grayPath);
+    const st = await stat(inkPath);
     if (st.size !== meta.frameCount * wanted.w2 * wanted.h2) return null;
   } catch {
     return null;
@@ -171,55 +216,60 @@ async function loadCacheMeta(metaPath, grayPath, wanted) {
   return meta;
 }
 
-async function decodeToCache(videoPath, wanted, { w, h, grayPath, metaPath }, onProgress, checkCancel) {
+async function decodeToCache(videoPath, wanted, calib, { w, h, inkPath, metaPath, duration }, onProgress, checkCancel) {
   const { startTime, endTime, crop, w2, h2 } = wanted;
-  // Invalidate the old meta BEFORE truncating frames.gray: a cancel/crash
-  // mid-decode must never leave a meta describing different pixels — if the
-  // new decode has the same byte size, a later run would silently analyze the
-  // wrong crop. Meta is re-written only after a complete decode.
+  // Invalidate the old meta BEFORE truncating the cache: a cancel/crash
+  // mid-decode must never leave a meta describing different pixels. Meta is
+  // re-written only after a complete decode.
   await rm(metaPath, { force: true });
-  const end = endTime ?? await probeDuration(videoPath);
+  await rm(path.join(path.dirname(inkPath), 'frames.gray'), { force: true }); // v1 cache
+  const end = endTime ?? duration;
   const expected = end != null && end > startTime ? Math.max(1, (end - startTime) * FPS) : null;
-  const vf = `crop=${w}:${h}:${crop.x}:${crop.y},fps=${FPS},format=gray`;
-  const out = createWriteStream(grayPath);
-  // Without a listener, an fs error (ENOSPC on a GB-scale cache) is an
-  // unhandled 'error' event and kills the whole server process.
-  let outErr = null;
-  let wakeup = null;
-  out.on('error', (e) => { outErr = e; if (wakeup) wakeup(); });
+  const vf = `fps=${FPS},crop=${w}:${h}:${crop.x}:${crop.y},format=rgb24`;
+  const P = w2 * h2;
+  const e = new Uint8Array(P), th = new Uint8Array(P), tmp = new Uint8Array(P);
+  const out = createWriteStream(inkPath);
+  // Without a listener, an fs error (ENOSPC) is an unhandled 'error' event and
+  // kills the whole server process.
+  let outErr = null, wakeup = null;
+  out.on('error', (err) => { outErr = err; if (wakeup) wakeup(); });
   let count = 0;
   try {
-    for await (const frame of rawFrames(videoPath, { ss: startTime, to: endTime ?? undefined, vf, frameBytes: w * h })) {
+    for await (const frame of rawFrames(videoPath, { ss: startTime, to: endTime ?? undefined, vf, frameBytes: 3 * w * h })) {
       checkCancel();
       if (outErr) break;
-      const half = downsample2x(frame, w, h);
-      if (!out.write(Buffer.from(half.buffer, half.byteOffset, half.length))) {
+      inkHalf(frame, w, h, calib.polarity, e);
+      topHat(e, w2, h2, calib.rH, th, tmp);
+      const g = localGain(th, w2, h2, calib.rH, calib.C, new Uint8Array(P), tmp); // fresh: write() is async
+      if (!out.write(g)) {
         await new Promise((r) => { wakeup = r; out.once('drain', r); }); // error also wakes us
         wakeup = null;
       }
       count++;
       if (count % 25 === 0) {
-        const pct = expected ? Math.min(89, (count / expected) * 90) : Math.min(89, count / 40);
-        onProgress({ phase: 'analyze', pct, msg: `decoded ${count} frames` });
+        const pct = expected ? Math.min(89, (count / expected) * 89) : Math.min(89, count / 40);
+        onProgress({ phase: 'analyze', pct, msg: `scanned ${fmtT(count / FPS)}` });
       }
     }
   } finally {
-    await new Promise((r) => { out.once('close', r); out.end(); }); // 'close' fires on finish AND destroy
+    // An errored stream has already auto-destroyed and emitted 'close';
+    // waiting for another one would hang the job in "analyzing" forever.
+    if (!out.closed) await new Promise((r) => { out.once('close', r); out.end(); });
   }
   checkCancel();
   if (outErr) throw userErr(`Could not write frame cache: ${outErr.message}`);
   if (count === 0) throw userErr('No frames decoded — check the crop and start time');
-  const meta = { ...wanted, frameCount: count };
+  const meta = { ...wanted, frameCount: count, calib };
   await writeFile(metaPath, JSON.stringify(meta)); // written last: no partial cache
   return meta;
 }
 
-async function* grayFrameReader(grayPath, frameBytes, frameCount, checkCancel) {
-  const fh = await open(grayPath, 'r');
+async function* inkFrameReader(inkPath, frameBytes, frameCount, checkCancel) {
+  const fh = await open(inkPath, 'r');
   try {
     for (let i = 0; i < frameCount; i++) {
       checkCancel();
-      const buf = new Uint8Array(frameBytes); // fresh buffer: consumer keeps prev frame
+      const buf = new Uint8Array(frameBytes); // fresh buffer: consumers keep frames
       const { bytesRead } = await fh.read(buf, 0, frameBytes, i * frameBytes);
       if (bytesRead < frameBytes) return;
       yield buf;
@@ -229,97 +279,83 @@ async function* grayFrameReader(grayPath, frameBytes, frameCount, checkCancel) {
   }
 }
 
-async function grabRgbFrames(videoPath, times, crop, w, h) {
-  const K = times.length;
-  const frameBytes = 3 * w * h;
-  const cropVf = `crop=${w}:${h}:${crop.x}:${crop.y}`;
-  const frames = [];
-  if (K === 1) {
-    for await (const f of rawFrames(videoPath, { ss: times[0], vf: `${cropVf},format=rgb24`, frameBytes, maxFrames: 1 })) {
-      frames.push(f);
-    }
-    return frames;
-  }
-  const span = Math.max(times[K - 1] - times[0] + 1 / FPS, 0.25);
-  const rate = K / span;
-  const vf = `${cropVf},fps=${rate},format=rgb24`;
-  for await (const f of rawFrames(videoPath, { ss: times[0], t: span, vf, frameBytes, maxFrames: K })) {
-    frames.push(f);
-  }
-  return frames;
-}
-
-// Zero stable runs: fixed-interval single-frame page captures every 4 s.
-async function fallbackCaptures(videoPath, { crop, startTime, endTime, w, h, workDir }, onProgress, checkCancel) {
-  const INTERVAL = 4;
-  const end = endTime ?? await probeDuration(videoPath);
-  const expected = end != null && end > startTime ? Math.ceil((end - startTime) / INTERVAL) : null;
-  const vf = `crop=${w}:${h}:${crop.x}:${crop.y},fps=${1 / INTERVAL},format=rgb24`;
-  const runTag = Date.now().toString(36); // see run(): never clobber a prior run's PNGs
+// No usable screens: fixed-interval single-frame captures, still rendered
+// through both looks so review and export behave the same.
+async function fallbackCaptures(videoPath, { crop, startTime, endTime, w, h, workDir, calib, debug }, onProgress, checkCancel) {
+  const end = endTime ?? (await probeVideo(videoPath))?.duration ?? null;
+  const expected = end != null && end > startTime ? Math.ceil((end - startTime) / FALLBACK_INTERVAL) : null;
+  const vf = `crop=${w}:${h}:${crop.x}:${crop.y},fps=${1 / FALLBACK_INTERVAL},format=rgb24`;
+  const runTag = Date.now().toString(36); // see renderPages(): never clobber a prior run's PNGs
   const captures = [];
   let i = 0;
   for await (const frame of rawFrames(videoPath, { ss: startTime, to: endTime ?? undefined, vf, frameBytes: 3 * w * h })) {
     checkCancel();
     const id = `cap-${String(i).padStart(3, '0')}`;
-    const png = `${runTag}-${id}.png`;
-    await encodePng(frame, w, h, path.join(workDir, png));
-    const t = startTime + i * INTERVAL;
-    const cap = { id, type: 'page', png, w, h, tStart: t, tEnd: t + INTERVAL, alsoAt: [] };
+    const png = `${runTag}-${id}.png`, pngColor = `${runTag}-${id}-color.png`;
+    await encodePng(renderClean([frame], w, h, calib), w, h, path.join(workDir, png), 'gray');
+    await encodePng(frame, w, h, path.join(workDir, pngColor));
+    const t = startTime + i * FALLBACK_INTERVAL;
+    const cap = { id, type: 'page', png, pngColor, w, h, tStart: t, tEnd: t + FALLBACK_INTERVAL, alsoAt: [], samples: 1 };
     captures.push(cap);
     onProgress({ phase: 'capture', capture: cap });
     const pct = expected ? Math.min(99, ((i + 1) / expected) * 100) : Math.min(95, (i + 1) * 5);
     onProgress({ phase: 'composite', pct });
     i++;
   }
-  await writeFile(path.join(workDir, 'manifest.json'), JSON.stringify({ captures }, null, 2));
+  await writeFile(path.join(workDir, 'manifest.json'), JSON.stringify({ captures, debug: { ...debug, fallback: true } }, null, 2));
   onProgress({ phase: 'composite', pct: 100 });
   return captures;
 }
 
-// End-to-end self-check on a synthetic lossless video: two textured pages with a
-// sweeping playhead bar -> exactly 2 clean page captures, cache reused on re-run,
-// cancellation rejects with .cancelled.
+// ------------------------------------------------------------ self-check
+// End-to-end on a synthetic lossless video in the vvxo style: dark panel,
+// six staff lines, three screens shown A B C A, a translucent blue measure
+// highlight jumping every second and an orange cursor sweeping every frame.
 async function selfCheck() {
   const { strict: assert } = await import('node:assert');
-  const { mkdtemp, rm, stat: statP } = await import('node:fs/promises');
+  const { mkdtemp, rm: rmP, stat: statP, utimes } = await import('node:fs/promises');
   const os = await import('node:os');
   const { spawn } = await import('node:child_process');
 
   const dir = await mkdtemp(path.join(os.tmpdir(), 'vidtotab-index-'));
   try {
-    const W = 128, H = 64, N = 40;
-    const makePage = (seed) => {
-      let s = seed >>> 0 || 1;
-      const rnd = () => ((s = (s * 1664525 + 1013904223) >>> 0) / 2 ** 32);
-      const g = new Uint8Array(W * H);
-      for (let by = 0; by < H; by += 8) {
-        for (let bx = 0; bx < W; bx += 8) {
-          const v = 20 + Math.floor(rnd() * 200);
-          for (let y = by; y < by + 8; y++) for (let x = bx; x < bx + 8; x++) g[y * W + x] = v;
+    const W = 320, H = 120, PER = 16;
+    const rows = [30, 42, 54, 66, 78, 90];
+    let seed = 1;
+    const rnd = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32);
+    const digitsFor = (s) => {
+      seed = s;
+      return Array.from({ length: 16 }, () => [24 + Math.floor(rnd() * 270), rows[Math.floor(rnd() * 6)] - 4]);
+    };
+    const screens = [digitsFor(11), digitsFor(22), digitsFor(33)];
+    const order = [0, 1, 2, 0];
+    const frame = (si, k) => {
+      const f = Buffer.alloc(W * H * 3);
+      for (let i = 0; i < W * H; i++) { f[3 * i] = 20; f[3 * i + 1] = 20; f[3 * i + 2] = 24; }
+      const put = (x0, y0, x1, y1, c, a = 1) => {
+        for (let y = y0; y < y1; y++) {
+          for (let x = x0; x < x1; x++) {
+            const j = 3 * (y * W + x);
+            for (let ch = 0; ch < 3; ch++) f[j + ch] = Math.round(a * c[ch] + (1 - a) * f[j + ch]);
+          }
         }
-      }
-      return g;
+      };
+      for (const y of rows) put(20, y, 300, y + 2, [170, 170, 170]);
+      for (const [x, y] of screens[si]) put(x, y, x + 5, y + 9, [235, 235, 235]);
+      const m = Math.floor(k / 4) % 4;
+      put(20 + 70 * m, 20, 90 + 70 * m, 100, [40, 110, 220], 0.45);
+      const cx = 20 + ((k * 17) % 277);
+      put(cx, 18, cx + 3, 102, [255, 140, 0]);
+      return f;
     };
-    const toRgb = (g) => {
-      const rgb = Buffer.alloc(g.length * 3);
-      for (let i = 0; i < g.length; i++) { rgb[3 * i] = rgb[3 * i + 1] = rgb[3 * i + 2] = g[i]; }
-      return rgb;
-    };
-    const pageA = makePage(11), pageB = makePage(22);
     const videoPath = path.join(dir, 'test.mkv');
     await new Promise((resolve, reject) => {
-      const args = ['-hide_banner', '-loglevel', 'error', '-y',
+      const child = spawn('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y',
         '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-s', `${W}x${H}`, '-r', String(FPS), '-i', 'pipe:0',
-        '-c:v', 'ffv1', videoPath]; // ffv1: lossless, always built in
-      const child = spawn('ffmpeg', args, { stdio: ['pipe', 'ignore', 'inherit'] });
+        '-c:v', 'ffv1', videoPath], { stdio: ['pipe', 'ignore', 'inherit'] }); // ffv1: lossless, intra-only
       child.once('error', reject);
       child.once('close', (code) => (code === 0 ? resolve() : reject(new Error(`ffmpeg encode exit ${code}`))));
-      for (let i = 0; i < N; i++) {
-        const g = Uint8Array.from(i < 20 ? pageA : pageB);
-        const x = (i * 6) % (W - 2);
-        for (let y = 0; y < H; y++) { g[y * W + x] = 230; g[y * W + x + 1] = 230; }
-        child.stdin.write(toRgb(g));
-      }
+      for (const si of order) for (let k = 0; k < PER; k++) child.stdin.write(frame(si, k));
       child.stdin.end();
     });
 
@@ -327,43 +363,56 @@ async function selfCheck() {
     const opts = { crop: { x: 0, y: 0, w: W, h: H }, startTime: 0, sensitivity: 0.5, workDir };
     const events = [];
     const captures = await runPipeline(videoPath, opts, (ev) => events.push(ev));
+    const manifest0 = JSON.parse(await readFile(path.join(workDir, 'manifest.json'), 'utf8'));
+    assert.equal(captures.length, 3, `expected 3 screens, got ${JSON.stringify(captures.map((c) => [c.tStart, c.tEnd, c.alsoAt]))} ${JSON.stringify(manifest0.debug)}`);
+    captures.forEach((c, i) => assert.ok(Math.abs(c.tStart - 4 * i) <= 1, `capture ${i} tStart ${c.tStart}`));
+    assert.equal(captures[0].alsoAt.length, 1, 'the repeat of screen A must be folded into alsoAt');
+    assert.ok(Math.abs(captures[0].alsoAt[0] - 12) <= 1);
+    assert.ok(events.some((e) => e.phase === 'capture') && events.some((e) => e.phase === 'analyze' && e.pct === 100));
 
-    assert.equal(captures.length, 2, 'flip video must produce 2 captures');
-    assert.ok(captures.every((c) => c.type === 'page'));
-    assert.equal(captures[0].id, 'cap-000');
-    assert.ok(captures[0].tStart <= 0.5 && Math.abs(captures[1].tStart - 5) <= 0.6);
-    assert.ok(events.some((e) => e.phase === 'capture'));
-    assert.ok(events.some((e) => e.phase === 'analyze' && e.pct === 100));
-
-    // medians must have erased the sweeping bar: compare decoded PNGs to clean pages
-    for (const [cap, page] of [[captures[0], pageA], [captures[1], pageB]]) {
-      const pngPath = path.join(workDir, cap.png);
-      const decoded = [];
-      for await (const f of rawFrames(pngPath, { vf: 'format=rgb24', frameBytes: 3 * W * H })) decoded.push(f);
-      assert.equal(decoded.length, 1);
-      const expectRgb = toRgb(page);
-      let maxDiff = 0;
-      for (let i = 0; i < expectRgb.length; i++) {
-        maxDiff = Math.max(maxDiff, Math.abs(decoded[0][i] - expectRgb[i]));
-      }
-      assert.ok(maxDiff <= 4, `bar not erased / lossy pipeline (maxDiff=${maxDiff})`);
+    const decode = async (file, fmt, bpp) => {
+      for await (const f of rawFrames(path.join(workDir, file), { vf: `format=${fmt}`, frameBytes: W * H * bpp })) return f;
+      return null;
+    };
+    // Clean print: row 48 lies between staff lines and clear of digits, but the
+    // highlight and cursor cross it — it must come out paper white.
+    const clean = await decode(captures[0].png, 'gray', 1);
+    let dirty = 0;
+    for (let x = 0; x < W; x++) if (clean[48 * W + x] < 230) dirty++;
+    assert.ok(dirty <= 3, `highlight/cursor residue in clean print: ${dirty}px`);
+    assert.equal(clean[5 * W + 5], 255);
+    const [dx, dy] = screens[0][0];
+    assert.ok(clean[(dy + 4) * W + dx + 2] < 110, 'digits must print dark');
+    assert.ok(clean[30 * W + 150] < 170 || clean[31 * W + 150] < 170, 'staff lines must print');
+    // Color: the same row keeps the panel color, no blue or orange left.
+    const color = await decode(captures[0].pngColor, 'rgb24', 3);
+    let tinted = 0;
+    for (let x = 0; x < W; x++) {
+      const j = 3 * (48 * W + x);
+      if (Math.max(color[j], color[j + 1], color[j + 2]) - Math.min(color[j], color[j + 1], color[j + 2]) > 40) tinted++;
     }
+    assert.ok(tinted <= 3, `highlight/cursor residue in color render: ${tinted}px`);
 
     const manifest = JSON.parse(await readFile(path.join(workDir, 'manifest.json'), 'utf8'));
     assert.deepEqual(manifest.captures.map((c) => c.id), captures.map((c) => c.id));
 
-    // re-run must reuse frames.gray (fast sensitivity re-runs)
-    const before = (await statP(path.join(workDir, 'frames.gray'))).mtimeMs;
-    const again = await runPipeline(videoPath, opts, () => {});
-    assert.equal(again.length, 2);
-    assert.equal((await statP(path.join(workDir, 'frames.gray'))).mtimeMs, before, 'cache must be reused');
+    // Re-run at another sensitivity reuses frames.ink; touching the video invalidates it.
+    const inkFile = path.join(workDir, 'frames.ink');
+    const before = (await statP(inkFile)).mtimeMs;
+    const again = await runPipeline(videoPath, { ...opts, sensitivity: 0.25 }, () => {});
+    assert.equal(again.length, 3);
+    assert.equal((await statP(inkFile)).mtimeMs, before, 'cache must be reused');
+    const later = new Date(Date.now() + 5000);
+    await utimes(videoPath, later, later);
+    await runPipeline(videoPath, opts, () => {});
+    assert.notEqual((await statP(inkFile)).mtimeMs, before, 'changed video must invalidate the cache');
 
-    // cancellation: reject with .cancelled === true
+    // Cancellation rejects with .cancelled.
     const p = runPipeline(videoPath, { ...opts, workDir: path.join(dir, 'work2') }, () => {});
     cancelPipeline();
     await assert.rejects(p, (e) => e.cancelled === true);
   } finally {
-    await rm(dir, { recursive: true, force: true });
+    await rmP(dir, { recursive: true, force: true });
   }
 }
 

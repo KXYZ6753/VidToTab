@@ -1,205 +1,175 @@
-// Assembly: collapse consecutive duplicate composites (temporal median erases
-// moving highlights), emit one page per distinct screen, globally dedup exact
-// repeats. The only comparison metric is diffFrac (changed-pixel count), not
-// MAD: sparse tab content dilutes MAD toward zero even across a real page flip.
-// ponytail: scroll matching/stitching removed — a scroll never produces a
-// stable run to match, so we only capture on change and leave scrolling to the
-// fixed-interval fallback.
+// Page assembly over pass-1 runs: merge consecutive runs that show the same
+// screen, fold later repeats into alsoAt, drop runs that aren't tab (no staff,
+// near-empty). Works on run masks only — nothing is decoded or rendered here.
 import { pathToFileURL } from 'node:url';
-import { medianComposite, toGray, diffFrac } from './composite.js';
+import { dilate3, maxWindow2x2 } from './ink.js';
+import { pct } from './analyze.js';
 
-export const DUP_FRAC = 0.012; // below: two composites are the same screen
-
-// diffFrac between two same-size gray frames, skipping pixels the pass-1
-// exclude mask marks (a webcam inset that always changes). maskHalf is half-res.
-// maskHalf === null reduces to plain diffFrac (composite.js).
-export function dupDiff(A, B, w, h, maskHalf = null, T = 24) {
-  if (maskHalf === null) return diffFrac(A, B, T);
-  const w2 = w >> 1;
-  let sum = 0, n = 0;
+// Same screen? Changed ink with 1-px tolerance must be small overall AND
+// nowhere concentrated: a glyph-sized cluster of change (one swapped fret
+// number) marks a different screen even when the rest is identical.
+export function samePage(A, B, w, h, { inkFloor = 0, ratioT, cellT, cell }) {
+  const dilA = dilate3(A, w, h), dilB = dilate3(B, w, h);
+  const cw = Math.ceil(w / cell), ch = Math.ceil(h / cell);
+  const counts = new Uint32Array(cw * ch);
+  let changed = 0, na = 0, nb = 0;
   for (let y = 0; y < h; y++) {
-    const row = y * w, mrow = (y >> 1) * w2;
+    const row = y * w, crow = Math.floor(y / cell) * cw;
     for (let x = 0; x < w; x++) {
-      if (maskHalf[mrow + (x >> 1)]) continue;
-      sum += B[row + x] - A[row + x];
-      n++;
-    }
-  }
-  if (n === 0) return 1;
-  const bias = Math.max(-16, Math.min(16, sum / n));
-  let changed = 0;
-  for (let y = 0; y < h; y++) {
-    const row = y * w, mrow = (y >> 1) * w2;
-    for (let x = 0; x < w; x++) {
-      if (maskHalf[mrow + (x >> 1)]) continue;
-      if (Math.abs(B[row + x] - A[row + x] - bias) > T) changed++;
-    }
-  }
-  return changed / n;
-}
-
-// 64-bit dHash: 9x8 box downscale, horizontal gradient sign. Returns [lo32, hi32].
-export function dHash(gray, w, h) {
-  const gw = 9, gh = 8;
-  const vals = new Float64Array(gw * gh);
-  for (let gy = 0; gy < gh; gy++) {
-    const y0 = Math.floor((gy * h) / gh), y1 = Math.max(y0 + 1, Math.floor(((gy + 1) * h) / gh));
-    for (let gx = 0; gx < gw; gx++) {
-      const x0 = Math.floor((gx * w) / gw), x1 = Math.max(x0 + 1, Math.floor(((gx + 1) * w) / gw));
-      let s = 0;
-      for (let y = y0; y < y1; y++) {
-        const row = y * w;
-        for (let x = x0; x < x1; x++) s += gray[row + x];
+      const i = row + x;
+      const a = A[i], b = B[i];
+      na += a;
+      nb += b;
+      if ((a && !dilB[i]) || (b && !dilA[i])) {
+        changed++;
+        counts[crow + Math.floor(x / cell)]++;
       }
-      vals[gy * gw + gx] = s / ((y1 - y0) * (x1 - x0));
     }
   }
-  let a = 0, b = 0;
-  for (let gy = 0; gy < gh; gy++) {
-    for (let gx = 0; gx < 8; gx++) {
-      const bit = vals[gy * gw + gx + 1] > vals[gy * gw + gx] ? 1 : 0;
-      const i = gy * 8 + gx;
-      if (i < 32) a = ((a << 1) | bit) >>> 0;
-      else b = ((b << 1) | bit) >>> 0;
-    }
+  const ratio = changed / Math.max(na, nb, inkFloor, 1);
+  const local = maxWindow2x2(counts, cw, ch);
+  return { same: ratio < ratioT && local < cellT, ratio, local };
+}
+
+function sigDistance(a, b) {
+  let s = 0, na = 0, nb = 0;
+  for (let i = 0; i < a.length; i++) {
+    s += Math.abs(a[i] - b[i]);
+    na += a[i];
+    nb += b[i];
   }
-  return [a, b];
+  return s / Math.max(na, nb, 1);
 }
 
-function popcount(x) {
-  x -= (x >>> 1) & 0x55555555;
-  x = (x & 0x33333333) + ((x >>> 2) & 0x33333333);
-  x = (x + (x >>> 4)) & 0x0f0f0f0f;
-  return Math.imul(x, 0x01010101) >>> 24;
-}
+// runs: pass-1 runs with {startF, endF, nFrames, interior, content, ink, sig, staff}.
+// Returns { pages: [{tStart, tEnd, alsoAt, runs, repeats, candidates}], dropped }.
+export function assemblePages(runs, { w, h, knobs, inkFloor, dH, fps, startTime = 0, hasStaff = false }) {
+  // Same glyph-cluster threshold (and floor) as pass-1 pair classification.
+  const opts = { inkFloor, ratioT: knobs.pageRatioT, cellT: Math.max(24, knobs.cellK * dH * dH), cell: Math.max(4, Math.round(dH)) };
+  const dropped = { noStaff: 0, empty: 0 };
 
-export function hamming(h1, h2) {
-  return popcount((h1[0] ^ h2[0]) >>> 0) + popcount((h1[1] ^ h2[1]) >>> 0);
-}
-
-// composites: time-ordered [{rgb, gray, tStart, tEnd}], all w x h.
-// maskHalf: optional half-res exclude mask from pass 1.
-// Returns capture drafts: {type:'page', rgb, w, h, tStart, tEnd, alsoAt}.
-// PNG writing is the caller's job.
-export function assemble(composites, { w, h, maskHalf = null } = {}) {
-  // Group consecutive near-duplicates; each group is one screen shown a while.
-  const groups = [];
-  for (const C of composites) {
-    const g = groups[groups.length - 1];
-    if (g && dupDiff(g[g.length - 1].gray, C.gray, w, h, maskHalf) < DUP_FRAC) g.push(C);
-    else groups.push([C]);
-  }
-
-  // Resolve a group: median across >= 3 near-duplicates erases persistent
-  // highlights; with fewer, keep the first.
-  const drafts = groups.map((cs) => {
-    const rgb = cs.length >= 3 ? medianComposite(cs.map((c) => c.rgb)) : cs[0].rgb;
-    return {
-      type: 'page',
-      rgb,
-      gray: cs.length >= 3 ? toGray(rgb) : cs[0].gray,
-      w,
-      h,
-      tStart: cs[0].tStart,
-      tEnd: cs[cs.length - 1].tEnd,
-      alsoAt: [],
-    };
+  // Not tab: calibrated staff invisible, or next to no notation.
+  let kept = runs.filter((r) => {
+    if (hasStaff && r.staff < 0.6) { dropped.noStaff++; return false; }
+    return true;
+  });
+  const p75 = pct(kept.map((r) => r.ink), 0.75);
+  kept = kept.filter((r) => {
+    if (r.ink < Math.max(inkFloor * 0.25, 0.15 * p75)) { dropped.empty++; return false; }
+    return true;
   });
 
-  // Global dedup: dHash prefilter, full-res diff-fraction confirm; repeats
-  // recorded in alsoAt.
-  const out = [];
-  for (const d of drafts) {
-    const hash = dHash(d.gray, w, h);
-    let dup = null;
-    for (const prior of out) {
-      if (hamming(prior._hash, hash) > 6) continue;
-      if (diffFrac(prior._gray, d.gray) < DUP_FRAC) { dup = prior; break; }
-    }
-    if (dup) {
-      dup.alsoAt.push(d.tStart);
+  // Consecutive runs of the same screen (a repeat back-to-back, a spurious
+  // split) collapse into one group, compared against the group's longest run
+  // so slow drift can't chain distinct screens together.
+  const groups = [];
+  for (const r of kept) {
+    const g = groups[groups.length - 1];
+    if (g && samePage(g.anchor.content, r.content, w, h, opts).same) {
+      g.runs.push(r);
+      if (r.nFrames > g.anchor.nFrames) g.anchor = r;
     } else {
-      d._hash = hash;
-      d._gray = d.gray;
-      out.push(d);
+      groups.push({ runs: [r], anchor: r });
     }
   }
-  for (const d of out) {
-    delete d._hash;
-    delete d._gray;
-    delete d.gray;
+
+  // A later group showing an earlier screen is a repeat, not a new page.
+  const pages = [];
+  for (const g of groups) {
+    const a = g.anchor;
+    let dup = null;
+    for (const p of pages) {
+      const b = p.anchor;
+      if (Math.abs(a.ink - b.ink) > 0.35 * Math.max(a.ink, b.ink)) continue;
+      if (sigDistance(a.sig, b.sig) > 0.8) continue;
+      if (samePage(b.content, a.content, w, h, opts).same) { dup = p; break; }
+    }
+    if (dup) dup.repeats.push(g);
+    else pages.push({ ...g, repeats: [] });
   }
-  return out;
+
+  const tOf = (f) => Math.round((startTime + f / fps) * 100) / 100;
+  const framesOf = (gs) => {
+    const out = [];
+    for (const g of gs) for (const r of g.runs) for (let f = r.interior[0]; f <= r.interior[1]; f++) out.push(f);
+    return out;
+  };
+  for (const p of pages) {
+    p.tStart = tOf(p.runs[0].startF);
+    p.tEnd = tOf(p.runs[p.runs.length - 1].endF + 1);
+    p.alsoAt = p.repeats.map((g) => tOf(g.runs[0].startF));
+    // Samples come from the first appearance; repeats only top up short ones.
+    let cands = framesOf([p]);
+    if (cands.length < 7) cands = [...cands, ...framesOf(p.repeats)];
+    p.candidates = cands;
+  }
+  return { pages, dropped };
 }
+
+// ------------------------------------------------------------ self-check
 
 async function selfCheck() {
   const { strict: assert } = await import('node:assert');
-  const W = 120, H = 200;
-
-  // Sparse tab page: shared staff lines + per-seed random ink marks. Two seeds
-  // differ only in sparse marks — a real flip whose MAD is tiny but diffFrac is not.
-  const sparsePage = (seed) => {
-    let s = seed >>> 0 || 1;
-    const rnd = () => ((s = (s * 1664525 + 1013904223) >>> 0) / 2 ** 32);
-    const marks = Array.from({ length: 90 }, () => [Math.floor(rnd() * (W - 3)), Math.floor(rnd() * (H - 5))]);
-    const g = new Uint8Array(W * H);
-    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) g[y * W + x] = y % 8 === 0 ? 140 : 255;
-    for (const [mx, my] of marks) {
-      for (let y = my; y < my + 4; y++) for (let x = mx; x < mx + 3; x++) g[y * W + x] = 0;
+  const { knobs } = await import('./analyze.js');
+  const { cellSig, countOnes } = await import('./ink.js');
+  // dH 8 with 4x6 digits: a swapped digit is ~0.4 dH^2 of change, like the
+  // real glyph swaps measured on the target videos (0.3-0.7 dH^2).
+  const W = 160, H = 60, dH = 8;
+  let seed = 1;
+  const rnd = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32);
+  const digit = (m, x, y, v = 1) => { for (let yy = y; yy < y + 6; yy++) for (let xx = x; xx < x + 4; xx++) m[yy * W + xx] = v; };
+  const page = (s) => {
+    seed = s;
+    const m = new Uint8Array(W * H);
+    const at = [];
+    for (let i = 0; i < 24; i++) {
+      const x = 8 + Math.floor(rnd() * 140), y = 2 + 10 * Math.floor(rnd() * 5);
+      at.push([x, y]);
+      digit(m, x, y);
     }
-    return g;
+    return { m, at };
   };
-  const grayToRgb = (g) => {
-    const rgb = new Uint8Array(g.length * 3);
-    for (let i = 0; i < g.length; i++) rgb[3 * i] = rgb[3 * i + 1] = rgb[3 * i + 2] = g[i];
-    return rgb;
+  let nextF = 0;
+  const run = (m, n = 16, staff = 1) => {
+    const r = { startF: nextF, endF: nextF + n - 1, nFrames: n, interior: [nextF + 2, nextF + n - 3], content: m, ink: countOnes(m), sig: cellSig(m, W, H, dH), staff };
+    nextF += n + 2;
+    return r;
   };
-  const comp = (g, t0, t1) => ({ rgb: grayToRgb(g), gray: g, tStart: t0, tEnd: t1 });
-  const withSquare = (g, sx, sy) => { // a moving highlight over an unchanged page
-    const f = Uint8Array.from(g);
-    for (let y = sy; y < sy + 8; y++) for (let x = sx; x < sx + 8; x++) f[y * W + x] = 200;
-    return f;
-  };
+  const k = knobs(0.5);
+  const ctx = { w: W, h: H, knobs: k, inkFloor: 60, dH, fps: 4, hasStaff: true };
+  const opts = { inkFloor: 60, ratioT: k.pageRatioT, cellT: k.cellK * dH * dH, cell: dH };
 
-  const pageA = sparsePage(101), pageB = sparsePage(202);
+  const A = page(1), B = page(2);
+  // 1. samePage: identical and 1-px shifted -> same; one digit moved -> different.
+  const shifted = new Uint8Array(W * H);
+  for (let y = 0; y < H; y++) for (let x = 1; x < W; x++) shifted[y * W + x] = A.m[y * W + x - 1];
+  assert.ok(samePage(A.m, Uint8Array.from(A.m), W, H, opts).same);
+  assert.ok(samePage(A.m, shifted, W, H, opts).same, '1-px jitter is the same screen');
+  const oneDigit = Uint8Array.from(A.m);
+  digit(oneDigit, A.at[0][0], A.at[0][1], 0);
+  digit(oneDigit, 150, 44);
+  assert.ok(!samePage(A.m, oneDigit, W, H, opts).same, 'a moved fret number is a different screen');
+  assert.ok(!samePage(A.m, B.m, W, H, opts).same);
 
-  // 1. dupDiff: identical -> ~0, sparse flip -> above DUP_FRAC.
-  assert.equal(dupDiff(pageA, Uint8Array.from(pageA), W, H), 0);
-  assert.ok(dupDiff(pageA, pageB, W, H) > DUP_FRAC, 'sparse flip must not read as duplicate');
+  // 2. Assembly: A, A (spurious split), B, intro-without-staff, A again ->
+  //    pages A (alsoAt the repeat) and B; the no-staff run is dropped.
+  nextF = 0;
+  const runs = [run(A.m), run(Uint8Array.from(A.m), 10), run(B.m), run(page(9).m, 16, 0.1), run(Uint8Array.from(A.m))];
+  const { pages, dropped } = assemblePages(runs, ctx);
+  assert.equal(pages.length, 2);
+  assert.equal(pages[0].runs.length, 2, 'back-to-back runs of one screen merge');
+  assert.equal(pages[0].alsoAt.length, 1);
+  assert.equal(pages[0].alsoAt[0], runs[4].startF / 4);
+  assert.equal(dropped.noStaff, 1);
+  assert.ok(pages[0].candidates.length >= 7);
+  assert.equal(pages[1].tStart, runs[2].startF / 4);
 
-  // 2. Assembly: three highlighted views of page A collapse to ONE page whose
-  //    median erased the moving square; page B is a distinct page; a later
-  //    exact repeat of A is deduped into alsoAt, not re-emitted.
-  const composites = [
-    comp(withSquare(pageA, 10, 4), 0, 5),
-    comp(withSquare(pageA, 60, 16), 5, 10),
-    comp(withSquare(pageA, 90, 28), 10, 15),
-    comp(pageB, 15, 20),
-    comp(Uint8Array.from(pageA), 20, 25),
-  ];
-  const captures = assemble(composites, { w: W, h: H });
-  assert.equal(captures.length, 2, 'expected page A + page B after dedup');
-  assert.equal(captures[0].type, 'page');
-  assert.equal(captures[0].tStart, 0);
-  assert.equal(captures[0].tEnd, 15);
-  assert.deepEqual(captures[0].alsoAt, [20], 'exact repeat recorded, not re-emitted');
-  assert.deepEqual(captures[0].rgb, grayToRgb(pageA), 'dup-set median erased the moving highlight');
-  assert.equal(captures[1].tStart, 15);
-  assert.deepEqual(captures[1].alsoAt, []);
-
-  // 3. Mask path: two identical pages plus a differing region that the exclude
-  //    mask covers must still read as duplicate.
-  const w2 = W >> 1, h2 = H >> 1;
-  const mask = new Uint8Array(w2 * h2); // mask out the top-left 20x20 block
-  for (let y = 0; y < 10; y++) for (let x = 0; x < 10; x++) mask[y * w2 + x] = 1;
-  const noisy = Uint8Array.from(pageA);
-  for (let y = 0; y < 20; y++) for (let x = 0; x < 20; x++) noisy[y * W + x] = (x * 13 + y * 7) & 0xff;
-  assert.ok(dupDiff(pageA, noisy, W, H) > DUP_FRAC, 'unmasked, the noisy block reads as change');
-  assert.ok(dupDiff(pageA, noisy, W, H, mask) < DUP_FRAC, 'masked region must be ignored');
-
-  // 4. dHash sanity: identical images collide, unrelated ones do not.
-  assert.equal(hamming(dHash(pageA, W, H), dHash(Uint8Array.from(pageA), W, H)), 0);
-  assert.ok(hamming(dHash(pageA, W, H), dHash(pageB, W, H)) > 6);
+  // 3. Drift can't chain: A -> A' (1 digit) -> A'' (2 digits) stay 3 pages.
+  const A1 = Uint8Array.from(A.m); digit(A1, A.at[1][0], A.at[1][1], 0); digit(A1, 20, 52);
+  const A2 = Uint8Array.from(A1); digit(A2, A.at[2][0], A.at[2][1], 0); digit(A2, 60, 52);
+  nextF = 0;
+  const drift = assemblePages([run(A.m), run(A1), run(A2)], ctx);
+  assert.equal(drift.pages.length, 3);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

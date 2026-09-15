@@ -1,0 +1,130 @@
+{
+  "tolerance": 1.5,
+  "videos": [
+    {
+      "id": "yT9gKKwBeVw",
+      "title": "Crossing Field (vvxo, older)",
+      "url": "https://www.youtube.com/watch?v=yT9gKKwBeVw",
+      "style": "dark strip, dashed text staff, translucent blue measure highlight, chord box right, capo label left",
+      "expect": {
+        "crop": {
+          "x": 118,
+          "y": 488,
+          "w": 990,
+          "h": 228
+        },
+        "scroll": false,
+        "tabEnd": 99,
+        "notes": "subscribe intro 0-5s fades into tab; outro 99-108s is a music-staff graphic (decoy); screen c plays twice back to back",
+        "sequence": "6:a 14:b 18:c 25:d 28:e 31:c 37:d 40:e 43:f 49:g 52:h 57:i 60:j 63:k 68:i 71:j 74:k 79:l 84:m 88:n 93:o"
+      }
+    },
+    {
+      "id": "73HxHE5e2yY",
+      "title": "Mephisto (Haruguitar)",
+      "url": "https://www.youtube.com/watch?v=73HxHE5e2yY",
+      "style": "white tab + chord names + rhythm/pick marks overlaid on live video; chord diagrams right; 2-measure screens every 3-4s",
+      "expect": {
+        "crop": {
+          "x": 88,
+          "y": 716,
+          "w": 1152,
+          "h": 324
+        },
+        "scroll": false,
+        "tabEnd": 231,
+        "notes": "U = E plus an 'Inter' label, AC = AE plus an 'Outro' label (either merged or separate is fine); AB is a ~1s screen",
+        "sequence": "0:A 9:B 13:C 18:D 22:E 25:F 28:E 32:F 35:G 38:H 41:I 44:H 48:I 51:H 54:I 57:H 60:J 62:K 65:L 68:K 72:M 75:N 78:O 81:P 84:O 88:N 91:O 94:P 97:Q 101:I 104:H 107:I 110:H 113:J 115:R 118:S 121:R 124:T 128:U 131:V 134:E 137:F 140:E 144:V 147:E 150:F 153:W 156:X 160:Y 163:X 166:Z 169:L 172:Z 176:AB 177:N 180:O 184:P 187:O 190:N 193:O 196:P 203:AC 206:AD 209:AE 212:AD 216:AE 219:AD 222:AE 225:AF",
+        "equiv": [
+          [
+            "U",
+            "E"
+          ],
+          [
+            "AC",
+            "AE"
+          ]
+        ],
+        "optional": [
+          "AB"
+        ]
+      }
+    },
+    {
+      "id": "Fv3pCR1Btjk",
+      "title": "Tabibito no Uta (vvxo, newer)",
+      "url": "https://www.youtube.com/watch?v=Fv3pCR1Btjk",
+      "style": "dark framed panel, orange sweeping cursor, legend box right, tuning label left",
+      "expect": {
+        "crop": {
+          "x": 178,
+          "y": 626,
+          "w": 1392,
+          "h": 372
+        },
+        "scroll": false,
+        "sequence": "3:A 8:B 11:C 13:B 16:D 19:E 24:F 35:G 40:H 45:I 53:J 56:K 61:L 66:M 72:N 77:O 82:P",
+        "notes": "ad 0-2s; played notes turn white->orange; lyrics row below the panel frame changes constantly (exclude); outro 89s+",
+        "tabEnd": 88
+      }
+    },
+    {
+      "id": "MENRbBUBYd4",
+      "title": "Yuusha (vvxo, newer)",
+      "url": "https://www.youtube.com/watch?v=MENRbBUBYd4",
+      "style": "dark framed panel, orange sweeping cursor, legend box right, tuning label left",
+      "expect": {
+        "crop": {
+          "x": 178,
+          "y": 660,
+          "w": 1392,
+          "h": 408
+        },
+        "scroll": false,
+        "sequence": "0:A 6:B 9:C 12:A 17:B 21:D 25:E 34:E2 37:F 42:G 49:A 54:B 57:H 60:I 66:J 73:K 77:L 83:M 86:N 89:O 94:P 97:Q 102:R 106:S",
+        "notes": "orange vertical cursor bar restarts on back-to-back repeats; percussion D row sits below the panel border; E2 differs from E by a few notes",
+        "tabEnd": 109
+      }
+    },
+    {
+      "id": "0YXjZDR5V-4",
+      "title": "Unravel (vvxo, 2017)",
+      "url": "https://www.youtube.com/watch?v=0YXjZDR5V-4",
+      "style": "dark strip, translucent blue measure highlight, blocky compression",
+      "expect": {
+        "crop": {
+          "x": 140,
+          "y": 506,
+          "w": 1130,
+          "h": 210
+        },
+        "scroll": false,
+        "sequence": "6:A 12:B 20:C 28:B 35:D 39:D2 41:E 50:F 58:G 62:G2 65:H 69:I 73:J 80:H2 83:I 87:J2",
+        "notes": "subscribe intro 0-5s; huge translucent blue measure block; D2 (2s) may be a partial of D; outro 97s+",
+        "tabEnd": 96,
+        "equiv": [
+          [
+            "D",
+            "D2"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "tabsheet-styx",
+      "title": "Styx Helix (Tab Sheet Music) — regression fixture",
+      "file": ".cache/eval/tabsheet-styx/video.mp4",
+      "style": "white page, black notation, thin playhead",
+      "expect": {
+        "crop": {
+          "x": 0,
+          "y": 276,
+          "w": 1278,
+          "h": 164
+        },
+        "scroll": false,
+        "sequence": null
+      }
+    }
+  ]
+}

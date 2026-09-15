@@ -1,5 +1,5 @@
-// ffmpeg spawn helpers: raw-frame async generator, PNG encode via stdin, duration probe.
-// All children are tracked so cancelPipeline() can kill them.
+// ffmpeg spawn helpers: raw-frame async generator, keyframe grabs, PNG encode via
+// stdin, probing. All children are tracked so cancelPipeline() can kill them.
 import { spawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 
@@ -20,14 +20,19 @@ function track(bin, args, stdio) {
 }
 
 // Async generator of raw frames (Buffer of exactly frameBytes each) from ffmpeg stdout.
-// opts: { ss?, to?, t?, vf?, frameBytes, maxFrames? }  (ss/to are input options, t is output -t)
-export async function* rawFrames(input, { ss, to, t, vf, frameBytes, maxFrames }) {
-  const args = ['-hide_banner', '-loglevel', 'error'];
+// opts: { ss?, to?, t?, vf?, frameBytes, maxFrames?, keyOnly?, passthrough? }
+// ss/to are input options, t is output -t. keyOnly decodes keyframes only and
+// snaps ss to the keyframe at/before it: one decoded frame per grab.
+// passthrough keeps select-filtered frames from being duplicated by the muxer.
+export async function* rawFrames(input, { ss, to, t, vf, frameBytes, maxFrames, keyOnly = false, passthrough = false }) {
+  const args = ['-hide_banner', '-loglevel', 'error', '-nostdin'];
+  if (keyOnly) args.push('-noaccurate_seek', '-skip_frame', 'nokey');
   if (ss != null) args.push('-ss', String(ss));
   if (to != null) args.push('-to', String(to));
-  args.push('-i', input);
+  args.push('-i', input, '-an', '-sn', '-dn');
   if (t != null) args.push('-t', String(t));
   if (vf) args.push('-vf', vf);
+  if (passthrough) args.push('-fps_mode', 'passthrough');
   if (maxFrames != null) args.push('-frames:v', String(maxFrames));
   args.push('-f', 'rawvideo', 'pipe:1');
 
@@ -79,11 +84,29 @@ export async function* rawFrames(input, { ss, to, t, vf, frameBytes, maxFrames }
   }
 }
 
-// Encode one rgb24 buffer to a PNG file via ffmpeg stdin.
-export function encodePng(rgb, w, h, outPath) {
+// One frame per timestamp, returned in input order; a failed grab is null.
+// keyOnly (default) makes each grab decode a single keyframe — ideal for
+// sampling a whole video quickly (detection, calibration).
+export async function grabFramesAt(input, times, { vf, frameBytes, keyOnly = true, concurrency = 4 } = {}) {
+  const out = new Array(times.length).fill(null);
+  let next = 0;
+  const worker = async () => {
+    while (next < times.length) {
+      const i = next++;
+      try {
+        for await (const f of rawFrames(input, { ss: times[i], vf, frameBytes, maxFrames: 1, keyOnly })) out[i] = f;
+      } catch { /* leave null; callers tolerate missing samples */ }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(concurrency, times.length) }, worker));
+  return out;
+}
+
+// Encode one raw buffer (rgb24 or gray) to a PNG file via ffmpeg stdin.
+export function encodePng(buf, w, h, outPath, pixFmt = 'rgb24') {
   return new Promise((resolve, reject) => {
     const args = ['-hide_banner', '-loglevel', 'error', '-y',
-      '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-s', `${w}x${h}`, '-i', 'pipe:0',
+      '-f', 'rawvideo', '-pix_fmt', pixFmt, '-s', `${w}x${h}`, '-i', 'pipe:0',
       '-frames:v', '1', outPath];
     const child = track('ffmpeg', args, ['pipe', 'ignore', 'pipe']);
     let stderr = '';
@@ -97,24 +120,50 @@ export function encodePng(rgb, w, h, outPath) {
       reject(err);
     });
     child.stdin.on('error', () => {}); // EPIPE if child died early; close handler reports
-    child.stdin.end(rgb);
+    child.stdin.end(buf);
   });
 }
 
-// Duration in seconds via ffprobe, or null on any failure (callers treat as unknown).
-export function probeDuration(input) {
+// {codec, width, height, fps, duration} of the first video stream, or null.
+export function probeVideo(input) {
   return new Promise((resolve) => {
     const child = track('ffprobe',
-      ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', input],
+      ['-v', 'error', '-select_streams', 'v:0',
+        '-show_entries', 'stream=codec_name,width,height,avg_frame_rate,r_frame_rate:format=duration',
+        '-of', 'json', input],
       ['ignore', 'pipe', 'ignore']);
     let out = '';
     child.stdout.on('data', (d) => { out += d; });
     child.once('error', () => resolve(null));
     child.once('close', (code) => {
-      const n = parseFloat(out);
-      resolve(code === 0 && Number.isFinite(n) ? n : null);
+      if (code !== 0) return resolve(null);
+      try {
+        const j = JSON.parse(out);
+        const s = j.streams?.[0];
+        if (!s) return resolve(null);
+        const d = parseFloat(j.format?.duration);
+        resolve({
+          codec: s.codec_name || '',
+          width: s.width || 0,
+          height: s.height || 0,
+          fps: parseRate(s.avg_frame_rate) || parseRate(s.r_frame_rate),
+          duration: Number.isFinite(d) ? d : null,
+        });
+      } catch {
+        resolve(null);
+      }
     });
   });
+}
+
+export function parseRate(r) {
+  const [a, b] = String(r || '').split('/').map(Number);
+  return a > 0 && b > 0 ? a / b : 0;
+}
+
+// Duration in seconds, or null on any failure (callers treat as unknown).
+export async function probeDuration(input) {
+  return (await probeVideo(input))?.duration ?? null;
 }
 
 async function selfCheck() {
@@ -137,8 +186,31 @@ async function selfCheck() {
     for await (const f of rawFrames(png, { vf: 'format=rgb24', frameBytes: w * h * 3 })) frames.push(f);
     assert.equal(frames.length, 1);
     assert.deepEqual(Buffer.from(frames[0]), rgb); // PNG round-trip is lossless
-    const d = await probeDuration(png);
-    assert.ok(d === null || Number.isFinite(d)); // probe must not throw on stills
+
+    // gray PNGs (clean print output) round-trip too
+    const gray = Buffer.from(Array.from({ length: w * h }, (_, i) => (i * 11) & 0xff));
+    const gpng = path.join(dir, 'g.png');
+    await encodePng(gray, w, h, gpng, 'gray');
+    const g = [];
+    for await (const f of rawFrames(gpng, { vf: 'format=gray', frameBytes: w * h })) g.push(f);
+    assert.deepEqual(Buffer.from(g[0]), gray);
+
+    // keyframe grabs from a tiny lossless video: 3 grabs, in order, right size
+    const vid = path.join(dir, 'v.mkv');
+    await new Promise((resolve, reject) => {
+      const c = spawn('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi',
+        '-i', 'testsrc=size=64x48:rate=10:duration=3', '-c:v', 'ffv1', '-g', '5', vid], { stdio: 'ignore' });
+      c.once('error', reject);
+      c.once('close', (code) => (code === 0 ? resolve() : reject(new Error('lavfi encode failed'))));
+    });
+    const grabs = await grabFramesAt(vid, [0.2, 1.4, 2.6], { vf: 'format=gray', frameBytes: 64 * 48 });
+    assert.equal(grabs.length, 3);
+    assert.ok(grabs.every((f) => f && f.length === 64 * 48));
+    const info = await probeVideo(vid);
+    assert.equal(info.width, 64);
+    assert.equal(info.fps, 10);
+    assert.ok(Math.abs(info.duration - 3) < 0.2);
+    assert.equal(await probeVideo(path.join(dir, 'missing.mp4')), null);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
