@@ -337,17 +337,22 @@ export function detectFromSamples(frames, W, H, times = []) {
 
   // Grow while rows stay panel-like, allowing notation gaps up to 2 line
   // spacings (rhythm stems -> pick-direction marks).
+  const stops = {};
   const walk = (from, dir, limit) => {
-    let edge = from, blank = 0;
+    let edge = from, blank = 0, why = 'limit', at = limit;
     for (let y = from + dir; dir < 0 ? y >= limit : y <= limit; y += dir) {
-      if (foreign(y) || frameRow(y) || stepRow(y, dir) || borderRow(y)) break;
+      const reason = foreign(y) ? 'video' : frameRow(y) ? 'frame line' : stepRow(y, dir) ? 'panel edge' : borderRow(y) ? 'border' : null;
+      if (reason) { why = reason; at = y; break; }
       if (rowInk[y] > 0.01) {
         edge = y;
         blank = 0;
       } else if (++blank > 2 * d) {
+        why = 'blank';
+        at = y;
         break;
       }
     }
+    stops[dir < 0 ? 'top' : 'bottom'] = { why, at: 2 * at, edge: 2 * edge };
     return edge;
   };
   const top = walk(y0i, -1, Math.max(bandLo, Math.floor(best.y0 - 4 * d)));
@@ -368,6 +373,7 @@ export function detectFromSamples(frames, W, H, times = []) {
     dN: 2 * d,
     lines: best.n,
     tabRange: present.length ? [present[0], present[present.length - 1]] : null,
+    stops, // why the box stopped growing (sample px) — diagnostics
     startTime: first > 0 && sampleTimes[first - 1] != null ? sampleTimes[first - 1] : 0,
   };
 }

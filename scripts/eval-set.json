@@ -33,7 +33,7 @@
         },
         "scroll": false,
         "tabEnd": 231,
-        "notes": "U = E plus an 'Inter' label, AC = AE plus an 'Outro' label (either merged or separate is fine); AB is a ~1s screen",
+        "notes": "U = E plus an 'Inter' section label and AC = AE plus an 'Outro' label: label-only differences, so either merged or separate is fine (equiv). AB is a ~1s screen with its own notes and is required.",
         "sequence": "0:A 9:B 13:C 18:D 22:E 25:F 28:E 32:F 35:G 38:H 41:I 44:H 48:I 51:H 54:I 57:H 60:J 62:K 65:L 68:K 72:M 75:N 78:O 81:P 84:O 88:N 91:O 94:P 97:Q 101:I 104:H 107:I 110:H 113:J 115:R 118:S 121:R 124:T 128:U 131:V 134:E 137:F 140:E 144:V 147:E 150:F 153:W 156:X 160:Y 163:X 166:Z 169:L 172:Z 176:AB 177:N 180:O 184:P 187:O 190:N 193:O 196:P 203:AC 206:AD 209:AE 212:AD 216:AE 219:AD 222:AE 225:AF",
         "equiv": [
           [
@@ -45,9 +45,7 @@
             "AE"
           ]
         ],
-        "optional": [
-          "AB"
-        ]
+        "optional": []
       }
     },
     {
@@ -99,14 +97,13 @@
           "h": 210
         },
         "scroll": false,
-        "sequence": "6:A 12:B 20:C 28:B 35:D 39:D2 41:E 50:F 58:G 62:G2 65:H 69:I 73:J 80:H2 83:I 87:J2",
-        "notes": "subscribe intro 0-5s; huge translucent blue measure block; D2 (2s) may be a partial of D; outro 97s+",
+        "sequence": "6:A 12:B 20:C 28:B 35:D 39:D2 41:E 44.5:E2 50:F 58:G 62:G2 65:H 69:I 73:J 80:H2 83:I 87:J2",
+        "notes": "subscribe intro 0-5s; huge translucent blue measure block. D2 is D without its last measure and E2 is E plus a final strummed chord (verified on frames at 43.5/44.25/45s): the fuller screens D and E2 are REQUIRED (dropping them loses notes); the partial D2 and E are optional. outro 97s+",
         "tabEnd": 96,
-        "equiv": [
-          [
-            "D",
-            "D2"
-          ]
+        "equiv": [],
+        "optional": [
+          "D2",
+          "E"
         ]
       }
     },

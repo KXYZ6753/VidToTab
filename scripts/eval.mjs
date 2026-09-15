@@ -254,6 +254,26 @@ for (const v of SET.videos) {
     continue;
   }
   const outDir = path.join(dir, `out-${tag}`);
+  if (flag('rescore')) {
+    // Re-score a previous run's saved captures against the current labels.
+    for (const sensitivity of sensList) {
+      const file = path.join(outDir, `captures-${sensitivity}.json`);
+      if (!fs.existsSync(file)) {
+        log(`  no saved captures for sens ${sensitivity} in ${outDir}`);
+        continue;
+      }
+      const captures = JSON.parse(fs.readFileSync(file, 'utf8'));
+      const score = scoreCaptures(captures, v.expect, SET.tolerance);
+      rows.push({ id: v.id, sensitivity, captures: captures.length, ...(score || {}) });
+      log(`  sens ${sensitivity}: ${captures.length} captures` + (score
+        ? ` | recall ${score.recall} precision ${score.precision} | missing [${score.missing.join(' ')}]`
+          + ` dups [${score.dups.join(' ')}] spurious [${score.spurious.join(' ')}]`
+          + ` wrongMerges [${score.wrongMerges.join(' ')}] repeats ${score.repeatsFound}/${score.repeats}`
+        : ''));
+      if (score && (score.recall < 1 || score.precision < 0.9)) failed = true;
+    }
+    continue;
+  }
   fs.rmSync(outDir, { recursive: true, force: true });
   fs.mkdirSync(outDir, { recursive: true });
 

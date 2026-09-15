@@ -112,7 +112,8 @@ async function run(videoPath, opts, onProgress, job) {
   onProgress({ phase: 'analyze', pct: 100 });
 
   const { pages, dropped } = assemblePages(p1.runs, {
-    w: w2, h: h2, knobs: knobs(sensitivity), inkFloor: p1.inkFloor, dH: calib.dH, fps: FPS, startTime, hasStaff: Boolean(calib.staff),
+    w: w2, h: h2, knobs: knobs(sensitivity), inkFloor: p1.inkFloor, dH: calib.dH, fps: FPS, startTime,
+    hasStaff: Boolean(calib.staff), staff: calib.staff,
   });
   const debug = {
     calib, frames: p1.frames, runs: p1.runs.length, hotFrac: round3(p1.hotFrac), staticFrac: round3(p1.staticFrac), zoneFrac: round3(p1.zoneFrac ?? 0), dropped,

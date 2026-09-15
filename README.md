@@ -48,6 +48,20 @@ npm run eval -- --label       # frame grids + 1-fps strips for labeling a new vi
 
 `scripts/eval-set.json` holds hand-labeled page sequences (`"t:id"` page starts, repeats reuse the id) for the target videos. The harness downloads them into `.cache/eval/`, scores recall/precision of page starts, repeat folding, crop IoU and leftover highlight color, and writes contact sheets to inspect.
 
+## Results on the target videos
+
+Hand-labeled page sequences in `scripts/eval-set.json`, scored at the default setting. *Recall* = distinct tab screens captured (a page whose notes are lost counts as missed); *precision* = captures that are a new screen (duplicates and intro/outro frames count against it). "Detected box" is the real flow — the pipeline runs on the automatically detected tab area.
+
+| Video | Style | Pages | Detected box: recall / precision | Hand-drawn box: recall / precision |
+|---|---|---|---|---|
+| Crossing Field (yT9gKKwBeVw) | dark strip, blue measure highlight | 15 | 1.00 / 0.94 | 1.00 / 1.00 |
+| Tabibito no Uta (Fv3pCR1Btjk) | dark panel, notes turn orange when played | 16 | 1.00 / 1.00 | 1.00 / 1.00 |
+| Yuusha (MENRbBUBYd4) | dark panel, orange cursor bar | 21 | 1.00 / 1.00 | 1.00 / 1.00 |
+| Unravel (0YXjZDR5V-4) | dark strip, wide blue highlight | 15 | 1.00 / 1.00 | 1.00 / 1.00 |
+| Mephisto (73HxHE5e2yY) | tab + chords over live video, 2-bar screens | 31 | 0.97 / 0.68 | 0.97 / 0.67 |
+
+Before the remaster, on the two videos labeled at the time: Crossing Field 0.87 / 0.38 (with blue highlights baked into the captures, 6 min to process) and Mephisto 0.68 / 0.56. Mephisto's remaining misses are screens that differ only by thin "x" strum marks; its duplicates are repeats of those look-alike screens — remove them in review or use *Fewer pages*.
+
 ## Troubleshooting
 
 - **"YouTube blocked the download"** — the app already retries through other YouTube player clients. If it still fails, update yt-dlp, wait a minute, or download the video yourself and drop the file in.

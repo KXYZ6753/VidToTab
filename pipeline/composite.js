@@ -87,6 +87,27 @@ export function renderClean(samples, w, h, calib) {
     const a = Math.min(1, Math.max(0, (v[i] - lo) / span));
     out[i] = Math.round(255 * (1 - a ** 0.8));
   }
+  // Staff lines: some panels draw them only ~45 levels above the background,
+  // well under the glyph gate. Near the calibrated staff rows, accept much
+  // fainter persistent ink and print it as a crisp mid-gray line (digit
+  // knock-outs stay open — there's no ink there in any sample).
+  const staff = calib.staff;
+  if (staff?.rows?.length) {
+    const lineT = 0.35 * tau;
+    const x0 = Math.max(0, Math.floor(2 * staff.x0) - 4), x1 = Math.min(w - 1, Math.ceil(2 * staff.x1) + 4);
+    for (const yr of staff.rows) {
+      const yc = Math.round(2 * yr + 0.5);
+      for (let y = Math.max(0, yc - 3); y <= Math.min(h - 1, yc + 3); y++) {
+        for (let x = x0; x <= x1; x++) {
+          const i = y * w + x;
+          if (keep[i]) continue;
+          let above = 0;
+          for (let k = 0; k < K; k++) if (planes[k][i] > lineT) above++;
+          if (above >= need) out[i] = Math.min(out[i], 105);
+        }
+      }
+    }
+  }
   return out;
 }
 

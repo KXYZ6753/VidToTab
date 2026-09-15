@@ -233,8 +233,8 @@ code { font: 13px var(--mono); background: color-mix(in srgb, currentColor 10%, 
 .detect-status > div { flex: 1; min-width: 0; }
 .detect-status .icon { width: 22px; height: 22px; flex: none; border-radius: 50%; display: grid; place-items: center; }
 .detect-status .icon svg { width: 14px; height: 14px; }
-.detect-status.found .icon { background: var(--ok-soft); color: var(--ok); }
-.detect-status.low .icon, .detect-status.none .icon { background: var(--warn-soft); color: var(--warn); }
+.detect-status.is-found .icon { background: var(--ok-soft); color: var(--ok); }
+.detect-status.is-low .icon, .detect-status.is-none .icon { background: var(--warn-soft); color: var(--warn); }
 .detect-status b { display: block; font-size: 15px; }
 .detect-status p { font-size: 13.5px; color: var(--muted); margin-top: 1px; }
 .spinner { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--line-strong); border-top-color: var(--accent); animation: spin .8s linear infinite; flex: none; margin: 2px; }

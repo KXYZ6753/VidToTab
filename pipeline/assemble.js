@@ -8,25 +8,28 @@ import { pct } from './analyze.js';
 // Same screen? Changed ink with 1-px tolerance must be small overall AND
 // nowhere concentrated: a glyph-sized cluster of change (one swapped fret
 // number) marks a different screen even when the rest is identical.
-export function samePage(A, B, w, h, { inkFloor = 0, ratioT, cellT, cell, tol = 1 }) {
+// rows: optional [y0, y1] band to compare (the staff band — see assemblePages).
+// oneWay: only count ink of A missing from B ("A is contained in B").
+export function samePage(A, B, w, h, { inkFloor = 0, ratioT, cellT, cell, tol = 1, rows = null, oneWay = false }) {
   const dilA = tol ? dilate3(A, w, h) : A, dilB = tol ? dilate3(B, w, h) : B;
   const cw = Math.ceil(w / cell), ch = Math.ceil(h / cell);
   const counts = new Uint32Array(cw * ch);
+  const y0 = rows ? Math.max(0, rows[0]) : 0, y1 = rows ? Math.min(h - 1, rows[1]) : h - 1;
   let changed = 0, na = 0, nb = 0;
-  for (let y = 0; y < h; y++) {
+  for (let y = y0; y <= y1; y++) {
     const row = y * w, crow = Math.floor(y / cell) * cw;
     for (let x = 0; x < w; x++) {
       const i = row + x;
       const a = A[i], b = B[i];
       na += a;
       nb += b;
-      if ((a && !dilB[i]) || (b && !dilA[i])) {
+      if ((a && !dilB[i]) || (!oneWay && b && !dilA[i])) {
         changed++;
         counts[crow + Math.floor(x / cell)]++;
       }
     }
   }
-  const ratio = changed / Math.max(na, nb, inkFloor, 1);
+  const ratio = changed / Math.max(na, oneWay ? 0 : nb, inkFloor, 1);
   const local = maxWindow2x2(counts, cw, ch);
   return { same: ratio < ratioT && local < cellT, ratio, local };
 }
@@ -43,9 +46,17 @@ function sigDistance(a, b) {
 
 // runs: pass-1 runs with {startF, endF, nFrames, interior, content, ink, sig, staff}.
 // Returns { pages: [{tStart, tEnd, alsoAt, runs, repeats, candidates}], dropped }.
-export function assemblePages(runs, { w, h, knobs, inkFloor, dH, fps, startTime = 0, hasStaff = false }) {
+export function assemblePages(runs, { w, h, knobs, inkFloor, dH, fps, startTime = 0, hasStaff = false, staff = null }) {
+  // Screens are compared inside the staff band only (top line - 1 spacing to
+  // bottom line + 1): fret numbers always differ there when pages differ,
+  // while live video drifting above or below the staff (a guitar body, a
+  // sleeve) and section labels ("Inter", "Outro") don't split repeats.
+  const rows = staff?.rows?.length
+    ? [Math.floor(Math.min(...staff.rows) - dH), Math.ceil(Math.max(...staff.rows) + dH)]
+    : null;
   // Same glyph-cluster threshold (and floor) as pass-1 pair classification.
-  const opts = { inkFloor, ratioT: knobs.pageRatioT, cellT: Math.max(24, knobs.cellK * dH * dH), cell: Math.max(4, Math.round(dH)) };
+  const opts = { inkFloor, ratioT: knobs.pageRatioT, cellT: Math.max(24, knobs.cellK * dH * dH), cell: Math.max(4, Math.round(dH)), rows };
+  const same = (a, b) => samePage(a.content, b.content, w, h, opts).same;
   const dropped = { noStaff: 0, empty: 0 };
 
   // Not tab: calibrated staff invisible, or next to no notation.
@@ -65,7 +76,7 @@ export function assemblePages(runs, { w, h, knobs, inkFloor, dH, fps, startTime 
   const groups = [];
   for (const r of kept) {
     const g = groups[groups.length - 1];
-    if (g && samePage(g.anchor.content, r.content, w, h, opts).same) {
+    if (g && same(g.anchor, r)) {
       g.runs.push(r);
       if (r.nFrames > g.anchor.nFrames) g.anchor = r;
     } else {
@@ -82,7 +93,7 @@ export function assemblePages(runs, { w, h, knobs, inkFloor, dH, fps, startTime 
       const b = p.anchor;
       if (Math.abs(a.ink - b.ink) > 0.35 * Math.max(a.ink, b.ink)) continue;
       if (sigDistance(a.sig, b.sig) > 0.8) continue;
-      if (samePage(b.content, a.content, w, h, opts).same) { dup = p; break; }
+      if (same(b, a)) { dup = p; break; }
     }
     if (dup) dup.repeats.push(g);
     else pages.push({ ...g, repeats: [] });
@@ -98,10 +109,12 @@ export function assemblePages(runs, { w, h, knobs, inkFloor, dH, fps, startTime 
     p.tStart = tOf(p.runs[0].startF);
     p.tEnd = tOf(p.runs[p.runs.length - 1].endF + 1);
     p.alsoAt = p.repeats.map((g) => tOf(g.runs[0].startF));
-    // Samples come from the first appearance; repeats only top up short ones.
-    let cands = framesOf([p]);
-    if (cands.length < 7) cands = [...cands, ...framesOf(p.repeats)];
-    p.candidates = cands;
+    // Samples come from the anchor run (the fullest view of the screen), topped
+    // up from the rest of its first appearance, then from repeats.
+    let cands = framesOf([{ runs: [p.anchor] }]);
+    if (cands.length < 7) cands = [...new Set([...cands, ...framesOf([p])])];
+    if (cands.length < 7) cands = [...new Set([...cands, ...framesOf(p.repeats)])];
+    p.candidates = cands.sort((x, y) => x - y);
   }
   return { pages, dropped };
 }
@@ -164,7 +177,19 @@ async function selfCheck() {
   assert.ok(pages[0].candidates.length >= 7);
   assert.equal(pages[1].tStart, runs[2].startF / 4);
 
-  // 3. Drift can't chain: A -> A' (1 digit) -> A'' (2 digits) stay 3 pages.
+  // 3. Staff band: identical notes, different junk above the staff (a guitar
+  //    edge drifting in the crop) -> same screen. A screen that gains a chord
+  //    stays a separate page: at small scales "gained notes" is too easy to
+  //    confuse with a different sparse page, and losing notes is worse than a
+  //    removable near-duplicate.
+  const bandCtx = { ...ctx, staff: { rows: [14, 24, 34, 44] } };
+  const junk = Uint8Array.from(A.m);
+  for (let y = 0; y < 4; y++) for (let x = 60; x < 72; x++) junk[y * W + x] = 1;
+  nextF = 0;
+  let res = assemblePages([run(A.m), run(page(5).m), run(junk)], bandCtx);
+  assert.equal(res.pages.length, 2);
+  assert.equal(res.pages[0].alsoAt.length, 1, 'junk above the staff must not split a repeat');
+  // 4. Drift can't chain: A -> A' (1 digit) -> A'' (2 digits) stay 3 pages.
   const A1 = Uint8Array.from(A.m); digit(A1, A.at[1][0], A.at[1][1], 0); digit(A1, 20, 52);
   const A2 = Uint8Array.from(A1); digit(A2, A.at[2][0], A.at[2][1], 0); digit(A2, 60, 52);
   nextF = 0;
