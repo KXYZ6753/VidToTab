@@ -15,6 +15,7 @@ const WORK = path.join(ROOT, 'work');
 const VIDEO = path.join(WORK, 'video.mp4');
 const THUMB = path.join(WORK, 'thumb.jpg');
 const PORT = Number(process.env.PORT) || 3000;
+const HOST = process.env.HOST || '127.0.0.1'; // loopback unless deliberately opened up
 const UPLOAD_CAP = 4 * 2 ** 30; // 4 GB
 
 const MIME = {
@@ -49,14 +50,17 @@ await checkTools();
 // ---------------------------------------------------------------- job state
 
 // Single in-memory job, single user.
-let job = freshJob('idle', null);
+// jobCounter has to be initialised before the first freshJob() call below,
+// otherwise that call reads it inside its temporal dead zone.
+let jobCounter = 0;
 let runCounter = 0;
+let job = freshJob('idle', null);
 
 function freshJob(phase, meta) {
   // phase: idle | downloading | ready | analyzing | done
   return {
-    phase, proc: null, cancelled: false, meta, captures: [], prevCaptures: [],
-    flow: null, analyze: null, detect: null, runId: 0, lastAnalyze: null,
+    id: ++jobCounter, phase, proc: null, cancelled: false, meta, captures: [], prevCaptures: [],
+    flow: null, analyze: null, detect: null, upload: null, uploadPath: null, runId: 0, lastAnalyze: null,
   };
 }
 
@@ -69,6 +73,10 @@ async function stopCurrent() {
   job.cancelled = true;
   job.runId = -1; // silence any analysis still settling
   if (job.proc) killProc(job.proc);
+  // An upload in flight has no process to kill: without destroying the request
+  // it keeps streaming gigabytes into a file resetWork already deleted, and
+  // then hands the *next* job's upload to a stale flow.
+  try { job.upload?.destroy(); } catch { /* already closed */ }
   try { cancelPipeline(); } catch {}
   await Promise.allSettled([job.flow, job.analyze, job.detect].filter(Boolean));
 }
@@ -289,7 +297,7 @@ async function fetchThumb(my, turl) {
 }
 
 async function fileFlow(my) {
-  const r = await toPlayableMp4(my, path.join(WORK, 'upload.bin'));
+  const r = await toPlayableMp4(my, my.uploadPath || path.join(WORK, 'upload.bin'));
   if (bail(my)) return;
   if (r) return flowError(my, r.msg, r.detail);
   await finishVideo(my);
@@ -303,6 +311,10 @@ const PLAY_A = new Set(['', 'aac', 'mp3', 'opus']);
 // transcode. Returns null on success or {msg, detail}.
 async function toPlayableMp4(my, src) {
   const p = await probe(src);
+  // Probing is slow enough for the job to change underneath us; writing VIDEO
+  // now would clobber whatever the new job just put there. Callers check
+  // bail(my) before they look at this return value.
+  if (my !== job || my.cancelled) return { superseded: true, msg: 'The video changed.' };
   if (!p || !p.width) return { msg: 'That file isn’t a readable video.' };
   const playable = p.container.includes('mp4') && PLAY_V.has(p.vcodec) && PLAY_A.has(p.acodec);
   if (playable) {
@@ -389,7 +401,10 @@ async function postUrl(req, res) {
   resetWork();
   job = freshJob('downloading', null);
   sendJson(res, 202, { ok: true });
-  job.flow = urlFlow(job, url.href);
+  const my = job;
+  // A synchronous fs throw inside the flow used to surface as an unhandled
+  // rejection, which ends the process on Node 26.
+  my.flow = urlFlow(my, url.href).catch((e) => flowError(my, 'Something went wrong.', e?.stack || String(e)));
 }
 
 async function putFile(req, res, u) {
@@ -413,7 +428,11 @@ async function putFile(req, res, u) {
   });
   const my = job;
   broadcast({ phase: 'meta', meta: my.meta });
-  const src = path.join(WORK, 'upload.bin');
+  // Per-job filename: with a shared upload.bin, dropping a second file made the
+  // first upload's flow probe and rename the second one's partial file.
+  const src = path.join(WORK, `upload-${my.id}.bin`);
+  my.uploadPath = src;
+  my.upload = req; // so stopCurrent can cut a superseded upload off
   try {
     await new Promise((resolve, reject) => {
       const ws = fs.createWriteStream(src);
@@ -431,14 +450,23 @@ async function putFile(req, res, u) {
       req.pipe(ws);
     });
   } catch (e) {
+    my.upload = null;
+    fs.rmSync(src, { force: true });
     if (my === job) my.phase = 'idle';
     if (!res.headersSent) {
       sendJson(res, e.message === 'too large' ? 413 : 500, { error: 'Upload failed: ' + e.message });
     }
     return;
   }
+  my.upload = null;
+  // Superseded while the bytes were still arriving: leave the new job alone.
+  if (my !== job || my.cancelled) {
+    fs.rmSync(src, { force: true });
+    if (!res.headersSent) sendJson(res, 409, { error: 'Replaced by a newer video.' });
+    return;
+  }
   sendJson(res, 202, { ok: true });
-  my.flow = fileFlow(my);
+  my.flow = fileFlow(my).catch((e) => flowError(my, 'Something went wrong.', e?.stack || String(e)));
 }
 
 async function postDetect(req, res) {
@@ -718,10 +746,16 @@ function serveFile(res, file, mime, cache = 'no-cache') {
   sendStream(res, fs.createReadStream(file));
 }
 
+const CAPTURE_EXT = new Set(['.png']);
+
 function serveCapture(res, pathname) {
   let name;
   try { name = path.basename(decodeURIComponent(pathname.slice('/captures/'.length))); }
   catch { return sendJson(res, 400, { error: 'bad path' }); }
+  // basename() already stops traversal, but without an extension check this
+  // route still hands out everything else in the work folder — frames.ink,
+  // video.mp4, the manifest. Captures are PNGs; nothing else is public.
+  if (!CAPTURE_EXT.has(path.extname(name).toLowerCase())) return sendJson(res, 404, { error: 'not found' });
   // run-unique filenames never change content: cache hard
   serveFile(res, path.join(WORK, name), MIME[path.extname(name).toLowerCase()] || 'application/octet-stream', 'max-age=31536000, immutable');
 }
@@ -797,9 +831,43 @@ function readJson(req, limit = 1e6) {
   });
 }
 
+// Any page open in the browser can POST to a localhost server, and a
+// DNS-rebinding page can read from one. Nothing here is authenticated, so lean
+// on what the browser must tell us: the Host has to be our own loopback
+// address, cross-site requests are refused, and a POST has to be real JSON —
+// text/plain is the one body type that needs no CORS preflight.
+// When HOST is deliberately set to a non-loopback address (the hosted build),
+// the operator has opted in, so the Host and Origin checks step aside.
+const LOOPBACK = HOST === '127.0.0.1' || HOST === 'localhost' || HOST === '::1';
+const ALLOWED_HOSTS = new Set([`127.0.0.1:${PORT}`, `localhost:${PORT}`, `[::1]:${PORT}`]);
+
+function crossSiteReject(req) {
+  if (LOOPBACK && !ALLOWED_HOSTS.has(String(req.headers.host || '').toLowerCase())) {
+    return { code: 403, error: 'Unrecognised Host header.' };
+  }
+  const site = req.headers['sec-fetch-site'];
+  if (site && site !== 'same-origin' && site !== 'none') {
+    return { code: 403, error: 'Cross-site requests are not allowed.' };
+  }
+  const origin = req.headers.origin;
+  if (origin) {
+    let oh;
+    try { oh = new URL(origin).host.toLowerCase(); }
+    catch { return { code: 403, error: 'Bad Origin header.' }; }
+    if (LOOPBACK && !ALLOWED_HOSTS.has(oh)) return { code: 403, error: 'Cross-origin requests are not allowed.' };
+  }
+  if (req.method === 'POST') {
+    const ct = String(req.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
+    if (ct !== 'application/json') return { code: 415, error: 'Expected application/json.' };
+  }
+  return null;
+}
+
 async function route(req, res) {
   const u = new URL(req.url, 'http://localhost');
   const key = `${req.method} ${u.pathname}`;
+  const bad = crossSiteReject(req);
+  if (bad) return sendJson(res, bad.code, { error: bad.error });
   if (key === 'GET /api/events') return sse(req, res);
   if (key === 'GET /api/preflight') {
     await checkTools(); // recompute: user may have just installed
@@ -828,16 +896,42 @@ const server = http.createServer((req, res) => {
 server.requestTimeout = 0; // default 300s would kill multi-GB uploads
 
 // Detached children survive Ctrl-C on the server; sweep them on the way out.
-for (const sig of ['SIGINT', 'SIGTERM']) {
-  process.on(sig, () => {
-    if (job.proc) killProc(job.proc);
-    try { cancelPipeline(); } catch {}
-    process.exit(0);
-  });
+// SIGHUP matters too: closing the terminal otherwise strands a running yt-dlp.
+function shutdown() {
+  if (job.proc) killProc(job.proc);
+  try { cancelPipeline(); } catch { /* nothing running */ }
+}
+for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
+  process.on(sig, () => { shutdown(); process.exit(0); });
 }
 
-server.listen(PORT, () => {
-  console.log(`VidToTab running at http://localhost:${PORT}`);
+// Node exits on an unhandled rejection, which used to take down the whole
+// server (losing the job and stranding a detached yt-dlp) over one failed
+// fs call inside a flow. Report it to the UI and keep serving instead.
+process.on('unhandledRejection', (e) => {
+  console.error('unhandled rejection:', e?.stack || e);
+  flowError(job, 'Something went wrong.', e?.stack || String(e));
+});
+process.on('uncaughtException', (e) => {
+  console.error('uncaught exception:', e?.stack || e);
+  shutdown();
+  flowError(job, 'Something went wrong.', e?.stack || String(e));
+});
+
+server.on('error', (e) => {
+  if (e.code === 'EADDRINUSE') {
+    console.error(`Port ${PORT} is already in use — VidToTab may already be running. Set PORT to pick another.`);
+    process.exit(1);
+  }
+  throw e;
+});
+
+// Loopback only: binding every interface put the API, the video and the work
+// folder on whatever network this machine joins. LAN sharing is a separate,
+// explicit listener (see the phone-viewing feature), never the default.
+server.listen(PORT, HOST, () => {
+  console.log(`VidToTab running at http://${HOST}:${PORT}`);
+  console.log(`VIDTOTAB_LISTENING ${PORT}`); // the desktop shell parses this
   if (!preflight.ytdlp || !preflight.ffmpeg) {
     const missing = [!preflight.ytdlp && 'yt-dlp', !preflight.ffmpeg && 'ffmpeg'].filter(Boolean).join(' ');
     console.error(`missing tools: ${missing} — brew install ${missing}`);

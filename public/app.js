@@ -40,10 +40,13 @@
   };
 
   async function api(path, body) {
+    // Always JSON, even when there is nothing to send: the server rejects POSTs
+    // without it, and that is what stops another open web page from driving
+    // this one (a bodyless POST needs no CORS preflight).
     const res = await fetch(path, {
       method: 'POST',
-      headers: body ? { 'content-type': 'application/json' } : {},
-      body: body ? JSON.stringify(body) : undefined,
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body ?? {}),
     });
     const data = (res.headers.get('content-type') || '').includes('json') ? await res.json().catch(() => null) : null;
     if (!res.ok) throw new Error(data?.error || `Request failed (HTTP ${res.status})`);
