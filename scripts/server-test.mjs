@@ -113,7 +113,64 @@ async function crossSiteGuard() {
   }
 }
 
+// ---- 3. loading a second video must not announce 'cancelled' for the first
+// Regression: stopCurrent() set `cancelled` on the job that was still current,
+// so the outgoing flow broadcast 'cancelled' and the UI fell back to the start
+// screen for several seconds after a second video was loaded.
+async function supersedeSilence() {
+  const port = await freePort();
+  const { srv } = await startServer(port);
+  const seen = [];
+  const stream = http.request(
+    { host: '127.0.0.1', port, path: '/api/events', headers: { accept: 'text/event-stream' } },
+    (res) => {
+      let buf = '';
+      res.on('data', (d) => {
+        buf += d;
+        let i;
+        while ((i = buf.indexOf('\n\n')) >= 0) {
+          const frame = buf.slice(0, i);
+          buf = buf.slice(i + 2);
+          const m = /^data: (.*)$/m.exec(frame);
+          if (m) { try { seen.push(JSON.parse(m[1])); } catch { /* ping */ } }
+        }
+      });
+    });
+  stream.end();
+  try {
+    const small = tinyVideo();
+    const chunk = Buffer.alloc(1 << 20, 3);
+    let stopA = false;
+    const a = put(port, 'first-A.bin', async (req) => {
+      for (let i = 0; i < 40 && !stopA; i++) { req.write(chunk); await sleep(60); }
+      req.end();
+    });
+    await sleep(900);
+    await put(port, 'second-B.mp4', (req) => fs.createReadStream(small).pipe(req));
+    stopA = true;
+    await a;
+    for (let i = 0; i < 100; i++) {
+      const r = await fetch(`http://127.0.0.1:${port}/api/meta`).catch(() => null);
+      if (r?.ok && (await r.json()).ready) break;
+      await sleep(200);
+    }
+    await sleep(300);
+
+    const cancelled = seen.filter((e) => e.phase === 'cancelled');
+    const ids = seen.map((e) => e.jobId).filter((n) => typeof n === 'number');
+    check('supersede: no bogus cancelled event', cancelled.length === 0, JSON.stringify(cancelled));
+    check('supersede: events carry a jobId', ids.length > 0);
+    check('supersede: jobId never goes backwards', ids.every((n, i) => i === 0 || n >= ids[i - 1]), ids.join(','));
+    check('supersede: second video got a new jobId', new Set(ids).size >= 2, ids.join(','));
+  } finally {
+    stream.destroy();
+    srv.kill('SIGKILL');
+    fs.rmSync(SMALL, { force: true });
+  }
+}
+
 await uploadRace();
+await supersedeSilence();
 await crossSiteGuard();
 
 const failed = results.filter((r) => !r.ok);

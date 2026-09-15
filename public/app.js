@@ -116,6 +116,8 @@
     selected: -1,
     deletedStamps: [],      // {t0,t1} of removed pages; survive re-scans
     undoStack: [],
+    warnings: [],           // shown on both the scan and songsheet steps
+    jobId: null,            // newest job seen; older events are ignored
     look: store.get('vtt.look', 'clean') === 'color' ? 'color' : 'clean',
     paper: store.get('vtt.paper', defaultPaper) === 'a4' ? 'a4' : 'letter',
     title: '',
@@ -211,7 +213,12 @@
       captures: [], items: [], undoStack: [], deletedStamps: [], lastAnalyze: null, suggestion: null,
       seekedToTab: false, rect: null, rectSource: null, startMode: 'auto', meta: null, videoSet: false,
       maxStep: 1, job: 'downloading', title: '', selected: -1,
+      // Sensitivity belongs to a video, not to the session: leaving it at the
+      // previous song's "Fewer pages" silently merged pages in the next one,
+      // from a control hidden inside a collapsed section.
+      sensitivity: 0.5, warnings: [], jobId: null,
     });
+    updateSensSeg();
     setSelectMode(false);
     rectEl.hidden = true;
     video.removeAttribute('src');
@@ -542,7 +549,11 @@
     if ((m === 'suggested' || m === 'auto') && t.suggested != null) return { mode: 'suggested', t: t.suggested };
     if (m === 'current') return { mode: 'current', t: t.current };
     if (m === 'zero') return { mode: 'zero', t: 0 };
-    return t.current > 1 ? { mode: 'current', t: t.current } : { mode: 'zero', t: 0 };
+    // Start at the beginning, not wherever the video happens to be paused: when
+    // detection fails the UI asks the user to pause on a frame showing the tab,
+    // and starting there silently dropped every page before that moment. Pass 1
+    // already discards intro screens that show no staff.
+    return { mode: 'zero', t: 0 };
   }
 
   function updateStartSeg() {
@@ -621,7 +632,11 @@
   function resetProcessing() {
     state.captures = [];
     $('liveGrid').textContent = '';
-    $('warnings').textContent = '';
+    // Clear the state, not just this one container: the songsheet step mirrors
+    // the same list, so wiping only the DOM here left stale warnings on step 4
+    // and brought the old ones back as soon as the new run logged its first.
+    state.warnings = [];
+    renderWarnings();
     $('foundCount').hidden = true;
     setProc('scan', 0, '');
     renderStepper();
@@ -661,7 +676,7 @@
     $('foundCount').textContent = `${n} page${n === 1 ? '' : 's'} so far`;
   }
 
-  function addWarning(msg) {
+  function warningBanner(msg) {
     const box = el('div', 'banner warn');
     box.appendChild(icon(ICON.warn)).classList.add('icon');
     const body = el('div', 'body');
@@ -676,9 +691,29 @@
     const x = el('button', 'x', '×');
     x.type = 'button';
     x.setAttribute('aria-label', 'Dismiss');
-    x.addEventListener('click', () => box.remove());
+    x.addEventListener('click', () => {
+      state.warnings = state.warnings.filter((m) => m !== msg);
+      renderWarnings();
+    });
     box.appendChild(x);
-    $('warnings').appendChild(box);
+    return box;
+  }
+
+  // Warnings live in state and are mirrored into the scan step and the
+  // songsheet step. Rendering them only into step 3 meant they were never read:
+  // finishing a scan hides that step immediately.
+  function renderWarnings() {
+    for (const id of ['warnings', 'warnings4']) {
+      const host = $(id);
+      if (!host) continue;
+      host.textContent = '';
+      for (const msg of state.warnings) host.appendChild(warningBanner(msg));
+    }
+  }
+
+  function addWarning(msg) {
+    if (!state.warnings.includes(msg)) state.warnings.push(msg);
+    renderWarnings();
   }
 
   $('procCancel').addEventListener('click', () => api('/api/cancel').catch(() => {}));
@@ -1128,6 +1163,9 @@
 
   function applySnapshot(ev) {
     if (typeof ev.runId === 'number') state.runId = Math.max(state.runId, ev.runId);
+    // Warnings come back with the snapshot so a reload does not silently drop
+    // the reason a scan produced odd results.
+    if (Array.isArray(ev.warnings)) { state.warnings = ev.warnings.slice(); renderWarnings(); }
     if (ev.lastAnalyze) {
       state.lastAnalyze = ev.lastAnalyze;
       state.sensitivity = ev.lastAnalyze.sensitivity ?? state.sensitivity;
@@ -1175,6 +1213,13 @@
   const RUN_PHASES = new Set(['analyzing', 'analyze', 'composite', 'capture', 'warning', 'done', 'error', 'cancelled']);
 
   function handleEvent(ev) {
+    // Ignore events about a video we have already moved on from. Pasting a
+    // second link while the first was still downloading used to let the old
+    // flow's events drive the UI back to the start screen.
+    if (typeof ev.jobId === 'number') {
+      if (state.jobId !== null && ev.jobId < state.jobId) return;
+      if (ev.jobId > (state.jobId ?? -1)) state.jobId = ev.jobId;
+    }
     if (RUN_PHASES.has(ev.phase) && typeof ev.runId === 'number' && ev.runId < state.runId) return; // stale run
     switch (ev.phase) {
       case 'state': applySnapshot(ev); break;
@@ -1206,10 +1251,27 @@
 
   function connectSSE() {
     const es = new EventSource('/api/events');
+    let lostTimer = null;
+    let lost = false;
     es.onmessage = (e) => {
+      if (lostTimer) { clearTimeout(lostTimer); lostTimer = null; }
+      if (lost) { lost = false; hideError(); }
       let ev;
       try { ev = JSON.parse(e.data); } catch { return; }
       handleEvent(ev);
+    };
+    // Without this the UI sits on "Scanning… 42%" for ever after the server
+    // stops (crash, quit, machine asleep). EventSource retries on its own, so
+    // only say something once it has really been failing for a few seconds.
+    es.onerror = () => {
+      if (lost || lostTimer) return;
+      lostTimer = setTimeout(() => {
+        lostTimer = null;
+        if (es.readyState !== EventSource.OPEN) {
+          lost = true;
+          showError('Lost connection to VidToTab — reconnecting…');
+        }
+      }, 5000);
     };
     // EventSource reconnects by itself; the server re-sends a state snapshot.
   }

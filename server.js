@@ -59,7 +59,8 @@ let job = freshJob('idle', null);
 function freshJob(phase, meta) {
   // phase: idle | downloading | ready | analyzing | done
   return {
-    id: ++jobCounter, phase, proc: null, cancelled: false, meta, captures: [], prevCaptures: [],
+    id: ++jobCounter, phase, proc: null, cancelled: false, superseded: false, meta,
+    captures: [], prevCaptures: [], warnings: [],
     flow: null, analyze: null, detect: null, upload: null, uploadPath: null, runId: 0, lastAnalyze: null,
   };
 }
@@ -71,6 +72,10 @@ function killProc(p) {
 
 async function stopCurrent() {
   job.cancelled = true;
+  // Superseded (a new video is loading) rather than cancelled by the user: the
+  // old flow must not announce 'cancelled', or the UI drops out of the new
+  // video's screen until its first event arrives seconds later.
+  job.superseded = true;
   job.runId = -1; // silence any analysis still settling
   if (job.proc) killProc(job.proc);
   // An upload in flight has no process to kill: without destroying the request
@@ -90,7 +95,7 @@ function resetWork() {
 // job was superseded (identity changed) or cancelled — otherwise a stale flow
 // would mutate the new job's state.
 function bail(my) {
-  if (my !== job) return true;
+  if (my !== job || my.superseded) return true;
   if (my.cancelled) {
     my.phase = 'idle';
     broadcast({ phase: 'cancelled' });
@@ -117,17 +122,20 @@ function sse(req, res) {
     'Cache-Control': 'no-cache',
     Connection: 'keep-alive',
   });
-  const snap = { phase: 'state', job: job.phase, runId: job.runId };
+  const snap = { phase: 'state', jobId: job.id, job: job.phase, runId: job.runId };
   if (job.meta) snap.meta = job.meta;
   if (job.captures.length) snap.captures = job.captures;
   if (job.lastAnalyze) snap.lastAnalyze = job.lastAnalyze;
+  if (job.warnings.length) snap.warnings = job.warnings; // survive a reload
   res.write(`data: ${JSON.stringify(snap)}\n\n`);
   sseClients.add(res);
   req.on('close', () => sseClients.delete(res));
 }
 
 function broadcast(ev) {
-  const line = `data: ${JSON.stringify(ev)}\n\n`;
+  // Every event carries the job it belongs to, so a client that reconnects mid
+  // switch can tell a late event about the old video from a current one.
+  const line = `data: ${JSON.stringify({ jobId: job.id, ...ev })}\n\n`;
   for (const c of sseClients) {
     try { c.write(line); } catch { sseClients.delete(c); }
   }
@@ -509,6 +517,7 @@ async function postAnalyze(req, res) {
   }
   my.phase = 'analyzing';
   my.captures = [];
+  my.warnings = [];
   my.lastAnalyze = { rect: crop, startTime, sensitivity };
   sendJson(res, 202, { ok: true, runId });
   broadcast({ phase: 'analyzing', runId, lastAnalyze: my.lastAnalyze });
@@ -518,6 +527,9 @@ async function postAnalyze(req, res) {
   my.analyze = runPipeline(VIDEO, { crop, startTime, sensitivity, workDir: WORK, polarity }, ev => {
     if (!mine()) return;
     if (ev.phase === 'capture') my.captures.push(ev.capture);
+    // Kept on the job: warnings were emitted during step 3 and lost the moment
+    // the UI moved to step 4, so nobody ever read them.
+    if (ev.phase === 'warning' && ev.msg) my.warnings.push(ev.msg);
     broadcast({ ...ev, runId });
   }).then(captures => {
     if (!mine()) return;

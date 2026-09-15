@@ -374,7 +374,10 @@ export function detectFromSamples(frames, W, H, times = []) {
     lines: best.n,
     tabRange: present.length ? [present[0], present[present.length - 1]] : null,
     stops, // why the box stopped growing (sample px) — diagnostics
-    startTime: first > 0 && sampleTimes[first - 1] != null ? sampleTimes[first - 1] : 0,
+    // Two samples back, not one. A single sample can miss the tab (a hand over
+    // the neck, a title card), and starting just after it silently drops every
+    // page in between — up to ~3 minutes on a long video sampled 20 times.
+    startTime: first > 0 ? (sampleTimes[Math.max(0, first - 2)] ?? 0) : 0,
   };
 }
 
