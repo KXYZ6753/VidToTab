@@ -4,7 +4,7 @@
 //   color  — the original look with tinted samples (measure highlights,
 //            cursor bars, notes recolored as they're played) rejected per pixel.
 import { pathToFileURL } from 'node:url';
-import { dilate3, inkPlane, localGain, morph, removeSmall, topHat } from './ink.js';
+import { dilate3, inkPlane, localGain, morph, removeSmall, suppressTintedBars, topHat } from './ink.js';
 
 // Up to K indices spread evenly over the candidate list (time order).
 export function pickSampleFrames(candidates, K = 11) {
@@ -54,7 +54,9 @@ export function renderClean(samples, w, h, calib) {
   const tmp = new Uint8Array(n);
   const planes = samples.map((rgb) => {
     const th = topHat(inkPlane(rgb, w, h, calib.polarity), w, h, r, new Uint8Array(n), tmp);
-    return localGain(th, w, h, r, C, new Uint8Array(n), tmp);
+    const g = localGain(th, w, h, r, C, new Uint8Array(n), tmp);
+    suppressTintedBars(g, rgb, w, h, 1, calib.dN);
+    return g;
   });
   // 65th-percentile rank: a cursor or playhead crossing a pixel in a few
   // samples can't lift it; ink dimmed in a few samples can't erase it.
@@ -74,7 +76,9 @@ export function renderClean(samples, w, h, calib) {
     v[i] = vals[rankIdx];
     gate[i] = above >= need ? 1 : 0;
   }
-  removeSmall(gate, w, h, Math.max(3, Math.round(0.02 * calib.dN * calib.dN)));
+  // Specks only: text-drawn staff lines ("- - - -", dash glyphs ~12 px at 720p)
+  // are separate tiny components and must survive.
+  removeSmall(gate, w, h, 4);
   const keep = dilate3(gate, w, h); // keep anti-aliased glyph edges
   const out = new Uint8Array(n).fill(255);
   const lo = 0.15 * C, span = 0.75 * C;

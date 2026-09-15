@@ -13,9 +13,9 @@ import { FPS, inkPass1, knobs } from './analyze.js';
 import { assemblePages } from './assemble.js';
 import { pickSampleFrames, renderClean, renderColor } from './composite.js';
 import { calibrateCrop } from './detect.js';
-import { inkHalf, localGain, topHat } from './ink.js';
+import { inkHalf, localGain, suppressTintedBars, topHat } from './ink.js';
 
-const CACHE_VERSION = 2;
+const CACHE_VERSION = 3;
 const K_SAMPLES = 11;
 const FALLBACK_INTERVAL = 4;
 
@@ -115,7 +115,7 @@ async function run(videoPath, opts, onProgress, job) {
     w: w2, h: h2, knobs: knobs(sensitivity), inkFloor: p1.inkFloor, dH: calib.dH, fps: FPS, startTime, hasStaff: Boolean(calib.staff),
   });
   const debug = {
-    calib, frames: p1.frames, runs: p1.runs.length, hotFrac: round3(p1.hotFrac), staticFrac: round3(p1.staticFrac), dropped,
+    calib, frames: p1.frames, runs: p1.runs.length, hotFrac: round3(p1.hotFrac), staticFrac: round3(p1.staticFrac), zoneFrac: round3(p1.zoneFrac ?? 0), dropped,
   };
   const ctx = { crop, w, h, startTime, endTime, workDir, calib, debug };
   if (pages.length === 0) {
@@ -241,6 +241,7 @@ async function decodeToCache(videoPath, wanted, calib, { w, h, inkPath, metaPath
       inkHalf(frame, w, h, calib.polarity, e);
       topHat(e, w2, h2, calib.rH, th, tmp);
       const g = localGain(th, w2, h2, calib.rH, calib.C, new Uint8Array(P), tmp); // fresh: write() is async
+      suppressTintedBars(g, frame, w, h, 2, calib.dH); // parked cursors, clipped highlight slivers
       if (!out.write(g)) {
         await new Promise((r) => { wakeup = r; out.once('drain', r); }); // error also wakes us
         wakeup = null;

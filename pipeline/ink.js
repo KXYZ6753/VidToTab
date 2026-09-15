@@ -290,6 +290,28 @@ export function removeSmall(mask, w, h, minArea) {
   return mask;
 }
 
+// Drop components that can't be notation from a comparison mask: anything
+// spanning >= 2.5 line spacings wide AND >= 1.5 tall (edges and curves of live
+// video behind an overlay — a guitar body, a sleeve, a hand), or a huge blob.
+// Fret numbers, chord names, slides, ties and arpeggio marks are smaller in at
+// least one dimension; beamed stem groups may go too, which only costs rhythm
+// detail in screen comparisons. Use on masks with static staff lines already
+// removed (lines would join everything into one component).
+export function dropNonGlyph(mask, w, h, d) {
+  const { labels, bbox, areas, count } = components(mask, w, h);
+  const kill = new Uint8Array(count + 1);
+  let killed = 0;
+  for (let l = 1; l <= count; l++) {
+    const bw = bbox[l][2] - bbox[l][0] + 1, bh = bbox[l][3] - bbox[l][1] + 1;
+    if ((bw >= 2.5 * d && bh >= 1.5 * d) || areas[l] >= 6 * d * d) {
+      kill[l] = 1;
+      killed++;
+    }
+  }
+  if (killed) for (let i = 0; i < mask.length; i++) if (kill[labels[i]]) mask[i] = 0;
+  return killed;
+}
+
 // Ink count per cell x cell block (coarse page signature).
 export function cellSig(mask, w, h, cell, out = null) {
   const cw = Math.ceil(w / cell), ch = Math.ceil(h / cell);
@@ -300,6 +322,76 @@ export function cellSig(mask, w, h, cell, out = null) {
     for (let x = 0; x < w; x++) if (mask[row + x]) out[crow + ((x / cell) | 0)]++;
   }
   return out;
+}
+
+// Zero playback-cursor bars in an ink plane: tall, narrow, densely tinted
+// vertical bands (a cursor that pauses at the end of the staff survives the
+// temporal filters) and slivers of a measure highlight clipped by the crop.
+// Found per column rather than per connected component — digits and staff
+// lines crossing a cursor chop it into short pieces. Stacks of colored notes
+// (recolored as played) are strokes, not filled bands, and stay. Only tinted
+// pixels (and their 1-px chroma fringe) are zeroed, so white digits under a
+// translucent cursor survive. plane is (w/scale) x (h/scale); rgb is the
+// full-res crop; d is the line spacing in plane pixels. Returns bars removed.
+export function suppressTintedBars(plane, rgb, w, h, scale, d) {
+  const pw = Math.floor(w / scale), ph = Math.floor(h / scale);
+  const tint = new Uint8Array(pw * ph);
+  const col = new Uint32Array(pw);
+  for (let y = 0; y < ph; y++) {
+    for (let x = 0; x < pw; x++) {
+      let s = 0;
+      for (let dy = 0; dy < scale; dy++) {
+        let j = 3 * ((y * scale + dy) * w + x * scale);
+        for (let dx = 0; dx < scale; dx++, j += 3) {
+          const r = rgb[j], g = rgb[j + 1], b = rgb[j + 2];
+          const mx = r > g ? (r > b ? r : b) : (g > b ? g : b);
+          const mn = r < g ? (r < b ? r : b) : (g < b ? g : b);
+          if (mx - mn > s) s = mx - mn;
+        }
+      }
+      if (s > 70) {
+        tint[y * pw + x] = 1;
+        col[x]++;
+      }
+    }
+  }
+  // A cursor is a filled band at least ~0.4 line spacings wide; the edge
+  // columns of stacked "0"s look like dashed lines but are 1-2 px wide.
+  const minH = 2.5 * d, maxW = Math.ceil(1.5 * d), minW = Math.max(3, Math.round(0.4 * d));
+  let killed = 0;
+  for (let x0 = 0; x0 < pw;) {
+    if (col[x0] < minH) { x0++; continue; }
+    let x1 = x0;
+    while (x1 + 1 < pw && col[x1 + 1] >= minH) x1++;
+    const bw = x1 - x0 + 1;
+    if (bw >= minW && bw <= maxW) {
+      let y0 = -1, y1 = -1;
+      for (let y = 0; y < ph; y++) {
+        let c = 0;
+        for (let x = x0; x <= x1; x++) c += tint[y * pw + x];
+        if (2 * c >= bw) {
+          if (y0 < 0) y0 = y;
+          y1 = y;
+        }
+      }
+      if (y0 >= 0 && y1 - y0 + 1 >= minH) {
+        let inside = 0;
+        for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) inside += tint[y * pw + x];
+        if (inside >= 0.55 * bw * (y1 - y0 + 1)) {
+          const xa = Math.max(0, x0 - 2), xb = Math.min(pw - 1, x1 + 2);
+          for (let y = y0; y <= y1; y++) {
+            const row = y * pw;
+            for (let x = xa; x <= xb; x++) {
+              if (tint[row + x] || (x > 0 && tint[row + x - 1]) || (x + 1 < pw && tint[row + x + 1])) plane[row + x] = 0;
+            }
+          }
+          killed++;
+        }
+      }
+    }
+    x0 = x1 + 1;
+  }
+  return killed;
 }
 
 // Largest sum over any 2x2 window of a cw x ch count grid (a glyph-sized change
@@ -478,7 +570,40 @@ async function selfCheck() {
     assert.equal(countOnes(m), 6);
   }
 
-  // 7. quantile8 / cellSig basics.
+  // 7. Cursor bars: a filled orange bar chopped by white digits and gray
+  //    lines is removed (digits stay); a column of orange strokes is kept.
+  {
+    const W = 120, H = 80, d = 8;
+    const rgb = new Uint8Array(W * H * 3).fill(30);
+    const put = (x0, y0, x1, y1, c) => { for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) rgb.set(c, 3 * (y * W + x)); };
+    put(40, 4, 50, 76, [220, 120, 40]);                      // cursor bar, 10 px wide
+    for (let y = 10; y < 76; y += 12) put(0, y, W, y + 1, [150, 150, 150]); // staff lines cross it
+    put(42, 30, 48, 40, [240, 240, 240]);                    // a white digit under the cursor
+    const orange = [250, 140, 30];
+    for (let y = 6; y < 72; y += 11) { // a stack of orange "0"s
+      put(88, y, 94, y + 1, orange); put(88, y + 8, 94, y + 9, orange);
+      put(88, y, 89, y + 9, orange); put(93, y, 94, y + 9, orange);
+    }
+    const plane = new Uint8Array(W * H).fill(200);
+    assert.equal(suppressTintedBars(plane, rgb, W, H, 1, d), 1);
+    assert.equal(plane[20 * W + 44], 0, "cursor pixels removed");
+    assert.equal(plane[35 * W + 45], 200, "white digit under the cursor kept");
+    assert.equal(plane[10 * W + 88], 200, "orange note stack kept");
+  }
+
+  // 8. dropNonGlyph: a long curved edge goes, digits and a hammer-on run stay.
+  {
+    const W = 120, H = 60, d = 8;
+    const m = new Uint8Array(W * H);
+    for (let x = 10; x < 70; x++) { const y = Math.round(10 + 12 * Math.sin((x - 10) / 19)); m[y * W + x] = 1; m[(y + 1) * W + x] = 1; }
+    for (const x0 of [80, 90, 100]) for (let y = 40; y < 48; y++) { m[y * W + x0] = 1; m[y * W + x0 + 4] = 1; }
+    for (let x = 20; x < 44; x++) m[45 * W + x] = 1; // "0h2h4" style run: wide but short
+    assert.equal(dropNonGlyph(m, W, H, d), 1);
+    assert.equal(m[45 * W + 30], 1);
+    assert.equal(m[44 * W + 84], 1);
+  }
+
+  // 9. quantile8 / cellSig basics.
   assert.equal(quantile8(Uint8Array.from([0, 10, 20, 30, 40]), 0.5), 20);
   assert.deepEqual(Array.from(cellSig(Uint8Array.from([1, 1, 0, 1]), 2, 2, 1)), [1, 1, 0, 1]);
 }

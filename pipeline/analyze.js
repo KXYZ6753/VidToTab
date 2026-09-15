@@ -9,7 +9,7 @@
 // fret numbers — change 7-90% of the ink or put 100+ changed pixels in one
 // window. The thresholds below sit in that gap.
 import { pathToFileURL } from 'node:url';
-import { cellSig, countOnes, dilate3, maxWindow2x2, morph } from './ink.js';
+import { cellSig, countOnes, dilate3, dropNonGlyph, maxWindow2x2, morph, removeSmall } from './ink.js';
 
 export const FPS = 4;
 const MAJ = 7; // majority window (frames); ink must persist >= 4 of 7 (1 s at 4 fps)
@@ -279,6 +279,11 @@ export async function inkPass1(makeFrames, w2, h2, { frameCount, calib, sensitiv
   // panel staff lines can sit right at tau).
   const interior = (r) => (r.nFrames >= 8 ? [r.startF + 2, r.endF - 2] : r.nFrames >= 5 ? [r.startF + 1, r.endF - 1] : [r.startF, r.endF]);
   const staffT = 0.6 * tau;
+  // Pixels whose ink wavers *within* a stable screen (inked in 20-80% of its
+  // interior frames) in many runs are not notation: live video drifting behind
+  // an overlay, a cursor parked at the end of the staff. They're excluded from
+  // screen comparisons once all runs are known.
+  const unstable = new Uint16Array(P);
   let ri = 0, acc = null, staffAcc = null;
   for await (const { t, full, raw } of majoritySweep(makeFrames, P, tau)) {
     while (ri < runs.length && t > interior(runs[ri])[1]) ri++;
@@ -298,9 +303,12 @@ export async function inkPass1(makeFrames, w2, h2, { frameCount, calib, sensitiv
       const len = b - a + 1;
       const content = new Uint8Array(P), faint = new Uint8Array(P);
       for (let i = 0; i < P; i++) {
-        content[i] = (2 * acc[i] >= len ? 1 : 0) & (excl[i] ^ 1);
+        const v = acc[i];
+        content[i] = (2 * v >= len ? 1 : 0) & (excl[i] ^ 1);
         faint[i] = 2 * staffAcc[i] >= len ? 1 : 0;
+        if (len >= 5 && 5 * v > len && 5 * v < 4 * len) unstable[i]++;
       }
+      dropNonGlyph(content, w2, h2, dH); // live-video edges drifting behind an overlay
       Object.assign(r, {
         interior: [a, b],
         content,
@@ -316,9 +324,25 @@ export async function inkPass1(makeFrames, w2, h2, { frameCount, calib, sensitiv
   }
   onPct(1);
   runs = runs.filter((r) => r.content);
+  const zone = new Uint8Array(P);
+  const zoneT = Math.max(2, 0.35 * runs.length);
+  for (let i = 0; i < P; i++) zone[i] = unstable[i] >= zoneT ? 1 : 0;
+  removeSmall(zone, w2, h2, Math.max(4, Math.round(0.5 * dH * dH)));
+  const zoneMask = countOnes(zone) ? morph(zone, w2, h2, Math.max(1, Math.round(dH / 2)), 'max') : zone;
+  let zoneFrac = countOnes(zoneMask) / P;
+  if (zoneFrac > 0.4) zoneFrac = 0; // pathological: better to compare everything than nothing
+  if (zoneFrac > 0) {
+    for (const r of runs) {
+      for (let i = 0; i < P; i++) if (zoneMask[i]) r.content[i] = 0;
+      r.ink = countOnes(r.content);
+      r.sig = cellSig(r.content, w2, h2, cell);
+    }
+  }
   return {
     runs,
     excl,
+    zoneFrac,
+    staticMask,
     hotFrac,
     staticFrac: staticN / P,
     inkFloor,

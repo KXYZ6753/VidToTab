@@ -8,8 +8,8 @@ import { pct } from './analyze.js';
 // Same screen? Changed ink with 1-px tolerance must be small overall AND
 // nowhere concentrated: a glyph-sized cluster of change (one swapped fret
 // number) marks a different screen even when the rest is identical.
-export function samePage(A, B, w, h, { inkFloor = 0, ratioT, cellT, cell }) {
-  const dilA = dilate3(A, w, h), dilB = dilate3(B, w, h);
+export function samePage(A, B, w, h, { inkFloor = 0, ratioT, cellT, cell, tol = 1 }) {
+  const dilA = tol ? dilate3(A, w, h) : A, dilB = tol ? dilate3(B, w, h) : B;
   const cw = Math.ceil(w / cell), ch = Math.ceil(h / cell);
   const counts = new Uint32Array(cw * ch);
   let changed = 0, na = 0, nb = 0;
