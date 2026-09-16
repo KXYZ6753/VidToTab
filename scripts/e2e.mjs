@@ -434,6 +434,27 @@ try {
   log('after reload:', await evalJs(`document.getElementById('rvCount').textContent`));
   await evalJs(`document.querySelector('#sensSeg [data-sens="0.75"]').click()`);
   await waitFor(`!document.getElementById('step3').hidden || !document.getElementById('step4').hidden`, 20000, 'rescan started');
+  // A scan in flight owns the songsheet on screen. Opening a stored one during
+  // it repointed state.sheetId at that record, and the finishing scan then saved
+  // its pages straight over it — a saved songsheet silently replaced by a
+  // different video's. The library grid could already do this from step 1, which
+  // is never disabled mid-scan; the sidebar made it reachable from every step.
+  await evalJs(`document.getElementById('viewToggle').click()`);
+  await sleep(300);
+  const sideCount = await evalJs(`document.querySelectorAll('#sideList .side-item').length`);
+  const busyNote = await evalJs(`!document.getElementById('sideBusy').hidden`);
+  const itemsOff = await evalJs(`[...document.querySelectorAll('#sideList .side-item')].every(b => b.disabled)`);
+  await evalJs(`document.querySelector('#sideList .side-item')?.click()`);
+  await sleep(300);
+  const wentToSheet = await evalJs(`!document.getElementById('step4').hidden`);
+  log(`mid-scan sidebar: ${sideCount} item(s), busy note=${busyNote}, disabled=${itemsOff}, opened a sheet=${wentToSheet}`);
+  if (sideCount < 1) problems.push('no songsheet in the sidebar to test the mid-scan guard against');
+  if (!busyNote) problems.push('the sidebar did not say a scan was running');
+  if (sideCount > 0 && itemsOff !== true) problems.push('sidebar songsheets stayed clickable during a scan');
+  if (wentToSheet) problems.push('a stored songsheet opened during a scan — the finishing scan would save over it');
+  await evalJs(`document.getElementById('viewToggle').click()`); // back to home view for the rest
+  await sleep(200);
+
   await waitFor(`!document.getElementById('step4').hidden && document.getElementById('stepper').querySelector('[data-step="3"]').disabled`, 300000, 'rescan done');
   log('after rescan at 0.75:', await evalJs(`document.getElementById('rvCount').textContent`));
 

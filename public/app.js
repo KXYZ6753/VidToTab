@@ -278,6 +278,11 @@ import { deleteSheet, getSheet, hasStorage, listSheets, newId, requestPersistenc
       if (state.sheetId && b.dataset.sheet === state.sheetId) b.setAttribute('aria-current', 'true');
       else b.removeAttribute('aria-current');
     }
+    // Disabled rather than merely refused on click: a row that looks live and
+    // then declines is worse than one that says it is not available yet.
+    const busy = scanBusy();
+    for (const b of $('sideList').querySelectorAll('.side-item')) b.disabled = busy;
+    $('sideBusy').hidden = !busy;
     const ready = state.items.some((it) => !it.deleted);
     $('sidePractice').disabled = !ready;
     $('sidePracticeWhy').hidden = ready;
@@ -1549,6 +1554,17 @@ import { deleteSheet, getSheet, hasStorage, listSheets, newId, requestPersistenc
     if (typeof ev.jobId === 'number') {
       if (state.jobId !== null && ev.jobId < state.jobId) return;
       if (ev.jobId > (state.jobId ?? -1)) state.jobId = ev.jobId;
+      // A reload rebuilds the review from the server's snapshot but not the
+      // library record it belongs to, so the next save wrote a second songsheet
+      // for the same scan instead of updating the first. The binding is
+      // remembered against the job it was made for, so only that same job can
+      // adopt it back — a later scan gets a new id, as it should.
+      if (state.sheetId === null && state.jobId !== null) {
+        try {
+          const held = JSON.parse(store.get('vtt.sheet', 'null'));
+          if (held && held.id && held.jobId === state.jobId) state.sheetId = held.id;
+        } catch { /* nothing remembered, or unreadable */ }
+      }
     }
     if (RUN_PHASES.has(ev.phase) && typeof ev.runId === 'number' && ev.runId < state.runId) return; // stale run
     switch (ev.phase) {
@@ -1695,6 +1711,7 @@ import { deleteSheet, getSheet, hasStorage, listSheets, newId, requestPersistenc
       ? await fetch('/thumb.jpg?v=' + state.thumbVersion).then((r) => r.blob()).catch(() => null)
       : null;
     state.sheetId = state.sheetId || newId();
+    store.set('vtt.sheet', JSON.stringify({ id: state.sheetId, jobId: state.jobId }));
     try {
       await saveSheet({
         id: state.sheetId,
@@ -1795,7 +1812,19 @@ import { deleteSheet, getSheet, hasStorage, listSheets, newId, requestPersistenc
     }
   }
 
+  // A scan in flight owns the songsheet on screen. Opening a stored one during
+  // it pointed state.sheetId at that stored record, and onDone then saved the
+  // scan's pages straight over it — the saved songsheet was replaced by a
+  // different video's, with nothing said. The library grid could already do
+  // this from step 1, which is never disabled during a scan; the sidebar made
+  // it reachable from every step, which is how it came to light.
+  const scanBusy = () => state.job === 'downloading' || state.job === 'analyzing';
+
   async function openSheet(id) {
+    if (scanBusy()) {
+      showToast('Finish or cancel the scan first — opening a songsheet now would save the scan over it.');
+      return;
+    }
     let sheet = null;
     try { sheet = await getSheet(id); } catch { /* unreadable */ }
     if (!sheet || !sheet.pages?.length) { showError('That songsheet could not be opened.'); return; }
