@@ -83,7 +83,11 @@ function get(port, p, headers = {}) {
     const req = http.request({ host: '127.0.0.1', port, method: 'GET', path: p, headers }, (res) => {
       let b = '';
       res.on('data', (d) => (b += d));
-      res.on('end', () => resolve({ status: res.statusCode, body: b.slice(0, 200) }));
+      res.on('end', () => resolve({
+        status: res.statusCode,
+        body: b.slice(0, 200),
+        setCookie: (res.headers['set-cookie'] || [])[0] || '',
+      }));
     });
     req.on('error', (e) => resolve({ status: 0, body: 'req error: ' + e.code }));
     req.end();
@@ -92,9 +96,9 @@ function get(port, p, headers = {}) {
 
 // The cross-site guard wants real JSON on a POST, so every one of these sends
 // it — otherwise everything here would only ever prove the guard works.
-async function post(port, p) {
+async function post(port, p, headers = {}) {
   const r = await fetch(`http://127.0.0.1:${port}${p}`, {
-    method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}',
+    method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: '{}',
   }).catch(() => null);
   return { status: r?.status ?? 0, retryAfter: r?.headers.get('retry-after') ?? null };
 }
@@ -102,10 +106,10 @@ async function post(port, p) {
 // Collects the server's events until it is stopped. Several tests can only see
 // what they are testing here: the flows answer 202 and report what happened
 // afterwards, over SSE.
-function eventStream(port) {
+function eventStream(port, headers = {}) {
   const seen = [];
   const req = http.request(
-    { host: '127.0.0.1', port, path: '/api/events', headers: { accept: 'text/event-stream' } },
+    { host: '127.0.0.1', port, path: '/api/events', headers: { accept: 'text/event-stream', ...headers } },
     (res) => {
       let buf = '';
       res.on('data', (d) => {
@@ -326,7 +330,11 @@ async function publicCaps() {
     VIDTOTAB_PUBLIC: '1', VIDTOTAB_MAX_UPLOAD_MB: '1', VIDTOTAB_MAX_MINUTES: '0.01',
     VIDTOTAB_RATE_LIMIT: '50', VIDTOTAB_MAX_JOBS: '4',
   });
-  const { seen, stop } = eventStream(port);
+  // Public mode ties a job to whoever started it, so every request here has to
+  // be the same visitor — including the event stream, which now only carries
+  // events for the job's owner. A browser gets its cookie by loading the page.
+  const cookie = ((await get(port, '/')).setCookie || '').split(';')[0];
+  const { seen, stop } = eventStream(port, { cookie });
   try {
     const h = await (await fetch(`http://127.0.0.1:${port}/api/health`)).json();
     check('public: health reports the limits are on', h.public === true, JSON.stringify(h));
@@ -336,7 +344,7 @@ async function publicCaps() {
     // that reads the header answers at once; one that does not waits forever.
     let held = null;
     const declared = await refusedWithin(8000, put(port, 'huge.mp4',
-      (req) => { held = req; req.write(Buffer.alloc(64)); }, { 'content-length': '40000000' }));
+      (req) => { held = req; req.write(Buffer.alloc(64)); }, { 'content-length': '40000000', cookie }));
     held?.destroy();
     check('public: an oversized upload is refused from its Content-Length', declared.status === 413, `${declared.status} ${declared.body}`);
     check('public: and the refusal names the cap', /1 MB max/.test(declared.body), declared.body);
@@ -347,14 +355,14 @@ async function publicCaps() {
     const streamed = await refusedWithin(8000, put(port, 'chunked.mp4', async (req) => {
       for (let i = 0; i < 4 && !req.destroyed; i++) { req.write(Buffer.alloc(512 << 10, 9)); await sleep(30); }
       if (!req.destroyed) req.end();
-    }));
+    }, { cookie }));
     check('public: an oversized chunked upload is refused mid stream', streamed.status === 413, `${streamed.status} ${streamed.body}`);
     check('public: and that refusal names the cap too', /1 MB max/.test(streamed.body), streamed.body);
 
     // Length is only knowable once the file is here, so this one is reported on
     // the event stream rather than in the answer to the upload.
     const from = seen.length;
-    const up = await put(port, 'two-seconds.mp4', (req) => fs.createReadStream(tinyVideo()).pipe(req));
+    const up = await put(port, 'two-seconds.mp4', (req) => fs.createReadStream(tinyVideo()).pipe(req), { cookie });
     check('public: an under-cap file is still accepted for upload', up.status === 202, `${up.status} ${up.body}`);
     const err = await waitFor(seen, from, (e) => e.phase === 'error');
     check('public: an over-long video is rejected', !!err, JSON.stringify(seen.slice(from).map((e) => e.phase)));
@@ -404,13 +412,17 @@ async function publicConcurrency() {
     VIDTOTAB_PUBLIC: '1', VIDTOTAB_MAX_JOBS: '1', VIDTOTAB_RATE_LIMIT: '100',
   });
   try {
+    // Same visitor throughout: a stranger calling /api/detect on someone else's
+    // job is refused as a stranger (403) long before the concurrency limit is
+    // reached, which would be testing the wrong thing.
+    const cookie = ((await get(port, '/')).setCookie || '').split(';')[0];
     let stopA = false;
     const slow = put(port, 'slow.bin', async (req) => {
       for (let i = 0; i < 40 && !stopA && !req.destroyed; i++) { req.write(Buffer.alloc(1 << 18, 5)); await sleep(60); }
       if (!req.destroyed) req.end();
-    });
+    }, { cookie });
     await sleep(500);
-    const busy = await post(port, '/api/detect');
+    const busy = await post(port, '/api/detect', { cookie });
     check('busy: a second heavy request is turned away', busy.status === 503, String(busy.status));
     check('busy: the 503 carries Retry-After', Number(busy.retryAfter) > 0, String(busy.retryAfter));
     stopA = true;
@@ -420,6 +432,74 @@ async function publicConcurrency() {
   }
 }
 
+// A public instance serves strangers and holds exactly one job. Nothing tied a
+// job to the visitor who started it, so anyone could read another person's
+// video title, thumbnail and scanned pages — and cancel their scan outright.
+// The cross-site guard never covered this: it checks origins, not people.
+async function publicJobIsPrivate() {
+  const port = await freePort();
+  const { srv } = await startServer(port, { VIDTOTAB_PUBLIC: '1', VIDTOTAB_RATE_LIMIT: '200' });
+  try {
+    // A browser first contact is the page itself; /api/health deliberately
+    // answers before the guard so a load balancer can reach it, and it must not
+    // mint a cookie for every poll.
+    const hello = await get(port, '/');
+    const cookie = (hello.setCookie || '').split(';')[0];
+    check('owner: a public instance issues an owner cookie', /^vtt_owner=[0-9a-f]{32}$/.test(cookie), hello.setCookie);
+
+    const clip = tinyVideo();
+    await put(port, 'ownerA.mp4', (req) => fs.createReadStream(clip).pipe(req), { cookie });
+    let mine = null;
+    for (let i = 0; i < 100; i++) {
+      const r = await get(port, '/api/meta', { cookie });
+      if (r.status === 200) { mine = r; break; }
+      await sleep(100);
+    }
+    check('owner: the visitor who started it can read it', mine?.status === 200 && /ownerA/.test(mine.body), JSON.stringify(mine));
+
+    // A second visitor, carrying no cookie of their own.
+    const meta = await get(port, '/api/meta');
+    const thumb = await get(port, '/thumb.jpg');
+    const cap = await get(port, '/captures/page-1.png');
+    const cancel = await post(port, '/api/cancel');
+    check('owner: a stranger cannot read the video', meta.status === 403, `${meta.status} ${meta.body}`);
+    check('owner: a stranger cannot fetch the thumbnail', thumb.status === 403, String(thumb.status));
+    check('owner: a stranger cannot fetch the scanned pages', cap.status === 403, String(cap.status));
+    check('owner: a stranger cannot cancel the scan', cancel.status === 403, String(cancel.status));
+
+    // The snapshot the event stream opens with is its own leak path: it used to
+    // carry the title, warnings and page list of whatever job was running.
+    const peek = eventStream(port); // no cookie: a stranger
+    await sleep(400);
+    const snap = peek.seen[0] || {};
+    peek.stop();
+    check('owner: a stranger'+String.fromCharCode(39)+'s event stream shows them nothing',
+      !snap.meta && !snap.captures && snap.job === 'idle', JSON.stringify(snap));
+
+    const after = await get(port, '/api/meta', { cookie });
+    check('owner: the job survived the stranger', after.status === 200, String(after.status));
+  } finally {
+    srv.kill('SIGKILL');
+    fs.rmSync(SMALL, { force: true });
+  }
+}
+
+// Locally there is one user by definition, so none of that machinery appears.
+async function localNeedsNoOwner() {
+  const port = await freePort();
+  const { srv } = await startServer(port);
+  try {
+    const r = await get(port, '/');
+    check('owner: a local instance sets no cookie', !r.setCookie, r.setCookie);
+    const meta = await get(port, '/api/meta');
+    check('owner: local reads are not gated', meta.status !== 403, String(meta.status));
+  } finally {
+    srv.kill('SIGKILL');
+  }
+}
+
+await publicJobIsPrivate();
+await localNeedsNoOwner();
 await uploadRace();
 await supersedeSilence();
 await crossSiteGuard();

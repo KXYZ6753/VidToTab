@@ -1,5 +1,6 @@
 // VidToTab server — local single-user app. node:http, no framework.
 import http from 'node:http';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -171,6 +172,7 @@ function freshJob(phase, meta) {
   // phase: idle | downloading | ready | analyzing | done
   return {
     id: ++jobCounter, phase, proc: null, cancelled: false, superseded: false, meta,
+    owner: null, // public instances only; see attachOwner
     captures: [], prevCaptures: [], warnings: [],
     flow: null, analyze: null, detect: null, upload: null, uploadPath: null, runId: 0, lastAnalyze: null,
   };
@@ -233,12 +235,18 @@ function sse(req, res) {
     'Cache-Control': 'no-cache',
     Connection: 'keep-alive',
   });
-  const snap = { phase: 'state', jobId: job.id, job: job.phase, runId: job.runId };
-  if (job.meta) snap.meta = job.meta;
-  if (job.captures.length) snap.captures = job.captures;
-  if (job.lastAnalyze) snap.lastAnalyze = job.lastAnalyze;
-  if (job.warnings.length) snap.warnings = job.warnings; // survive a reload
+  // Someone else's job is not theirs to watch: a stranger gets an idle snapshot
+  // rather than the title, warnings and page thumbnails of another visitor's video.
+  const mine = ownsJob(req);
+  const snap = { phase: 'state', jobId: job.id, job: mine ? job.phase : 'idle', runId: job.runId };
+  if (mine) {
+    if (job.meta) snap.meta = job.meta;
+    if (job.captures.length) snap.captures = job.captures;
+    if (job.lastAnalyze) snap.lastAnalyze = job.lastAnalyze;
+    if (job.warnings.length) snap.warnings = job.warnings; // survive a reload
+  }
   res.write(`data: ${JSON.stringify(snap)}\n\n`);
+  res.vttOwner = req.vttOwner; // broadcast() filters on this
   sseClients.add(res);
   req.on('close', () => sseClients.delete(res));
 }
@@ -248,6 +256,8 @@ function broadcast(ev) {
   // switch can tell a late event about the old video from a current one.
   const line = `data: ${JSON.stringify({ jobId: job.id, ...ev })}\n\n`;
   for (const c of sseClients) {
+    // Public: progress belongs to whoever started the job.
+    if (LIMITS.on && job.owner && c.vttOwner !== job.owner) continue;
     try { c.write(line); } catch { sseClients.delete(c); }
   }
 }
@@ -654,6 +664,7 @@ async function postUrl(req, res) {
   await stopCurrent();
   resetWork();
   job = freshJob('downloading', null);
+  job.owner = req.vttOwner;
   sendJson(res, 202, { ok: true });
   const my = job;
   // A synchronous fs throw inside the flow used to surface as an unhandled
@@ -683,6 +694,7 @@ async function putFile(req, res, u) {
     thumb: false,
     ready: false,
   });
+  job.owner = req.vttOwner;
   const my = job;
   broadcast({ phase: 'meta', meta: my.meta });
   // Per-job filename: with a shared upload.bin, dropping a second file made the
@@ -1151,6 +1163,39 @@ const hostsFor = (p) => new Set([`127.0.0.1:${p}`, `localhost:${p}`, `[::1]:${p}
 // Host header, not match "…:0", and be refused.
 let ALLOWED_HOSTS = hostsFor(PORT);
 
+// A public instance serves strangers, and this server has exactly one job.
+// With no notion of an owner, any visitor could act on the job another visitor
+// started: /api/meta names their video, /thumb.jpg and /captures/ show it,
+// /api/video streams the file they uploaded, and /api/cancel destroys their
+// scan outright. The cross-site guard never helped here — it checks origins,
+// not people, and two strangers on a public instance are both legitimate
+// same-origin callers. A cookie minted on first contact ties a job to whoever
+// started it. Local instances are untouched: LIMITS.on is off, and loopback
+// already means one person.
+const OWNER_COOKIE = 'vtt_owner';
+const JOB_SCOPED = new Set([
+  'GET /api/meta', 'GET /api/video', 'GET /thumb.jpg',
+  'POST /api/cancel', 'POST /api/export', 'POST /api/detect', 'POST /api/analyze',
+]);
+const ownerCookie = (req) => (/(?:^|;\s*)vtt_owner=([a-f0-9]{32})/.exec(req.headers.cookie || '') || [])[1] || null;
+
+function attachOwner(req, res) {
+  if (!LIMITS.on) { req.vttOwner = null; return; }
+  const existing = ownerCookie(req);
+  if (existing) { req.vttOwner = existing; return; }
+  req.vttOwner = crypto.randomBytes(16).toString('hex');
+  // Lax, not Strict: arriving from a shared link is a top-level navigation, and
+  // Strict would drop the cookie on exactly that first visit.
+  res.setHeader('Set-Cookie', `${OWNER_COOKIE}=${req.vttOwner}; HttpOnly; SameSite=Lax; Path=/; Max-Age=86400`);
+}
+
+// True when there is nothing to protect — local, or no job started yet — or the
+// caller is the one who started it.
+function ownsJob(req) {
+  if (!LIMITS.on || !job.owner) return true;
+  return req.vttOwner === job.owner;
+}
+
 function crossSiteReject(req) {
   if (LOOPBACK && !ALLOWED_HOSTS.has(String(req.headers.host || '').toLowerCase())) {
     return { code: 403, error: 'Unrecognised Host header.' };
@@ -1261,6 +1306,12 @@ async function route(req, res) {
   if (u.pathname === '/api/health' && (req.method === 'GET' || req.method === 'HEAD')) return health(res);
   const bad = crossSiteReject(req);
   if (bad) return sendJson(res, bad.code, { error: bad.error });
+  // Minted on first contact, so a visitor already holds one by the time they
+  // open the event stream or start anything.
+  attachOwner(req, res);
+  if (!ownsJob(req) && (JOB_SCOPED.has(key) || u.pathname.startsWith('/captures/'))) {
+    return sendJson(res, 403, { error: 'Someone else is using this instance right now.' });
+  }
   if (key === 'GET /api/events') return sse(req, res);
   if (key === 'GET /api/preflight') {
     await checkTools(); // recompute: user may have just installed
