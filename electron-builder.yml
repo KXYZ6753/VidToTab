@@ -1,0 +1,56 @@
+appId: com.vidtotab.app
+productName: VidToTab
+directories:
+  output: dist
+
+# Only the shell goes in the asar. The server stays outside it: it spawns child
+# processes and reads its own files, both of which are unhappy inside an archive.
+files:
+  - electron/**/*
+  - package.json
+
+extraResources:
+  - from: server.js
+    to: app/server.js
+  - from: pipeline
+    to: app/pipeline
+  - from: public
+    to: app/public
+  # Marks the packaged server as ESM. Without it Node reads server.js as
+  # CommonJS and every import throws.
+  - from: electron/server-package.json
+    to: app/package.json
+  # The server's only runtime dependency, plus its own dependencies. The
+  # packaged smoke test imports it for real, so a missing one fails loudly
+  # rather than at the moment a user first exports a PDF.
+  - from: node_modules/pdf-lib
+    to: app/node_modules/pdf-lib
+  - from: node_modules/@pdf-lib
+    to: app/node_modules/@pdf-lib
+  - from: node_modules/pako
+    to: app/node_modules/pako
+  - from: node_modules/tslib
+    to: app/node_modules/tslib
+
+mac:
+  category: public.app-category.music
+  target:
+    - target: dmg
+      arch: [arm64]
+    - target: zip
+      arch: [arm64]
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+
+linux:
+  category: AudioVideo
+  # .deb is the primary download: AppImage needs chmod +x and trips Ubuntu's
+  # AppArmor sandbox, which is a poor first experience for a non-developer.
+  target:
+    - target: deb
+      arch: [x64, arm64]
+    - target: AppImage
+      arch: [x64]

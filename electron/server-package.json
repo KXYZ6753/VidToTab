@@ -1,0 +1,6 @@
+{
+  "name": "vidtotab-server",
+  "private": true,
+  "type": "module",
+  "_comment": "Copied to <resources>/app/package.json when packaging. Without a package.json above it, Node reads the packaged server.js as CommonJS and every import fails — a break that only ever shows up in a built app."
+}
