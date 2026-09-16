@@ -13,7 +13,8 @@
     "test:app": "node scripts/app-test.mjs",
     "pack": "electron-builder --dir",
     "dist": "electron-builder",
-    "test:app:packaged": "node scripts/app-test.mjs --packaged"
+    "test:app:packaged": "node scripts/app-test.mjs --packaged",
+    "binaries": "node scripts/fetch-binaries.mjs"
   },
   "dependencies": {
     "pdf-lib": "^1.17.1"

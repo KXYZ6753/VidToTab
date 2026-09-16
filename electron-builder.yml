@@ -10,6 +10,13 @@ files:
   - package.json
 
 extraResources:
+  # ffmpeg/ffprobe, fetched and checksum-verified by scripts/fetch-binaries.mjs.
+  # The resolver looks here first, which is what makes the app work on a machine
+  # that has never had Homebrew — i.e. almost every machine it will be
+  # downloaded onto. The macOS build is a shared one, so its dylibs travel in
+  # the same folder as the executables.
+  - from: build/bin/${platform}-${arch}
+    to: bin
   - from: server.js
     to: app/server.js
   - from: pipeline
