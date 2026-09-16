@@ -689,6 +689,16 @@ async function stalledUploadDoesNotLockTheInstance() {
     // One probe covers both failures, and the body says which: "busy" if the
     // slot is still held, "someone else is using this instance" if the dead
     // upload still owns it. Each was true in turn while this was being written.
+    // Freed has to mean emptied. An unowned job is readable by anyone, so
+    // unclaiming without clearing would hand the next visitor the previous
+    // one's filename and whatever part of their file had arrived.
+    const leakMeta = await get(port, '/api/meta', { cookie: stranger });
+    const leakVideo = await get(port, '/api/video', { cookie: stranger });
+    check('stalled upload: its details are not left for the next visitor',
+      leakMeta.status === 404 && !/stalled/.test(leakMeta.body), `${leakMeta.status} ${leakMeta.body}`);
+    check('stalled upload: its file is not left for the next visitor',
+      leakVideo.status !== 200, `${leakVideo.status}`);
+
     const other = await put(port, 'stranger.mp4', (req) => fs.createReadStream(clip).pipe(req), { cookie: stranger });
     check('stalled upload: an abandoned upload frees the instance', other.status === 202, `${other.status} ${other.body}`);
 

@@ -231,17 +231,23 @@ function bail(my) {
 // someone's songsheet and it stays theirs.
 function releaseIfEmpty(my) {
   if (my !== job || !job.owner || job.captures.length) return;
-  job.owner = null;
+  // Unclaiming alone would hand the next visitor everything this job left
+  // behind, because an unowned job is readable by anyone: /api/meta names the
+  // file that was uploaded, and /api/video serves however much of it arrived.
+  // A download that failed during analysis has no pages and a whole video on
+  // disk. So the instance is not merely unclaimed, it is emptied.
+  resetWork();
+  job = freshJob('idle', null);
   claim = { owner: null, at: 0 };
 }
 
 function flowError(my, msg, detail) {
   if (my !== job) return;
   my.phase = 'idle';
-  releaseIfEmpty(my);
   const ev = { phase: 'error', msg };
   if (detail) ev.detail = String(detail).slice(-1500);
   broadcast(ev);
+  releaseIfEmpty(my); // after the owner has been told, not before
 }
 
 // ---------------------------------------------------------------- SSE hub
@@ -753,7 +759,6 @@ async function putFile(req, res, u) {
     my.upload = null;
     fs.rmSync(src, { force: true });
     if (my === job) my.phase = 'idle';
-    releaseIfEmpty(my); // a dead upload does not reserve the instance
     if (!res.headersSent) {
       // A chunked upload declares no length, so the cap is only reached part
       // way through — say the same useful thing the header check says, then
@@ -764,6 +769,7 @@ async function putFile(req, res, u) {
         res.on('finish', () => req.destroy());
       } else sendJson(res, 500, { error: 'Upload failed: ' + e.message });
     }
+    releaseIfEmpty(my); // a dead upload neither reserves the instance nor leaves its file behind
     return;
   }
   my.upload = null;
