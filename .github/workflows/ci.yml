@@ -52,6 +52,15 @@ jobs:
         shell: bash
         run: node -e "console.log(require('path').join(process.cwd(),'build','bin',process.platform+'-'+process.arch))" >> "$GITHUB_PATH"
 
+      # The server checks drive the real URL flow, and it refuses to start at all
+      # without yt-dlp. A runner has none, so one check was measuring that
+      # refusal rather than the thing it meant to test — and a machine with no
+      # yt-dlp is not what this app runs on anyway. Fetched with the project's
+      # own installer, so it is checksum-verified like everything else, into the
+      # directory already added to PATH above.
+      - name: Fetch yt-dlp for the tests
+        run: node -e "const p=require('path');import('./pipeline/ytdlp.js').then(m=>m.ensureYtDlp({binDir:p.join(process.cwd(),'build','bin',process.platform+'-'+process.arch),onLog:console.log}))"
+
       - name: Module self-checks
         run: npm test
 
