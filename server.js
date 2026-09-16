@@ -8,7 +8,8 @@ import { PDFDocument, PDFString, StandardFonts, rgb } from 'pdf-lib';
 import { runPipeline, cancelPipeline } from './pipeline/index.js';
 import { detectRegion } from './pipeline/detect.js';
 import { YT_BASE_ARGS, YT_DOWNLOAD_ARGS, noteClientSuccess, orderedClients } from './pipeline/config.js';
-import { toolPath } from './pipeline/tools.js';
+import { clearToolCache, toolPath } from './pipeline/tools.js';
+import { ensureYtDlp } from './pipeline/ytdlp.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(ROOT, 'public');
@@ -74,6 +75,31 @@ async function checkTools() {
   return preflight;
 }
 await checkTools();
+
+// A downloaded app has no Homebrew to fall back on, so it fetches yt-dlp into
+// its own data folder. The resolver prefers that copy over anything on the
+// system, so this also quietly replaces a stale one — which matters, because a
+// yt-dlp a couple of months old fails in ways that read as broken links rather
+// than as an out-of-date tool.
+//
+// Only when a data folder is configured: a plain checkout keeps using whatever
+// the developer installed, and never downloads 37 MB behind their back.
+if (process.env.VIDTOTAB_DATA_DIR && (!preflight.ytdlp || preflight.ytdlpStale)) {
+  const why = preflight.ytdlp
+    ? `yt-dlp ${preflight.ytdlpVersion} is ${preflight.ytdlpAgeDays} days old`
+    : 'yt-dlp is not installed';
+  console.log(`${why} — fetching a current one into the app's data folder`);
+  ensureYtDlp({
+    binDir: path.join(process.env.VIDTOTAB_DATA_DIR, 'bin'),
+    force: preflight.ytdlpStale,
+    onLog: (l) => console.log(l),
+  })
+    .then(async () => {
+      clearToolCache(); // the old path is memoised; drop it or the new copy is ignored
+      await checkTools();
+    })
+    .catch((e) => console.error(`could not install yt-dlp: ${e.message} — YouTube links will not work`));
+}
 
 // ---------------------------------------------------------------- job state
 
