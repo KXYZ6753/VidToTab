@@ -25,6 +25,12 @@ export function knobs(sensitivity = 0.5) {
     minRunS: lerp(1.25, 0.5, s),       // shortest screen kept, seconds
     cpT: lerp(0.5, 0.3, s),            // in-run change-point threshold (cell signatures)
     pageRatioT: lerp(0.12, 0.04, s),   // runs showing the same screen differ by less
+    // Absolute floor under the glyph-sized rule. When the staff spacing is
+    // small (under ~8 half-res px, which covers most 720p tabs) cellK*dH^2 sits
+    // below 24 at every setting, so this floor decided everything and "More
+    // pages" changed nothing at all. Held at 24 up to the default so default
+    // results are unchanged, then lowered so the control has real range.
+    cellFloor: s <= 0.5 ? 24 : lerp(24, 10, (s - 0.5) * 2),
   };
 }
 
@@ -183,7 +189,7 @@ export async function inkPass1(makeFrames, w2, h2, { frameCount, calib, sensitiv
   for (let y = 0; y < h2; y++) for (let x = 0; x < w2; x++) cellOf[y * w2 + x] = Math.floor(y / cell) * cw + Math.floor(x / cell);
   // Floor: at tiny scales (360p sources) a few shifting glyph-edge pixels would
   // otherwise read as a swapped fret number.
-  const cellT = Math.max(24, k.cellK * dH * dH);
+  const cellT = Math.max(k.cellFloor ?? 24, k.cellK * dH * dH);
   const N = Math.max(1, frameCount);
 
   // ---- sweep A: raw ink counts -> present frames, static mask

@@ -588,7 +588,10 @@
   video.addEventListener('loadeddata', redrawPreview);
   video.addEventListener('pause', redrawPreview);
 
-  async function startAnalyze(sensitivity, reuse) {
+  // allowFallback asks the server for a capture every few seconds when no tab
+  // screens are recognised. It is never automatic: that used to turn a video
+  // with no tab into a hundred meaningless "pages".
+  async function startAnalyze(sensitivity, reuse, allowFallback = false) {
     let rect = null, startTime = 0;
     if (reuse && state.lastAnalyze) {
       ({ rect, startTime } = state.lastAnalyze);
@@ -604,7 +607,7 @@
     const btn = $('analyzeBtn');
     btn.disabled = true;
     try {
-      const res = await api('/api/analyze', { rect, startTime, sensitivity });
+      const res = await api('/api/analyze', { rect, startTime, sensitivity, allowFallback });
       state.runId = Math.max(state.runId, res?.runId || 0);
       state.lastAnalyze = { rect, startTime, sensitivity };
       state.sensitivity = sensitivity;
@@ -754,6 +757,9 @@
     $('rvCount').textContent = `${vis.length} page${vis.length === 1 ? '' : 's'}` + (removed ? ` (${removed} removed)` : '');
     $('diagCard').hidden = state.items.length > 1;
     $('diagText').textContent = state.items.length === 0 ? 'No pages found.' : 'Only one page found.';
+    // Offered only when nothing was recognised. A capture every few seconds is
+    // a fallback, not a result, so it must never look like the normal scan.
+    $('diagTimed').hidden = state.items.length !== 0;
     for (const b of $('lookSeg').querySelectorAll('button')) b.setAttribute('aria-pressed', String(b.dataset.look === state.look));
     $('paperSelect').value = state.paper;
     $('exportPdf').disabled = vis.length === 0;
@@ -899,6 +905,7 @@
   $('backToRegion').addEventListener('click', () => { showStep(2); setSelectMode(true); });
   $('diagAdjust').addEventListener('click', () => { showStep(2); setSelectMode(true); });
   $('diagMore').addEventListener('click', () => startAnalyze(0.75, true));
+  $('diagTimed').addEventListener('click', () => startAnalyze(state.sensitivity, true, true));
 
   // ---------- exports ----------
 

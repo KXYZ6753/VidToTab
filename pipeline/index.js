@@ -67,7 +67,7 @@ const fmtT = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart
 
 async function run(videoPath, opts, onProgress, job) {
   validate(videoPath, opts);
-  const { crop, startTime, endTime = null, sensitivity = 0.5, workDir, polarity = null } = opts;
+  const { crop, startTime, endTime = null, sensitivity = 0.5, workDir, polarity = null, allowFallback = false } = opts;
   await mkdir(workDir, { recursive: true });
   const w = crop.w & ~1, h = crop.h & ~1; // server guarantees even; floor defensively
   const w2 = w >> 1, h2 = h >> 1;
@@ -120,6 +120,20 @@ async function run(videoPath, opts, onProgress, job) {
   };
   const ctx = { crop, w, h, startTime, endTime, workDir, calib, debug };
   if (pages.length === 0) {
+    // Say so rather than inventing pages. A video with no tab on screen used to
+    // become one "page" every 4 s — about 150 of them for a 10-minute cover,
+    // each costing two ffmpeg processes — which reads as a working scan and
+    // buries the real answer. The timed capture is now an explicit choice.
+    if (!allowFallback) {
+      onProgress({
+        phase: 'warning',
+        msg: p1.runs.length
+          ? 'No tab screens were recognised in this area. Check that the box covers the tab, or try More pages.'
+          : 'Nothing in this area holds still long enough to be a tab screen. Check that the box covers the tab.',
+      });
+      await writeFile(path.join(workDir, 'manifest.json'), JSON.stringify({ captures: [], debug: { ...debug, noPages: true } }, null, 2));
+      return [];
+    }
     onProgress({
       phase: 'warning',
       msg: p1.runs.length
@@ -413,6 +427,30 @@ async function selfCheck() {
     const p = runPipeline(videoPath, { ...opts, workDir: path.join(dir, 'work2') }, () => {});
     cancelPipeline();
     await assert.rejects(p, (e) => e.cancelled === true);
+
+    // A region with no tab says so instead of inventing pages. Capturing on a
+    // timer regardless turned a video with no tab on screen into one "page"
+    // every 4 s — about 150 of them for a 10-minute cover — which reads as a
+    // successful scan. The timed capture now happens only when asked for.
+    const blank = path.join(dir, 'blank.mkv');
+    await new Promise((resolve, reject) => {
+      const c = spawn('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi',
+        '-i', 'color=c=black:s=320x120:d=6:r=10', '-c:v', 'ffv1', blank], { stdio: 'ignore' });
+      c.once('error', reject);
+      c.once('close', (code) => (code === 0 ? resolve() : reject(new Error('blank encode failed'))));
+    });
+    const blankOpts = { crop: { x: 0, y: 0, w: 320, h: 120 }, startTime: 0, sensitivity: 0.5 };
+    const blankWarnings = [];
+    const none = await runPipeline(blank, { ...blankOpts, workDir: path.join(dir, 'blankA') },
+      (ev) => { if (ev.phase === 'warning') blankWarnings.push(ev.msg); });
+    assert.equal(none.length, 0, 'a region with no tab must report nothing, not invent pages');
+    const blankManifest = JSON.parse(await readFile(path.join(dir, 'blankA', 'manifest.json'), 'utf8'));
+    assert.equal(blankManifest.captures.length, 0, 'the manifest must still be written, with no captures');
+    assert.equal(blankManifest.debug.noPages, true);
+    assert.ok(blankWarnings.some((m) => /no tab screens were recognised/i.test(m)),
+      `expected a "no tab screens" warning, got: ${blankWarnings.join(' | ') || '(none)'}`);
+    const timed = await runPipeline(blank, { ...blankOpts, workDir: path.join(dir, 'blankB'), allowFallback: true }, () => {});
+    assert.ok(timed.length > 0, 'allowFallback must still give a timed capture when it is asked for');
   } finally {
     await rmP(dir, { recursive: true, force: true });
   }

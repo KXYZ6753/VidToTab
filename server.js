@@ -547,7 +547,10 @@ async function postAnalyze(req, res) {
 
   const polarity = meta.suggestion?.crop ? meta.suggestion.polarity : null;
   const mine = () => my === job && my.runId === runId;
-  my.analyze = runPipeline(VIDEO, { crop, startTime, sensitivity, workDir: WORK, polarity }, ev => {
+  // allowFallback is opt-in: without it a region with no tab returns no pages
+  // and says so, instead of inventing a capture every 4 seconds.
+  const allowFallback = body.allowFallback === true;
+  my.analyze = runPipeline(VIDEO, { crop, startTime, sensitivity, workDir: WORK, polarity, allowFallback }, ev => {
     if (!mine()) return;
     if (ev.phase === 'capture') my.captures.push(ev.capture);
     // Kept on the job: warnings were emitted during step 3 and lost the moment

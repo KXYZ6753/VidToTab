@@ -55,7 +55,7 @@ export function assemblePages(runs, { w, h, knobs, inkFloor, dH, fps, startTime 
     ? [Math.floor(Math.min(...staff.rows) - dH), Math.ceil(Math.max(...staff.rows) + dH)]
     : null;
   // Same glyph-cluster threshold (and floor) as pass-1 pair classification.
-  const opts = { inkFloor, ratioT: knobs.pageRatioT, cellT: Math.max(24, knobs.cellK * dH * dH), cell: Math.max(4, Math.round(dH)), rows };
+  const opts = { inkFloor, ratioT: knobs.pageRatioT, cellT: Math.max(knobs.cellFloor ?? 24, knobs.cellK * dH * dH), cell: Math.max(4, Math.round(dH)), rows };
   const same = (a, b) => samePage(a.content, b.content, w, h, opts).same;
   const dropped = { noStaff: 0, empty: 0 };
 
