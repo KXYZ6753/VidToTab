@@ -1694,8 +1694,28 @@ import { deleteSheet, getSheet, hasStorage, listSheets, newId, requestPersistenc
   // another video is loaded — a saved sheet that kept links would open empty.
   async function saveCurrentSheet() {
     if (!hasStorage() || !state.items.length) return;
+    // Bind the record, and everything that describes it, before the first
+    // await. This fetches a blob per page, and the guard in openSheet does not
+    // cover that window: onDone sets the job to 'done' and *then* calls this, so
+    // the scan is no longer "busy" while it is still saving. Opening a stored
+    // songsheet in between used to repoint state.sheetId — and every other field
+    // was read at the end too, so the scan's pages landed in whatever had just
+    // been opened, under that songsheet's title.
+    const items = state.items;
+    const target = {
+      id: state.sheetId || newId(),
+      jobId: state.jobId,
+      title: state.title || state.meta?.title || 'Untitled songsheet',
+      url: state.meta?.url || '',
+      channel: state.meta?.channel || '',
+      duration: state.meta?.duration || 0,
+      recipe: state.lastAnalyze || {},
+      look: state.look,
+      paper: state.paper,
+      thumbUrl: state.meta?.thumb ? '/thumb.jpg?v=' + state.thumbVersion : null,
+    };
     const pages = [];
-    for (const it of state.items) {
+    for (const it of items) {
       if (it.deleted) continue;
       // Works for both a live capture (/captures/…) and a page already held as
       // a blob, so re-saving an opened songsheet needs no special case.
@@ -1707,21 +1727,24 @@ import { deleteSheet, getSheet, hasStorage, listSheets, newId, requestPersistenc
       pages.push({ tStart: it.tStart, tEnd: it.tEnd, alsoAt: it.alsoAt, w: it.w, h: it.h, clean, color });
     }
     if (!pages.length) return;
-    const thumb = state.meta?.thumb
-      ? await fetch('/thumb.jpg?v=' + state.thumbVersion).then((r) => r.blob()).catch(() => null)
+    const thumb = target.thumbUrl
+      ? await fetch(target.thumbUrl).then((r) => r.blob()).catch(() => null)
       : null;
-    state.sheetId = state.sheetId || newId();
-    store.set('vtt.sheet', JSON.stringify({ id: state.sheetId, jobId: state.jobId }));
+    // Only claim the id for what is on screen if what is on screen is still
+    // this scan. If something else was opened meanwhile, this saves as its own
+    // record and leaves their view alone.
+    if (state.items === items) state.sheetId = target.id;
+    store.set('vtt.sheet', JSON.stringify({ id: target.id, jobId: target.jobId }));
     try {
       await saveSheet({
-        id: state.sheetId,
-        title: state.title || state.meta?.title || 'Untitled songsheet',
-        url: state.meta?.url || '',
-        channel: state.meta?.channel || '',
-        duration: state.meta?.duration || 0,
-        recipe: state.lastAnalyze || {},
-        look: state.look,
-        paper: state.paper,
+        id: target.id,
+        title: target.title,
+        url: target.url,
+        channel: target.channel,
+        duration: target.duration,
+        recipe: target.recipe,
+        look: target.look,
+        paper: target.paper,
       }, pages, thumb);
       await requestPersistence();
       renderLibrary(); // so the home screen already shows it when you go back
