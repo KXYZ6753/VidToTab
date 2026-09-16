@@ -36,13 +36,31 @@ fs.mkdirSync(WORK, { recursive: true });
 
 // Async tool checks: a spawnSync here stalls SSE and video range requests.
 const have = (cmd, arg) => new Promise(resolve => {
-  const p = spawn(cmd, [arg], { stdio: 'ignore' });
-  p.on('error', () => resolve(false));
-  p.on('close', code => resolve(code === 0));
+  const p = spawn(cmd, [arg], { stdio: ['ignore', 'pipe', 'ignore'] });
+  let out = '';
+  p.stdout.on('data', (d) => { out += d; });
+  p.on('error', () => resolve({ ok: false, out: '' }));
+  p.on('close', code => resolve({ ok: code === 0, out: out.trim() }));
 });
-const preflight = { ytdlp: false, ffmpeg: false };
+
+// yt-dlp goes stale quickly: YouTube changes something every few weeks and an
+// old build starts failing in ways that look like broken links to the user.
+// Its version is a date (2026.07.04), so age is readable straight off it.
+function ytdlpAgeDays(version) {
+  const m = /^(\d{4})\.(\d{2})\.(\d{2})/.exec(version || '');
+  if (!m) return null;
+  const released = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  return Math.max(0, Math.round((Date.now() - released) / 86400000));
+}
+
+const preflight = { ytdlp: false, ffmpeg: false, ytdlpVersion: '', ytdlpAgeDays: null, ytdlpStale: false };
 async function checkTools() {
-  [preflight.ytdlp, preflight.ffmpeg] = await Promise.all([have('yt-dlp', '--version'), have('ffmpeg', '-version')]);
+  const [yt, ff] = await Promise.all([have('yt-dlp', '--version'), have('ffmpeg', '-version')]);
+  preflight.ytdlp = yt.ok;
+  preflight.ffmpeg = ff.ok;
+  preflight.ytdlpVersion = yt.ok ? yt.out.split('\n')[0] : '';
+  preflight.ytdlpAgeDays = ytdlpAgeDays(preflight.ytdlpVersion);
+  preflight.ytdlpStale = preflight.ytdlpAgeDays != null && preflight.ytdlpAgeDays > 60;
   return preflight;
 }
 await checkTools();
@@ -298,9 +316,22 @@ function friendlyYtError(err, fallback) {
   const e = String(err || '');
   if (/Unsupported URL|is not a valid URL/i.test(e)) return 'That link isn’t a video page yt-dlp can read.';
   if (/Private video|Video unavailable|This video is unavailable/i.test(e)) return 'That video is private or unavailable.';
-  if (/confirm your age|Sign in/i.test(e)) return 'YouTube requires sign-in for this video, so it can’t be downloaded here.';
-  if (/403|Forbidden/i.test(e)) return 'YouTube blocked the download. Try again in a minute — or update yt-dlp (brew upgrade yt-dlp).';
-  if (/resolve|getaddrinfo|Network is unreachable|timed out/i.test(e)) return 'Couldn’t reach YouTube — check your internet connection.';
+  // "Sign in to confirm you're not a bot" is a temporary rate limit, not a
+  // sign-in requirement. Calling it the latter told people to give up on a
+  // video that usually works again within minutes.
+  if (/confirm you'?re not a bot|not a bot/i.test(e)) {
+    return 'YouTube is rate-limiting downloads from this computer right now. Wait a few minutes and try again, or download the video yourself and drop the file in.';
+  }
+  if (/confirm your age|age-restricted/i.test(e)) return 'That video is age-restricted, so it can’t be downloaded without signing in.';
+  if (/members-only|join this channel/i.test(e)) return 'That video is for channel members only.';
+  if (/Sign in/i.test(e)) return 'YouTube is asking this download to sign in. Try again in a few minutes, or drop the video file in instead.';
+  // Every player client is tried before this surfaces, so a 403 here means they
+  // all failed — "try again in a minute" was misleading on its own.
+  if (/403|Forbidden/i.test(e)) {
+    return 'YouTube refused the download on every route we try. Wait a few minutes, update yt-dlp, or download the video yourself and drop the file in.';
+  }
+  if (/resolve|getaddrinfo|Network is unreachable|timed out|Connection reset/i.test(e)) return 'Couldn’t reach YouTube — check your internet connection.';
+  if (/No space left|ENOSPC/i.test(e)) return 'The disk is full — free up some space and try again.';
   return fallback;
 }
 

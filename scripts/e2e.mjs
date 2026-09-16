@@ -159,6 +159,18 @@ try {
   await sleep(600);
   await shot('1-source-light');
 
+  // The yt-dlp staleness notice is built in JS, so a wrong helper would render
+  // nothing at all rather than fail. Assert against what the server reports, so
+  // this still passes on a machine with an up-to-date yt-dlp.
+  const pref = JSON.parse(await evalJs(`fetch('/api/preflight').then(r => r.json()).then(JSON.stringify)`) || '{}');
+  if (pref.ytdlpStale) {
+    const shown = await evalJs(`[...document.querySelectorAll('.banner.warn p')].some((p) => /yt-dlp is \\d+ days old/.test(p.textContent))`);
+    if (!shown) problems.push('yt-dlp reports stale but no staleness banner was rendered');
+    else log(`stale banner shown (yt-dlp ${pref.ytdlpVersion}, ${pref.ytdlpAgeDays} days)`);
+  } else {
+    log(`yt-dlp current (${pref.ytdlpVersion || '?'}) — no staleness banner expected`);
+  }
+
   if (YT_URL) {
     log('source: youtube link', YT_URL);
     await evalJs(`(() => {

@@ -185,12 +185,40 @@
     $('fileInput').click();
   });
 
+  // Built here rather than in the markup: the preflight banner is specifically
+  // about tools that are missing, and an installed-but-old yt-dlp is a
+  // different message with a different fix.
+  let staleEl = null;
+  function staleBanner(show, version, ageDays) {
+    if (!show) { staleEl?.remove(); staleEl = null; return; }
+    if (staleEl) return;
+    staleEl = el('div', 'banner warn');
+    staleEl.appendChild(icon(ICON.warn)).classList.add('icon');
+    const body = el('div', 'body');
+    body.appendChild(el('p', null,
+      `yt-dlp is ${ageDays} days old (${version}). YouTube changes every few weeks, and an out-of-date copy fails in ways that look like a broken link.`));
+    const row = el('p', 'row wrap');
+    row.style.marginTop = '6px';
+    row.appendChild(el('code', null, 'brew upgrade yt-dlp'));
+    body.appendChild(row);
+    staleEl.appendChild(body);
+    const x = el('button', 'x', '×');
+    x.type = 'button';
+    x.setAttribute('aria-label', 'Dismiss');
+    x.addEventListener('click', () => { staleEl?.remove(); staleEl = null; });
+    staleEl.appendChild(x);
+    $('preflight').insertAdjacentElement('afterend', staleEl);
+  }
+
   async function checkPreflight() {
     let p;
     try { p = await (await fetch('/api/preflight')).json(); } catch { return; }
     const missing = [!p.ytdlp && 'yt-dlp', !p.ffmpeg && 'ffmpeg'].filter(Boolean);
     $('preflight').hidden = missing.length === 0;
     $('preflightMissing').textContent = missing.join(' and ');
+    // Installed but old is its own problem: YouTube changes every few weeks and
+    // a stale yt-dlp fails in ways that read as "this link is broken".
+    staleBanner(p.ytdlp && p.ytdlpStale, p.ytdlpVersion, p.ytdlpAgeDays);
     $('urlInput').disabled = !p.ytdlp;
     $('urlSubmit').disabled = !p.ytdlp;
     $('urlInput').placeholder = p.ytdlp ? 'https://www.youtube.com/watch?v=…' : 'Install yt-dlp to paste links';
