@@ -14,6 +14,9 @@ const mods = [
   // Shared with the browser so it lives outside pipeline/, but it decides what
   // every exported page looks like, so it is checked with everything else.
   { name: 'look', file: path.join(here, '..', 'public', 'shared', 'look.js') },
+  // Only its pure parts run here — IndexedDB does not exist in Node, and the
+  // storage paths are covered by the browser end-to-end test instead.
+  { name: 'library', file: path.join(here, '..', 'public', 'lib', 'library.js') },
 ]
   .filter((m) => only.length === 0 || only.includes(m.name))
   .sort((a, b) => a.name.localeCompare(b.name));

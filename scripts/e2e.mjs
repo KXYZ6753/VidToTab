@@ -328,6 +328,68 @@ try {
   await waitFor(`!document.getElementById('step3').hidden || !document.getElementById('step4').hidden`, 20000, 'rescan started');
   await waitFor(`!document.getElementById('step4').hidden && document.getElementById('stepper').querySelector('[data-step="3"]').disabled`, 300000, 'rescan done');
   log('after rescan at 0.75:', await evalJs(`document.getElementById('rvCount').textContent`));
+
+  // The songsheet library exists for one scenario: loading another video used to
+  // destroy the finished songsheet, because the server wipes the work folder.
+  // Kept last, because it deliberately loads a second video and reopens a stored
+  // sheet — states the earlier checks do not expect.
+  await sleep(1500); // let the save settle
+  // Ask the database directly, so "nothing on screen" can be told apart from
+  // "nothing was ever stored" — those need completely different fixes. The
+  // re-scan above finished with a second save, so a correct run still has one
+  // record: re-scanning must update a songsheet, not duplicate it.
+  const storedCount = await evalJs(`new Promise((resolve) => {
+    const req = indexedDB.open('vidtotab');
+    req.onerror = () => resolve('open-error');
+    req.onsuccess = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains('sheets')) return resolve('no-store');
+      const tx = db.transaction('sheets', 'readonly');
+      const c = tx.objectStore('sheets').count();
+      c.onsuccess = () => resolve(String(c.result));
+      c.onerror = () => resolve('count-error');
+    };
+  })`);
+  log('songsheets in IndexedDB:', storedCount);
+  if (storedCount !== '1') problems.push(`expected exactly 1 stored songsheet, database reports ${storedCount}`);
+
+  await evalJs(`document.querySelector('#stepper [data-step="1"]').click()`);
+  await sleep(800);
+  const libShown = await evalJs(`!document.getElementById('librarySection').hidden`);
+  const libCount = await evalJs(`document.querySelectorAll('#libraryGrid .lib-card').length`);
+  const libTitle = await evalJs(`document.querySelector('#libraryGrid .lib-name')?.textContent || ''`);
+  log(`library on the home screen: ${libCount} card(s), shown=${libShown}, first="${libTitle}"`);
+  if (libCount < 1) problems.push('a finished songsheet did not appear in the library');
+  if (!libShown) problems.push('the library section stayed hidden although a songsheet was saved');
+  await shot('6-library');
+
+  // Load a second video — the moment that used to lose everything.
+  const doc2 = await send('DOM.getDocument');
+  const { nodeId: fileNode2 } = await send('DOM.querySelector', { nodeId: doc2.root.nodeId, selector: '#fileInput' });
+  await send('DOM.setFileInputFiles', { nodeId: fileNode2, files: [VIDEO] });
+  await waitFor(`!document.getElementById('step2').hidden`, 180000, 'second video ready');
+  await evalJs(`document.querySelector('#stepper [data-step="1"]').click()`);
+  await sleep(800);
+  const afterCount = await evalJs(`document.querySelectorAll('#libraryGrid .lib-card').length`);
+  log(`library after loading a second video: ${afterCount} card(s), was ${libCount}`);
+  if (afterCount < libCount) problems.push(`library lost songsheets when a new video was loaded: ${libCount} -> ${afterCount}`);
+
+  // Reopening must show real pages, not empty frames: the images have to be
+  // stored blobs, not links to files the server deleted when the second video
+  // arrived. That is the whole point of the feature.
+  if (afterCount > 0) {
+    await evalJs(`document.querySelector('#libraryGrid .lib-card').click()`);
+    await waitFor(`!document.getElementById('step4').hidden`, 20000, 'saved songsheet opens');
+    await sleep(1500);
+    const reopened = await evalJs(`document.querySelectorAll('.sheet-item').length`);
+    const firstSrc = await evalJs(`(document.querySelector('.sheet-item img')?.src || '').slice(0, 5)`);
+    const firstLoaded = await evalJs(`(() => { const i = document.querySelector('.sheet-item img'); return i ? (i.complete && i.naturalWidth > 0) : false; })()`);
+    log(`reopened songsheet: ${reopened} page(s), src starts "${firstSrc}", image decoded=${firstLoaded}`);
+    if (reopened < 1) problems.push('a saved songsheet reopened with no pages');
+    if (firstSrc !== 'blob:') problems.push(`saved pages are not blob-backed (src starts "${firstSrc}")`);
+    if (!firstLoaded) problems.push('a saved page did not decode — the stored blob is unusable');
+    await shot('6b-library-reopened');
+  }
 } catch (e) {
   failure = e;
   log('E2E FAILED:', e.message);

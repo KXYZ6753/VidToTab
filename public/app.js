@@ -4,6 +4,7 @@
    from an older run is ignored. Loaded as a module so the preview can share the
    look maths with the PNG and PDF exports instead of reimplementing it. */
 import { LOOKS, applyLook, inkRgb, isIdentity, isOriginal, lookById, mixRgb, paperRgb, rgbCss } from '/shared/look.js';
+import { deleteSheet, getSheet, hasStorage, listSheets, newId, requestPersistence, saveSheet } from '/lib/library.js';
 
 (() => {
 
@@ -69,8 +70,8 @@ import { LOOKS, applyLook, inkRgb, isIdentity, isOriginal, lookById, mixRgb, pap
   // back a canvas, usable as an image source or drawn straight into a larger
   // one. Print and Original never come here: their pixels are already right, so
   // the stored file is used untouched and nothing is uploaded for them.
-  async function recolouredCanvas(pngName, look) {
-    const img = await loadImage(capSrc(pngName));
+  async function recolouredCanvas(src, look) {
+    const img = await loadImage(src);
     const c = document.createElement('canvas');
     c.width = img.naturalWidth;
     c.height = img.naturalHeight;
@@ -148,6 +149,7 @@ import { LOOKS, applyLook, inkRgb, isIdentity, isOriginal, lookById, mixRgb, pap
     look: lookById(store.get('vtt.look', 'print')).id,
     paper: store.get('vtt.paper', defaultPaper) === 'a4' ? 'a4' : 'letter',
     title: '',
+    sheetId: null,          // library record this scan belongs to
     snapshotApplied: false,
   };
 
@@ -176,6 +178,11 @@ import { LOOKS, applyLook, inkRgb, isIdentity, isOriginal, lookById, mixRgb, pap
     state.maxStep = Math.max(state.maxStep, n);
     for (let i = 1; i <= 4; i++) sections[i].hidden = i !== n;
     renderStepper();
+    // Every route home funnels through here — the stepper, backToSource, and
+    // the internal calls — so the saved songsheets are refreshed in one place.
+    // Hooking only backToSource missed the stepper, which is how a freshly
+    // saved sheet failed to appear at all.
+    if (n === 1) renderLibrary();
     if (n === 2) {
       layoutVideo();
       updateDetectUI();
@@ -271,8 +278,9 @@ import { LOOKS, applyLook, inkRgb, isIdentity, isOriginal, lookById, mixRgb, pap
       // Sensitivity belongs to a video, not to the session: leaving it at the
       // previous song's "Fewer pages" silently merged pages in the next one,
       // from a control hidden inside a collapsed section.
-      sensitivity: 0.5, warnings: [], jobId: null,
+      sensitivity: 0.5, warnings: [], jobId: null, sheetId: null,
     });
+    $('librarySection').hidden = true;
     updateSensSeg();
     setSelectMode(false);
     rectEl.hidden = true;
@@ -790,19 +798,45 @@ import { LOOKS, applyLook, inkRgb, isIdentity, isOriginal, lookById, mixRgb, pap
   const isStamped = (t0, t1) => state.deletedStamps.some((s) => Math.abs(s.t0 - t0) <= 1 && Math.abs(s.t1 - t1) <= 1);
   const visibleIndices = () => state.items.flatMap((it, i) => (it.deleted ? [] : [i]));
 
+  // Object URLs handed out for a saved songsheet's pages, revoked when the
+  // review is rebuilt — reopening sheets would otherwise leak one per page.
+  let heldUrls = [];
+  function releaseHeldUrls() {
+    for (const u of heldUrls) { try { URL.revokeObjectURL(u); } catch { /* already gone */ } }
+    heldUrls = [];
+  }
+  const holdUrl = (blob) => {
+    const u = URL.createObjectURL(blob);
+    heldUrls.push(u);
+    return u;
+  };
+
+  // captures are either live pipeline captures (filenames under work/) or pages
+  // from the library (blobs). Each item resolves its image URLs once here, so
+  // the preview and both exports never need to know which kind it is — the
+  // work folder is wiped by the next video, and a saved sheet has no filename
+  // to point at anyway.
   function buildReview(captures) {
+    releaseHeldUrls();
     state.captures = [...captures].sort((a, b) => a.tStart - b.tStart);
-    state.items = state.captures.map((c) => ({
-      key: c.png,
-      png: c.png,
-      pngColor: c.pngColor || c.png,
-      w: c.w,
-      h: c.h,
-      tStart: c.tStart,
-      tEnd: c.tEnd,
-      alsoAt: c.alsoAt || [],
-      deleted: isStamped(c.tStart, c.tEnd),
-    }));
+    state.items = state.captures.map((c, i) => {
+      const stored = Boolean(c.clean);
+      const src = stored ? holdUrl(c.clean) : capSrc(c.png);
+      return {
+        key: c.png || `stored:${i}`,
+        png: c.png || null,                       // server-side name, live scans only
+        pngColor: c.pngColor || c.png || null,
+        src,
+        srcColor: stored ? (c.color ? holdUrl(c.color) : src) : capSrc(c.pngColor || c.png),
+        stored,
+        w: c.w,
+        h: c.h,
+        tStart: c.tStart,
+        tEnd: c.tEnd,
+        alsoAt: c.alsoAt || [],
+        deleted: isStamped(c.tStart, c.tEnd),
+      };
+    });
     state.selected = -1;
     state.undoStack = [];
     if (!state.title) state.title = suggestTitle(state.meta?.title);
@@ -873,14 +907,14 @@ import { LOOKS, applyLook, inkRgb, isIdentity, isOriginal, lookById, mixRgb, pap
       const paper = el('div', 'paper' + (isOriginal(look) ? ' color' : ''));
       if (!isOriginal(look)) paper.style.background = rgbCss(paperRgb(look));
       const img = el('img');
-      img.src = capSrc(isOriginal(look) ? it.pngColor : it.png);
+      img.src = isOriginal(look) ? it.srcColor : it.src;
       img.alt = `Page ${pageNo}, ${fmtTime(it.tStart)} to ${fmtTime(it.tEnd)}`;
       img.loading = 'lazy';
       if (it.w && it.h) { img.width = it.w; img.height = it.h; }
       // Dark and Sepia map the clean render pixel by pixel, so the preview
       // shows precisely the bytes the export will use — one recipe, not two.
       if (!isIdentity(look) && !isOriginal(look)) {
-        recolouredCanvas(it.png, look)
+        recolouredCanvas(it.src, look)
           .then((c) => { img.src = c.toDataURL('image/png'); })
           .catch(() => { /* keep the plain render rather than blanking the page */ });
       }
@@ -1075,8 +1109,11 @@ import { LOOKS, applyLook, inkRgb, isIdentity, isOriginal, lookById, mixRgb, pap
     return c;
   }
 
-  const visibleFiles = () => state.items.filter((it) => !it.deleted)
-    .map((it) => (isOriginal(lookById(state.look)) ? it.pngColor : it.png));
+  // Items, not filenames: the PDF still needs the server-side name when the
+  // pages are live captures, while the PNG compositor and a saved songsheet
+  // only ever have a URL. Returning strings could not serve both.
+  const visibleItems = () => state.items.filter((it) => !it.deleted);
+  const visibleSrc = (it) => (isOriginal(lookById(state.look)) ? it.srcColor : it.src);
   const exportBase = () => fileSafe(state.title || state.meta?.title);
 
   async function busy(btn, label, fn) {
@@ -1087,7 +1124,7 @@ import { LOOKS, applyLook, inkRgb, isIdentity, isOriginal, lookById, mixRgb, pap
   }
 
   $('exportPdf').addEventListener('click', () => busy($('exportPdf'), 'Building PDF…', async () => {
-    const files = visibleFiles();
+    const files = visibleItems();
     if (!files.length) return;
     try {
       const look = lookById(state.look);
@@ -1097,10 +1134,13 @@ import { LOOKS, applyLook, inkRgb, isIdentity, isOriginal, lookById, mixRgb, pap
       // makes the PDF match the screen instead of merely resembling it.
       const recolour = !isIdentity(look) && !isOriginal(look);
       const items = [];
-      for (const png of files) {
-        items.push(recolour
-          ? { png, pngData: (await recolouredCanvas(png, look)).toDataURL('image/png') }
-          : { png });
+      for (const it of files) {
+        // A page from the library has no file on the server — the work folder
+        // was wiped long ago — so it always travels as bytes, whatever the look.
+        const asBytes = recolour || it.stored;
+        items.push(asBytes
+          ? { png: it.png, pngData: (await recolouredCanvas(visibleSrc(it), look)).toDataURL('image/png') }
+          : { png: isOriginal(look) ? it.pngColor : it.png });
       }
       const res = await fetch('/api/export', {
         method: 'POST',
@@ -1124,12 +1164,12 @@ import { LOOKS, applyLook, inkRgb, isIdentity, isOriginal, lookById, mixRgb, pap
   }));
 
   $('exportPng').addEventListener('click', () => busy($('exportPng'), 'Building…', async () => {
-    const files = visibleFiles();
+    const files = visibleItems();
     if (!files.length) return;
     try {
       const look = lookById(state.look);
       const plain = isIdentity(look) || isOriginal(look);
-      const imgs = await Promise.all(files.map((f) => (plain ? loadImage(capSrc(f)) : recolouredCanvas(f, look))));
+      const imgs = await Promise.all(files.map((it) => (plain ? loadImage(visibleSrc(it)) : recolouredCanvas(it.src, look))));
       const pad = 56, gap = 22;
       const W = Math.max(1400, ...imgs.map(srcW)) + 2 * pad;
       const inner = W - 2 * pad;
@@ -1245,6 +1285,9 @@ import { LOOKS, applyLook, inkRgb, isIdentity, isOriginal, lookById, mixRgb, pap
     setProc('render', 100, '');
     buildReview(Array.isArray(captures) ? captures : state.captures);
     showStep(4);
+    // Save straight away: the next video wipes the work folder, and until now
+    // that is exactly when a finished songsheet disappeared.
+    saveCurrentSheet().catch(() => { /* reported inside */ });
   }
 
   function backToSource() {
@@ -1252,6 +1295,7 @@ import { LOOKS, applyLook, inkRgb, isIdentity, isOriginal, lookById, mixRgb, pap
     $('dlProgress').hidden = true;
     $('sourceCard').hidden = !state.meta;
     $('how').hidden = Boolean(state.meta);
+    renderLibrary();
     showStep(1);
   }
 
@@ -1394,10 +1438,122 @@ import { LOOKS, applyLook, inkRgb, isIdentity, isOriginal, lookById, mixRgb, pap
     // EventSource reconnects by itself; the server re-sends a state snapshot.
   }
 
+  // ---------- songsheet library ----------
+
+  // Every finished scan is kept here. The pages are stored as image blobs
+  // rather than links, because the server deletes the work folder as soon as
+  // another video is loaded — a saved sheet that kept links would open empty.
+  async function saveCurrentSheet() {
+    if (!hasStorage() || !state.items.length) return;
+    const pages = [];
+    for (const it of state.items) {
+      if (it.deleted) continue;
+      // Works for both a live capture (/captures/…) and a page already held as
+      // a blob, so re-saving an opened songsheet needs no special case.
+      const clean = await fetch(it.src).then((r) => r.blob()).catch(() => null);
+      const color = it.srcColor && it.srcColor !== it.src
+        ? await fetch(it.srcColor).then((r) => r.blob()).catch(() => null)
+        : null;
+      if (!clean) continue;
+      pages.push({ tStart: it.tStart, tEnd: it.tEnd, alsoAt: it.alsoAt, w: it.w, h: it.h, clean, color });
+    }
+    if (!pages.length) return;
+    const thumb = state.meta?.thumb
+      ? await fetch('/thumb.jpg?v=' + state.thumbVersion).then((r) => r.blob()).catch(() => null)
+      : null;
+    state.sheetId = state.sheetId || newId();
+    try {
+      await saveSheet({
+        id: state.sheetId,
+        title: state.title || state.meta?.title || 'Untitled songsheet',
+        url: state.meta?.url || '',
+        channel: state.meta?.channel || '',
+        duration: state.meta?.duration || 0,
+        recipe: state.lastAnalyze || {},
+        look: state.look,
+        paper: state.paper,
+      }, pages, thumb);
+      await requestPersistence();
+      renderLibrary(); // so the home screen already shows it when you go back
+    } catch (err) {
+      addWarning('Could not save this songsheet: ' + err.message);
+    }
+  }
+
+  async function renderLibrary() {
+    const section = $('librarySection');
+    if (!hasStorage()) { section.hidden = true; return; }
+    let sheets = [];
+    try { sheets = await listSheets(); } catch { sheets = []; }
+    const host = $('libraryGrid');
+    host.textContent = '';
+    $('libCount').textContent = sheets.length ? `${sheets.length} saved` : '';
+    $('libNote').textContent = sheets.length
+      ? 'Kept in this browser. Export a PDF to keep a copy anywhere else.' : '';
+    // No need to check whether a video is loaded: this section lives inside
+    // step 1, so it is already only visible on the home screen. Hiding it
+    // whenever a video was loaded meant it disappeared after the first scan —
+    // exactly when someone has songsheets worth going back to.
+    section.hidden = sheets.length === 0;
+    for (const s of sheets) {
+      const card = el('button', 'lib-card');
+      card.type = 'button';
+      const img = el('img', 'lib-thumb');
+      img.alt = '';
+      img.loading = 'lazy';
+      if (s.thumb) {
+        const u = URL.createObjectURL(s.thumb);
+        img.src = u;
+        img.addEventListener('load', () => URL.revokeObjectURL(u), { once: true });
+      }
+      card.appendChild(img);
+      const body = el('div', 'lib-body');
+      body.appendChild(el('div', 'lib-name', s.title));
+      body.appendChild(el('div', 'lib-sub',
+        [`${s.pageCount} page${s.pageCount === 1 ? '' : 's'}`, s.channel].filter(Boolean).join(' · ')));
+      card.appendChild(body);
+      const del = el('button', 'lib-del', '×');
+      del.type = 'button';
+      del.title = 'Remove from your songsheets';
+      del.setAttribute('aria-label', 'Remove ' + s.title);
+      del.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        try { await deleteSheet(s.id); showToast('Songsheet removed', false); } catch { /* already gone */ }
+        renderLibrary();
+      });
+      card.appendChild(del);
+      card.addEventListener('click', () => openSheet(s.id));
+      host.appendChild(card);
+    }
+  }
+
+  async function openSheet(id) {
+    let sheet = null;
+    try { sheet = await getSheet(id); } catch { /* unreadable */ }
+    if (!sheet || !sheet.pages?.length) { showError('That songsheet could not be opened.'); return; }
+    state.sheetId = sheet.id;
+    // No video is loaded for a saved sheet, so the source is metadata only.
+    state.meta = { title: sheet.title, url: sheet.url, channel: sheet.channel, duration: sheet.duration, thumb: false, ready: false, width: 0, height: 0, fps: 0 };
+    state.title = sheet.title;
+    state.look = lookById(sheet.look).id;
+    state.paper = sheet.paper === 'a4' ? 'a4' : 'letter';
+    state.lastAnalyze = sheet.recipe?.rect ? sheet.recipe : null;
+    state.deletedStamps = [];
+    state.videoSet = false;
+    state.job = 'done';
+    state.maxStep = 4;
+    buildLookSeg();
+    $('paperSelect').value = state.paper;
+    buildReview(sheet.pages);
+    $('librarySection').hidden = true;
+    showStep(4);
+  }
+
   // ---------- init ----------
 
   $('paperSelect').value = state.paper;
   buildLookSeg();
+  renderLibrary();
   updateSensSeg();
   checkPreflight();
   connectSSE();

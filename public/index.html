@@ -263,6 +263,18 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line-strong); border-botto
 @keyframes pulse { 50% { box-shadow: 0 0 0 6px transparent; } }
 #warnings .banner { margin: 14px 0 0; }
 .found { text-align: center; font-weight: 650; margin: 8px 0 14px; color: var(--muted); }
+/* ---------- songsheet library ---------- */
+.lib-title { font-size: 17px; margin: 0; }
+.lib-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; max-width: 900px; margin: 0 auto; }
+.lib-card { position: relative; text-align: left; padding: 0; overflow: hidden; cursor: pointer; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-sm); }
+.lib-card:hover { border-color: var(--accent); }
+.lib-card .lib-thumb { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; display: block; background: var(--paper); border-bottom: 1px solid var(--line); }
+.lib-card .lib-body { padding: 10px 12px 12px; }
+.lib-card .lib-name { font-weight: 650; font-size: 14.5px; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.lib-card .lib-sub { font-size: 12.5px; color: var(--faint); margin-top: 4px; }
+.lib-card .lib-del { position: absolute; top: 8px; right: 8px; background: rgba(0,0,0,.55); color: #fff; border: none; border-radius: 8px; padding: 4px 6px; cursor: pointer; opacity: 0; transition: opacity .15s; }
+.lib-card:hover .lib-del, .lib-card .lib-del:focus-visible { opacity: 1; }
+
 .live-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
 .live-grid img { width: 100%; height: auto; border-radius: 8px; border: 1px solid var(--line); background: var(--paper); box-shadow: var(--shadow-sm); animation: rise .3s ease both; }
 
@@ -400,6 +412,18 @@ button.chip { cursor: pointer; }
         </div>
       </div>
     </div>
+
+    <!-- Saved songsheets. Shown on the home screen because loading a new video
+         wipes the work folder: without this, every scan was lost the moment the
+         next one started. -->
+    <section id="librarySection" hidden>
+      <div class="row spread" style="max-width:900px;margin:34px auto 12px">
+        <h2 class="lib-title">Your songsheets</h2>
+        <span id="libCount" class="quiet"></span>
+      </div>
+      <div id="libraryGrid" class="lib-grid"></div>
+      <p id="libNote" class="quiet" style="max-width:900px;margin:10px auto 0"></p>
+    </section>
 
     <ul class="how" id="how">
       <li><span class="how-num">1</span><div><b>Finds the tab</b><p>The tab area is detected for you — just confirm the box.</p></div></li>
