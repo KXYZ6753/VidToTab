@@ -53,8 +53,8 @@ function tinyVideo() {
   return makeClip(SMALL, ['-c:v', 'libvpx-vp9', '-b:v', '0', '-crf', '40', '-pix_fmt', 'yuv420p']);
 }
 
-async function startServer(port) {
-  const srv = spawn('node', [ENTRY], { cwd: ROOT, env: { ...process.env, PORT: String(port) }, stdio: ['ignore', 'pipe', 'pipe'] });
+async function startServer(port, env = {}) {
+  const srv = spawn('node', [ENTRY], { cwd: ROOT, env: { ...process.env, PORT: String(port), ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
   let log = '';
   srv.stdout.on('data', (d) => { log += d; });
   srv.stderr.on('data', (d) => { log += d; });
@@ -66,14 +66,78 @@ async function startServer(port) {
   return { srv, log: () => log };
 }
 
-function put(port, name, feed) {
+function put(port, name, feed, headers = {}) {
   return new Promise((resolve) => {
     const req = http.request(
-      { host: '127.0.0.1', port, method: 'PUT', path: '/api/video/file?name=' + encodeURIComponent(name) },
+      { host: '127.0.0.1', port, method: 'PUT', path: '/api/video/file?name=' + encodeURIComponent(name), headers },
       (res) => { let b = ''; res.on('data', (d) => (b += d)); res.on('end', () => resolve({ status: res.statusCode, body: b.slice(0, 120) })); });
     req.on('error', (e) => resolve({ status: 0, body: 'req error: ' + e.code }));
     feed(req);
   });
+}
+
+// node:http rather than fetch: fetch quietly drops a Host header set by the
+// caller, and the Host header is the whole point of the checks that use this.
+function get(port, p, headers = {}) {
+  return new Promise((resolve) => {
+    const req = http.request({ host: '127.0.0.1', port, method: 'GET', path: p, headers }, (res) => {
+      let b = '';
+      res.on('data', (d) => (b += d));
+      res.on('end', () => resolve({ status: res.statusCode, body: b.slice(0, 200) }));
+    });
+    req.on('error', (e) => resolve({ status: 0, body: 'req error: ' + e.code }));
+    req.end();
+  });
+}
+
+// The cross-site guard wants real JSON on a POST, so every one of these sends
+// it — otherwise everything here would only ever prove the guard works.
+async function post(port, p) {
+  const r = await fetch(`http://127.0.0.1:${port}${p}`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}',
+  }).catch(() => null);
+  return { status: r?.status ?? 0, retryAfter: r?.headers.get('retry-after') ?? null };
+}
+
+// Collects the server's events until it is stopped. Several tests can only see
+// what they are testing here: the flows answer 202 and report what happened
+// afterwards, over SSE.
+function eventStream(port) {
+  const seen = [];
+  const req = http.request(
+    { host: '127.0.0.1', port, path: '/api/events', headers: { accept: 'text/event-stream' } },
+    (res) => {
+      let buf = '';
+      res.on('data', (d) => {
+        buf += d;
+        let i;
+        while ((i = buf.indexOf('\n\n')) >= 0) {
+          const frame = buf.slice(0, i);
+          buf = buf.slice(i + 2);
+          const m = /^data: (.*)$/m.exec(frame);
+          if (m) { try { seen.push(JSON.parse(m[1])); } catch { /* ping */ } }
+        }
+      });
+    });
+  req.end();
+  return { seen, stop: () => req.destroy() };
+}
+
+// A request that is supposed to be refused, with a deadline. The server has no
+// request timeout on purpose — multi-GB uploads — so a cap that fails to bite
+// leaves the caller waiting for a body that never comes. Without this the suite
+// hangs there instead of reporting a failure, which is how it behaved the first
+// time the upload cap was deliberately broken to check this test bites.
+const refusedWithin = (ms, p) => Promise.race([p, sleep(ms).then(() => ({ status: 0, body: `nothing answered within ${ms}ms` }))]);
+
+// Waits for an event the test cares about, rather than for a fixed time.
+async function waitFor(seen, from, match, tries = 150) {
+  for (let i = 0; i < tries; i++) {
+    const hit = seen.slice(from).find(match);
+    if (hit) return hit;
+    await sleep(100);
+  }
+  return null;
 }
 
 const results = [];
@@ -145,23 +209,7 @@ async function crossSiteGuard() {
 async function supersedeSilence() {
   const port = await freePort();
   const { srv } = await startServer(port);
-  const seen = [];
-  const stream = http.request(
-    { host: '127.0.0.1', port, path: '/api/events', headers: { accept: 'text/event-stream' } },
-    (res) => {
-      let buf = '';
-      res.on('data', (d) => {
-        buf += d;
-        let i;
-        while ((i = buf.indexOf('\n\n')) >= 0) {
-          const frame = buf.slice(0, i);
-          buf = buf.slice(i + 2);
-          const m = /^data: (.*)$/m.exec(frame);
-          if (m) { try { seen.push(JSON.parse(m[1])); } catch { /* ping */ } }
-        }
-      });
-    });
-  stream.end();
+  const { seen, stop } = eventStream(port);
   try {
     const small = tinyVideo();
     const chunk = Buffer.alloc(1 << 20, 3);
@@ -188,7 +236,7 @@ async function supersedeSilence() {
     check('supersede: jobId never goes backwards', ids.every((n, i) => i === 0 || n >= ids[i - 1]), ids.join(','));
     check('supersede: second video got a new jobId', new Set(ids).size >= 2, ids.join(','));
   } finally {
-    stream.destroy();
+    stop();
     srv.kill('SIGKILL');
     fs.rmSync(SMALL, { force: true });
   }
@@ -221,10 +269,166 @@ async function transcodesUnplayable() {
   }
 }
 
+// ---- 5. hosted mode: the health endpoint a load balancer or container
+// runtime polls. It is the one route answered before the cross-site guard,
+// because those callers send no Origin and whatever Host they please — the
+// exact shape the guard refuses. So both halves of that are worth pinning: it
+// has to answer them, and the guard has to go on refusing them everywhere else.
+async function healthEndpoint() {
+  const port = await freePort();
+  const { srv } = await startServer(port);
+  try {
+    const r = await fetch(`http://127.0.0.1:${port}/api/health`);
+    const j = await r.json().catch(() => null);
+    check('health: 200 with a JSON body', r.status === 200 && !!j, String(r.status));
+    check('health: the five documented fields and nothing else',
+      Object.keys(j || {}).sort().join(',') === 'mode,ok,public,uptimeSec,version', JSON.stringify(j));
+    check('health: a plain checkout is local, with no limits',
+      j?.mode === 'local' && j?.public === false, JSON.stringify(j));
+    check('health: carries the version and an uptime',
+      j?.ok === true && /^\d+\.\d+\.\d+$/.test(j?.version || '') && Number.isFinite(j?.uptimeSec), JSON.stringify(j));
+
+    const host = { host: 'health-check.internal' };
+    const lb = await get(port, '/api/health', host);
+    check('health: answers a caller with a foreign Host header', lb.status === 200, `${lb.status} ${lb.body}`);
+    const other = await get(port, '/api/meta', host);
+    check('health: the guard still refuses that Host everywhere else', other.status === 403, `${other.status} ${other.body}`);
+  } finally {
+    srv.kill('SIGKILL');
+  }
+}
+
+// ---- 6. the limits are opt-in. Configured but without VIDTOTAB_PUBLIC=1 they
+// must do nothing at all: a local instance is the user's own machine, and their
+// own four-hour video is none of the app's business.
+async function limitsOffByDefault() {
+  const port = await freePort();
+  const { srv } = await startServer(port, {
+    VIDTOTAB_MAX_UPLOAD_MB: '1', VIDTOTAB_MAX_MINUTES: '0.01', VIDTOTAB_RATE_LIMIT: '1',
+  });
+  try {
+    const big = await put(port, 'two-mb.bin', (req) => req.end(Buffer.alloc(2 << 20, 9)));
+    check('limits off: a 2 MB upload passes a configured 1 MB cap', big.status === 202, `${big.status} ${big.body}`);
+    const codes = [];
+    for (let i = 0; i < 4; i++) codes.push((await post(port, '/api/detect')).status);
+    check('limits off: the heavy routes are not rationed', !codes.includes(429), codes.join(','));
+  } finally {
+    srv.kill('SIGKILL');
+  }
+}
+
+// ---- 7. a public instance caps what it accepts: how big the file may be, and
+// how long the video may run. Both refusals have to say what the limit is —
+// a bare 413, or a video that simply never becomes ready, tells nobody anything.
+async function publicCaps() {
+  const port = await freePort();
+  const { srv } = await startServer(port, {
+    VIDTOTAB_PUBLIC: '1', VIDTOTAB_MAX_UPLOAD_MB: '1', VIDTOTAB_MAX_MINUTES: '0.01',
+    VIDTOTAB_RATE_LIMIT: '50', VIDTOTAB_MAX_JOBS: '4',
+  });
+  const { seen, stop } = eventStream(port);
+  try {
+    const h = await (await fetch(`http://127.0.0.1:${port}/api/health`)).json();
+    check('public: health reports the limits are on', h.public === true, JSON.stringify(h));
+
+    // Declared up front, so it can be refused before a byte of the body is
+    // read: 40 MB declared, 64 bytes sent, and the request left open. A server
+    // that reads the header answers at once; one that does not waits forever.
+    let held = null;
+    const declared = await refusedWithin(8000, put(port, 'huge.mp4',
+      (req) => { held = req; req.write(Buffer.alloc(64)); }, { 'content-length': '40000000' }));
+    held?.destroy();
+    check('public: an oversized upload is refused from its Content-Length', declared.status === 413, `${declared.status} ${declared.body}`);
+    check('public: and the refusal names the cap', /1 MB max/.test(declared.body), declared.body);
+
+    // Chunked, so the size is only known as it arrives. The cap has to bite mid
+    // stream — and the answer still has to reach the client, which is why the
+    // request is paused rather than destroyed.
+    const streamed = await refusedWithin(8000, put(port, 'chunked.mp4', async (req) => {
+      for (let i = 0; i < 4 && !req.destroyed; i++) { req.write(Buffer.alloc(512 << 10, 9)); await sleep(30); }
+      if (!req.destroyed) req.end();
+    }));
+    check('public: an oversized chunked upload is refused mid stream', streamed.status === 413, `${streamed.status} ${streamed.body}`);
+    check('public: and that refusal names the cap too', /1 MB max/.test(streamed.body), streamed.body);
+
+    // Length is only knowable once the file is here, so this one is reported on
+    // the event stream rather than in the answer to the upload.
+    const from = seen.length;
+    const up = await put(port, 'two-seconds.mp4', (req) => fs.createReadStream(tinyVideo()).pipe(req));
+    check('public: an under-cap file is still accepted for upload', up.status === 202, `${up.status} ${up.body}`);
+    const err = await waitFor(seen, from, (e) => e.phase === 'error');
+    check('public: an over-long video is rejected', !!err, JSON.stringify(seen.slice(from).map((e) => e.phase)));
+    check('public: and the rejection says what the limit is',
+      /accepts videos up to/.test(err?.msg || ''), err?.msg || '(no message)');
+    check('public: the rejected upload is not left on disk',
+      !fs.readdirSync(WORK).some((f) => /^upload-/.test(f)), fs.readdirSync(WORK).join(','));
+  } finally {
+    stop();
+    srv.kill('SIGKILL');
+    fs.rmSync(SMALL, { force: true });
+  }
+}
+
+// ---- 8. a public instance rations the expensive routes per IP, and says when
+// to come back. Nothing rations the cheap ones: the page still has to load.
+async function publicRateLimit() {
+  const port = await freePort();
+  const { srv } = await startServer(port, {
+    VIDTOTAB_PUBLIC: '1', VIDTOTAB_RATE_LIMIT: '2', VIDTOTAB_RATE_WINDOW_SEC: '60',
+  });
+  try {
+    const codes = [];
+    let retryAfter = null;
+    for (let i = 0; i < 4; i++) {
+      const r = await post(port, '/api/detect');
+      codes.push(r.status);
+      if (r.status === 429 && !retryAfter) retryAfter = r.retryAfter;
+    }
+    // 409 is 'no video is ready yet' — the request was served, which is the point.
+    check('rate limit: requests inside the window are served', codes.slice(0, 2).every((c) => c === 409), codes.join(','));
+    check('rate limit: the ones over it get 429', codes.slice(2).every((c) => c === 429), codes.join(','));
+    check('rate limit: the 429 carries Retry-After', Number(retryAfter) > 0, String(retryAfter));
+    const cheap = [];
+    for (let i = 0; i < 6; i++) cheap.push((await fetch(`http://127.0.0.1:${port}/api/meta`)).status);
+    check('rate limit: cheap routes are left alone', !cheap.includes(429), cheap.join(','));
+  } finally {
+    srv.kill('SIGKILL');
+  }
+}
+
+// ---- 9. and it only runs so many videos at once. The slot is held for as long
+// as the work runs, not just until the 202 goes out.
+async function publicConcurrency() {
+  const port = await freePort();
+  const { srv } = await startServer(port, {
+    VIDTOTAB_PUBLIC: '1', VIDTOTAB_MAX_JOBS: '1', VIDTOTAB_RATE_LIMIT: '100',
+  });
+  try {
+    let stopA = false;
+    const slow = put(port, 'slow.bin', async (req) => {
+      for (let i = 0; i < 40 && !stopA && !req.destroyed; i++) { req.write(Buffer.alloc(1 << 18, 5)); await sleep(60); }
+      if (!req.destroyed) req.end();
+    });
+    await sleep(500);
+    const busy = await post(port, '/api/detect');
+    check('busy: a second heavy request is turned away', busy.status === 503, String(busy.status));
+    check('busy: the 503 carries Retry-After', Number(busy.retryAfter) > 0, String(busy.retryAfter));
+    stopA = true;
+    await slow;
+  } finally {
+    srv.kill('SIGKILL');
+  }
+}
+
 await uploadRace();
 await supersedeSilence();
 await crossSiteGuard();
 await transcodesUnplayable();
+await healthEndpoint();
+await limitsOffByDefault();
+await publicCaps();
+await publicRateLimit();
+await publicConcurrency();
 
 const failed = results.filter((r) => !r.ok);
 console.log(`\n${results.length - failed.length}/${results.length} server checks passed`);

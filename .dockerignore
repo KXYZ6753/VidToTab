@@ -1,0 +1,25 @@
+# What must never reach the build context. node_modules is reinstalled inside
+# the image with `npm ci --omit=dev`, and build/ holds the host's ffmpeg — a
+# macOS one, in the case of the machine this was written on, which would quietly
+# replace the Linux build the image fetches for itself.
+node_modules/
+build/
+dist/
+work/
+.cache/
+.e2e/
+.e2e-small.mp4
+
+# History and CI are megabytes of context the image has no use for.
+.git/
+.github/
+
+# The desktop half of the project: Electron shell, packaging config, docs.
+electron/
+electron-builder.yml
+README.md
+
+.DS_Store
+*.log
+Dockerfile
+.dockerignore

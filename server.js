@@ -30,6 +30,62 @@ const PORT = Number.isInteger(parsedPort) && parsedPort >= 0 && parsedPort <= 65
 const HOST = process.env.HOST || '127.0.0.1'; // loopback unless deliberately opened up
 const UPLOAD_CAP = 4 * 2 ** 30; // 4 GB
 
+// VIDTOTAB_MODE is a label and nothing more. What the server binds to is HOST,
+// and what it enforces is VIDTOTAB_PUBLIC; keeping the three apart means a
+// hosted deployment cannot lose its limits by mislabelling itself, and a local
+// one cannot acquire limits behind the user's back.
+const MODE = process.env.VIDTOTAB_MODE === 'web' ? 'web' : 'local';
+
+const VERSION = (() => {
+  try { return String(JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version || '0.0.0'); }
+  catch { return '0.0.0'; }
+})();
+
+// A local instance is unlimited: it is the user's own machine, their own CPU
+// and their own three-hour video, and none of that is the app's business. A
+// public one is shared with strangers, so it gets caps — opt in with
+// VIDTOTAB_PUBLIC=1. Every number is overridable; the defaults are what a small
+// hosted instance can serve without falling over.
+const LIMITS = (() => {
+  const num = (name, fallback) => {
+    const v = Number(process.env[name]);
+    return Number.isFinite(v) && v > 0 ? v : fallback;
+  };
+  const maxMinutes = num('VIDTOTAB_MAX_MINUTES', 20);
+  return {
+    on: process.env.VIDTOTAB_PUBLIC === '1',
+    uploadBytes: Math.min(UPLOAD_CAP, Math.round(num('VIDTOTAB_MAX_UPLOAD_MB', 512) * 2 ** 20)),
+    maxMinutes,
+    maxSeconds: maxMinutes * 60,
+    rateMax: num('VIDTOTAB_RATE_LIMIT', 20),
+    rateWindowMs: num('VIDTOTAB_RATE_WINDOW_SEC', 60) * 1000,
+    // One at a time, and that is architecture rather than caution: this server
+    // holds a single global job, and starting a second video calls
+    // stopCurrent(). Allowing two does not buy concurrency — it lets the second
+    // visitor destroy the first visitor's scan mid-analysis. It stays an env
+    // knob because the tests set it, and because it becomes a real one the day
+    // jobs are per-session.
+    maxJobs: num('VIDTOTAB_MAX_JOBS', 1),
+    // X-Forwarded-For is whatever the client typed unless something in front
+    // rewrites it, so it is read only when the operator says there is one.
+    trustProxy: process.env.VIDTOTAB_TRUST_PROXY === '1',
+  };
+})();
+
+const sizeLabel = (bytes) => (bytes >= 2 ** 30 ? `${+(bytes / 2 ** 30).toFixed(1)} GB` : `${Math.round(bytes / 2 ** 20)} MB`);
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+const lengthLabel = (sec) => (sec >= 90 ? plural(Math.round(sec / 60), 'minute') : plural(Math.max(1, Math.round(sec)), 'second'));
+
+// A public instance is not a free transcoding farm: every extra minute of video
+// is real CPU, in the download, the conversion and then each analysis pass.
+// Returns the message to show, or null when the video is fine (or the instance
+// is local, where there is no limit at all).
+function tooLongMsg(seconds) {
+  if (!LIMITS.on || !(Number(seconds) > LIMITS.maxSeconds)) return null;
+  return `That video is ${lengthLabel(Number(seconds))} long. This instance accepts videos up to `
+    + `${lengthLabel(LIMITS.maxSeconds)} — trim it first, or run VidToTab on your own machine, where nothing is capped.`;
+}
+
 const MIME = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
@@ -301,6 +357,9 @@ async function urlFlow(my, url) {
   if (j.is_live) {
     return flowError(my, 'That video is live right now. Try again once the stream has ended.');
   }
+  // Checked off yt-dlp's metadata, before a byte of it is downloaded.
+  const tooLong = tooLongMsg(j.duration);
+  if (tooLong) return flowError(my, tooLong);
   my.meta = {
     title: j.title || url,
     url: j.webpage_url || url,
@@ -408,7 +467,19 @@ async function fetchThumb(my, turl) {
 }
 
 async function fileFlow(my) {
-  const r = await toPlayableMp4(my, my.uploadPath || path.join(WORK, 'upload.bin'));
+  const src = my.uploadPath || path.join(WORK, 'upload.bin');
+  // An uploaded file only admits its length once it is here, so this is the
+  // earliest the cap can be applied — but still before the expensive part.
+  if (LIMITS.on) {
+    const probed = await probe(src);
+    if (bail(my)) return;
+    const tooLong = tooLongMsg(probed?.duration || 0);
+    if (tooLong) {
+      fs.rmSync(src, { force: true }); // no reason to keep a file we refused
+      return flowError(my, tooLong);
+    }
+  }
+  const r = await toPlayableMp4(my, src);
   if (bail(my)) return;
   if (r) return flowError(my, r.msg, r.detail);
   await finishVideo(my);
@@ -592,8 +663,11 @@ async function postUrl(req, res) {
 
 async function putFile(req, res, u) {
   if (!preflight.ffmpeg) return sendJson(res, 500, { error: 'ffmpeg is not installed (brew install ffmpeg)' });
-  if (Number(req.headers['content-length']) > UPLOAD_CAP) {
-    return sendJson(res, 413, { error: 'File too large (4 GB max).' });
+  // 4 GB locally; a public instance lowers it with VIDTOTAB_MAX_UPLOAD_MB.
+  const cap = LIMITS.on ? LIMITS.uploadBytes : UPLOAD_CAP;
+  const capMsg = `File too large (${sizeLabel(cap)} max).`;
+  if (Number(req.headers['content-length']) > cap) {
+    return sendJson(res, 413, { error: capMsg });
   }
   const name = path.basename(u.searchParams.get('name') || 'video');
   await stopCurrent();
@@ -625,7 +699,11 @@ async function putFile(req, res, u) {
       let n = 0;
       req.on('data', d => {
         n += d.length;
-        if (n > UPLOAD_CAP) { fail(new Error('too large')); req.destroy(); }
+        // Pause rather than destroy. Destroying the request tears down the
+        // socket, so the 413 below never arrives and the browser reports a
+        // network error instead of saying the file is too big; pausing stops
+        // us reading any more of it, and the response ends the connection.
+        if (n > cap) { req.pause(); fail(new Error('too large')); }
       });
       req.on('error', fail);
       ws.on('error', fail);
@@ -637,7 +715,14 @@ async function putFile(req, res, u) {
     fs.rmSync(src, { force: true });
     if (my === job) my.phase = 'idle';
     if (!res.headersSent) {
-      sendJson(res, e.message === 'too large' ? 413 : 500, { error: 'Upload failed: ' + e.message });
+      // A chunked upload declares no length, so the cap is only reached part
+      // way through — say the same useful thing the header check says, then
+      // hang up so the rest of the file is never sent.
+      if (e.message === 'too large') {
+        res.setHeader('Connection', 'close');
+        sendJson(res, 413, { error: capMsg });
+        res.on('finish', () => req.destroy());
+      } else sendJson(res, 500, { error: 'Upload failed: ' + e.message });
     }
     return;
   }
@@ -1088,9 +1173,92 @@ function crossSiteReject(req) {
   return null;
 }
 
+// ------------------------------------------------- public limits (opt-in)
+//
+// None of this runs on a local instance. With VIDTOTAB_PUBLIC=1 the expensive
+// routes get a per-IP rate limit and a cap on how many videos can be in flight
+// at once, so one visitor cannot hold the whole box.
+
+function clientIp(req) {
+  if (LIMITS.trustProxy) {
+    const fwd = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+    if (fwd) return fwd;
+  }
+  return req.socket.remoteAddress || 'unknown';
+}
+
+// Fixed window, in memory: one process per container, so nothing to share and
+// no dependency to add. Returns 0 when allowed, else seconds until the reset.
+const rateHits = new Map();
+function rateLimited(req) {
+  const now = Date.now();
+  // Cheap sweep: without it a busy instance keeps one entry per IP forever.
+  if (rateHits.size > 5000) for (const [k, v] of rateHits) if (v.resetAt <= now) rateHits.delete(k);
+  const ip = clientIp(req);
+  const hit = rateHits.get(ip);
+  if (!hit || hit.resetAt <= now) {
+    rateHits.set(ip, { n: 1, resetAt: now + LIMITS.rateWindowMs });
+    return 0;
+  }
+  hit.n++;
+  return hit.n > LIMITS.rateMax ? Math.max(1, Math.ceil((hit.resetAt - now) / 1000)) : 0;
+}
+
+let heavyJobs = 0;
+
+// Wraps the four routes that cost minutes of CPU: loading a video by link or
+// by file, detection, and analysis. Everything else here is a file read.
+async function heavy(req, res, fn) {
+  if (!LIMITS.on) return fn(); // local: not even a counter in the way
+  const retry = rateLimited(req);
+  if (retry) {
+    res.setHeader('Retry-After', String(retry));
+    return sendJson(res, 429, { error: `Too many requests — wait ${retry}s and try again.` });
+  }
+  if (heavyJobs >= LIMITS.maxJobs) {
+    res.setHeader('Retry-After', '30');
+    return sendJson(res, 503, { error: 'The server is busy with other videos right now. Try again in a minute.' });
+  }
+  heavyJobs++;
+  let released = false;
+  const release = () => { if (!released) { released = true; heavyJobs--; } };
+  try {
+    await fn();
+  } finally {
+    // These handlers answer 202 and keep working: the download, the conversion
+    // and the analysis all outlive the request that started them. Holding the
+    // slot only until the response went out would count requests rather than
+    // jobs, and let any number of transcodes run at once.
+    Promise.allSettled([job.flow, job.analyze, job.detect].filter(Boolean)).then(release, release);
+  }
+}
+
+// Deliberately dull, and deliberately the one route the cross-site guard does
+// not cover (see route()): mode, whether limits are on, the version and how
+// long this process has been up. No paths, no tool versions, no job state.
+function health(res) {
+  res.setHeader('Cache-Control', 'no-store');
+  sendJson(res, 200, {
+    ok: preflight.ffmpeg, // ffmpeg missing means this container cannot do its job
+    mode: MODE,
+    public: LIMITS.on,
+    version: VERSION,
+    uptimeSec: Math.round(process.uptime()),
+  });
+}
+
 async function route(req, res) {
   const u = new URL(req.url, 'http://localhost');
   const key = `${req.method} ${u.pathname}`;
+  // Health is answered before the guard, on purpose. Load balancers and
+  // container runtimes poll it with no Origin and whatever Host they please,
+  // which is exactly the shape crossSiteReject refuses — on a local instance an
+  // unrecognised Host is a 403, so /api/health would fail for precisely the
+  // callers it exists for. Exempting it is safe because it reads nothing,
+  // changes nothing, and tells everyone the same five facts; and since no CORS
+  // header goes out with it, a page on another origin can send the request but
+  // cannot read the reply.
+  if (u.pathname === '/api/health' && (req.method === 'GET' || req.method === 'HEAD')) return health(res);
   const bad = crossSiteReject(req);
   if (bad) return sendJson(res, bad.code, { error: bad.error });
   if (key === 'GET /api/events') return sse(req, res);
@@ -1102,10 +1270,10 @@ async function route(req, res) {
   if (key === 'GET /api/video') return serveVideo(req, res);
   if (key === 'GET /thumb.jpg') return serveFile(res, THUMB, 'image/jpeg');
   if (req.method === 'GET' && u.pathname.startsWith('/captures/')) return serveCapture(res, u.pathname);
-  if (key === 'POST /api/video/url') return postUrl(req, res);
-  if (key === 'PUT /api/video/file') return putFile(req, res, u);
-  if (key === 'POST /api/detect') return postDetect(req, res);
-  if (key === 'POST /api/analyze') return postAnalyze(req, res);
+  if (key === 'POST /api/video/url') return heavy(req, res, () => postUrl(req, res));
+  if (key === 'PUT /api/video/file') return heavy(req, res, () => putFile(req, res, u));
+  if (key === 'POST /api/detect') return heavy(req, res, () => postDetect(req, res));
+  if (key === 'POST /api/analyze') return heavy(req, res, () => postAnalyze(req, res));
   if (key === 'POST /api/cancel') return postCancel(req, res);
   if (key === 'POST /api/export') return postExport(req, res);
   if (req.method === 'GET') return serveStaticPublic(res, u.pathname);
@@ -1161,6 +1329,16 @@ server.listen(PORT, HOST, () => {
   ALLOWED_HOSTS = hostsFor(bound);
   console.log(`VidToTab running at http://${HOST}:${bound}`);
   console.log(`VIDTOTAB_LISTENING ${bound}`); // the desktop shell parses this
+  if (LIMITS.on && LIMITS.maxJobs > 1) {
+    console.error(`VIDTOTAB_MAX_JOBS=${LIMITS.maxJobs}: this server runs one job at a time, so a second `
+      + 'visitor will supersede the first one\'s video mid-scan rather than run alongside it.');
+  }
+  if (MODE !== 'local' || LIMITS.on) {
+    console.log(LIMITS.on
+      ? `mode ${MODE}, public limits on: ${sizeLabel(LIMITS.uploadBytes)} upload, ${lengthLabel(LIMITS.maxSeconds)} of video, `
+        + `${LIMITS.rateMax} heavy requests per ${Math.round(LIMITS.rateWindowMs / 1000)}s per IP, ${LIMITS.maxJobs} at a time`
+      : `mode ${MODE}, public limits off (set VIDTOTAB_PUBLIC=1 to apply them)`);
+  }
   if (!preflight.ytdlp || !preflight.ffmpeg) {
     const missing = [!preflight.ytdlp && 'yt-dlp', !preflight.ffmpeg && 'ffmpeg'].filter(Boolean).join(' ');
     console.error(`missing tools: ${missing} — brew install ${missing}`);

@@ -58,6 +58,9 @@ jobs:
       - name: Server checks
         run: npm run test:server
 
+      # `npm run pack` draws the icon itself — build/ is not in git, and an
+      # explicit icon path makes electron-builder hard-error when it is absent,
+      # so a fresh clone has to work without a separate step here.
       - name: Build the app
         run: npm run pack
 
@@ -87,9 +90,42 @@ jobs:
       - name: No orphaned processes
         if: runner.os != 'Windows'
         run: |
-          left=$(pgrep -f 'ffmpeg|yt-dlp|VidToTab' || true)
+          # -x matches the process name exactly, like the Windows step below.
+          # -f matched whole command lines, so anything merely mentioning the
+          # repo counted as an orphan — on Linux the workspace path itself is
+          # /home/runner/work/VidToTab/VidToTab. Measured locally: -f found 3
+          # processes where -x found 0.
+          left=$(pgrep -x 'ffmpeg|ffprobe|yt-dlp|VidToTab' || true)
           if [ -n "$left" ]; then echo "orphans left behind:"; ps -p $left || true; exit 1; fi
           echo "none"
+
+      # The same check on Windows, which had none: there is no pgrep here, so the
+      # step above skips the one platform whose kill path is different code
+      # (taskkill /PID <pid> /T /F rather than signalling a process group). The
+      # tree-kill most likely to miss a grandchild was the one nothing looked at.
+      #
+      # -Name matches the image name exactly — ffmpeg.exe is "ffmpeg", and both
+      # the shell and the server it spawns are VidToTab.exe — never a path or a
+      # command line, so the workspace being D:\a\VidToTab\VidToTab cannot make
+      # this fire on its own. -ErrorAction SilentlyContinue is load-bearing, not
+      # decoration: the step runs with $ErrorActionPreference = 'stop', so
+      # without it "no such process" is a terminating error and a clean runner
+      # fails here. exit 1 is explicit because a non-empty result is not an
+      # error PowerShell would raise by itself.
+      - name: No orphaned processes (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $left = @(Get-Process -Name 'ffmpeg','ffprobe','yt-dlp','VidToTab' -ErrorAction SilentlyContinue)
+          if ($left.Count -gt 0) {
+            Write-Host 'orphans left behind:'
+            foreach ($p in $left) {
+              $path = $(try { $p.Path } catch { '(path unavailable)' })
+              Write-Host ('  {0} pid {1} {2}' -f $p.ProcessName, $p.Id, $path)
+            }
+            exit 1
+          }
+          Write-Host 'none'
 
       - name: Keep the build for inspection
         if: failure()
@@ -98,3 +134,68 @@ jobs:
           name: dist-${{ matrix.os }}
           path: dist
           retention-days: 5
+
+  # The hosted half. Docker is not runnable on the machine this was written on,
+  # so this job is the only thing that proves the image builds, starts as a
+  # non-root user, finds its bundled ffmpeg and answers the health check a
+  # platform would poll. Nothing is pushed anywhere — the image is built, run,
+  # and thrown away with the runner.
+  web-image:
+    name: Web image (linux/amd64)
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # Plain docker build rather than docker/build-push-action: the runner
+      # already has a daemon, nothing here is pushed or cached across runs, and
+      # this owes nothing to a third-party action's release schedule.
+      - name: Build the image
+        run: docker build -t vidtotab:ci .
+
+      # VIDTOTAB_PUBLIC=1 so the run exercises the limited configuration, which
+      # is the one a public instance actually uses.
+      - name: Start the container
+        run: docker run -d --name vidtotab -p 3000:3000 -e VIDTOTAB_PUBLIC=1 vidtotab:ci
+
+      - name: It answers /api/health
+        run: |
+          for i in $(seq 1 30); do
+            body=$(curl -fsS http://127.0.0.1:3000/api/health) && break
+            sleep 2
+          done
+          echo "health: $body"
+          # ok:false would mean the bundled ffmpeg is not where tools.js looks.
+          echo "$body" | grep -q '"ok":true'
+          echo "$body" | grep -q '"mode":"web"'
+          echo "$body" | grep -q '"public":true'
+
+      - name: It serves the app
+        run: curl -fsS -o /dev/null http://127.0.0.1:3000/
+
+      - name: It does not run as root
+        run: |
+          who=$(docker exec vidtotab id -un)
+          echo "running as: $who"
+          [ "$who" != root ]
+
+      # The HEALTHCHECK in the image, as Docker itself evaluates it — a platform
+      # restarting the container in a loop is the failure this catches.
+      - name: Docker agrees the container is healthy
+        run: |
+          for i in $(seq 1 40); do
+            s=$(docker inspect -f '{{.State.Health.Status}}' vidtotab)
+            [ "$s" = healthy ] && break
+            [ "$s" = unhealthy ] && break
+            sleep 3
+          done
+          echo "health status: $s"
+          [ "$s" = healthy ]
+
+      - name: Container log
+        if: always()
+        run: docker logs vidtotab || true
+
+      - name: Stop the container
+        if: always()
+        run: docker rm -f vidtotab || true
