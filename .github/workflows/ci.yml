@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# The point of this matrix is the two platforms that cannot be checked on the
+# machine this was written on. A macOS build proves very little about whether
+# the Windows and Linux apps start at all, find their bundled ffmpeg, or shut
+# down without leaving a server running.
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-15, name: macOS (arm64) }
+          - { os: windows-latest, name: Windows (x64) }
+          - { os: ubuntu-24.04, name: Linux (x64) }
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '26'
+          cache: npm
+
+      # Electron needs these to open a window, and the packaged-app test opens
+      # one. Xvfb gives the runner a display to open it on.
+      - name: Linux desktop dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            xvfb libnss3 libatk-bridge2.0-0 libgtk-3-0 libasound2t64 libgbm1
+
+      - run: npm ci
+
+      # Pure logic: no ffmpeg, no network, no display.
+      - name: Module self-checks
+        run: npm test
+
+      - name: Server checks
+        run: npm run test:server
+
+      # Downloads the pinned, checksum-verified ffmpeg for this platform. A
+      # checksum mismatch fails the build rather than shipping something
+      # unexpected.
+      - name: Fetch bundled binaries
+        run: npm run binaries
+
+      - name: Build the app
+        run: npm run pack
+
+      # The one that matters: does the built app actually start, serve, and
+      # leave nothing running when it is closed.
+      - name: Packaged app checks
+        if: runner.os != 'Linux'
+        run: npm run test:app:packaged
+
+      - name: Packaged app checks (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a npm run test:app:packaged
+
+      # Nothing should outlive the app. A leftover ffmpeg or yt-dlp here means
+      # killTree missed a grandchild.
+      - name: No orphaned processes
+        if: runner.os != 'Windows'
+        run: |
+          left=$(pgrep -f 'ffmpeg|yt-dlp|VidToTab' || true)
+          if [ -n "$left" ]; then echo "orphans left behind:"; ps -p $left || true; exit 1; fi
+          echo "none"
+
+      - name: Keep the build for inspection
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.os }}
+          path: dist
+          retention-days: 5

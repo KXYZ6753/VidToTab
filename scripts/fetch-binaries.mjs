@@ -148,8 +148,17 @@ async function fetchTarget(target) {
 
   const unpack = path.join(tmp, 'x');
   fs.mkdirSync(unpack);
-  if (spec.kind === 'zip') run('unzip', ['-q', archive, '-d', unpack]);
-  else run('tar', ['-xJf', archive, '-C', unpack]);
+  // bsdtar (macOS, and Windows 10 onwards) extracts zip as happily as tar.xz,
+  // and GNU tar on Linux handles the tar.xz — so one command covers every
+  // runner. Windows has no unzip at all, which is where the previous version of
+  // this would have failed. unzip stays as the fallback for a Linux box
+  // fetching another platform's zip via --all, which GNU tar would refuse.
+  try {
+    run('tar', ['-xf', archive, '-C', unpack]);
+  } catch (e) {
+    if (spec.kind !== 'zip') throw e;
+    run('unzip', ['-q', archive, '-d', unpack]);
+  }
 
   const srcDir = binaryDir(unpack, target);
   if (!srcDir) throw new Error(`${target}: archive contained no ${NEEDED.join(' or ')}`);
