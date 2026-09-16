@@ -153,24 +153,24 @@
       "id": "Z9kRYKgfMIY",
       "title": "One Punch Man main theme (Jaehoon Jang)",
       "url": "https://www.youtube.com/watch?v=Z9kRYKgfMIY",
-      "style": "holdout — 1080p30, Korean titles",
-      "holdout": true,
+      "style": "negative — performance footage only; \"TAB 악보\" in the title means tabs are sold or linked, not shown on screen (verified across the whole video)",
+      "noTab": true,
       "expect": { "sequence": null }
     },
     {
       "id": "L7Dw_3fFmOw",
       "title": "Demon Slayer OST (Jaehoon Jang)",
       "url": "https://www.youtube.com/watch?v=L7Dw_3fFmOw",
-      "style": "holdout — 1080p30, same channel as Z9kRYKgfMIY",
-      "holdout": true,
+      "style": "negative — performance footage plus a logo card; same channel and same title convention as Z9kRYKgfMIY",
+      "noTab": true,
       "expect": { "sequence": null }
     },
     {
       "id": "1Ibfff_JpCM",
       "title": "Zoltraak — Frieren (Youta's SoloGuitar)",
       "url": "https://www.youtube.com/watch?v=1Ibfff_JpCM",
-      "style": "holdout — 1080p30",
-      "holdout": true,
+      "style": "negative — performance footage only, despite 【TAB】 in the title",
+      "noTab": true,
       "expect": { "sequence": null }
     },
     {
@@ -185,8 +185,8 @@
       "id": "UmlrE4LKgEM",
       "title": "怪獣 Kaiju — Sakanaction (Kuro)",
       "url": "https://www.youtube.com/watch?v=UmlrE4LKgEM",
-      "style": "holdout — 1080p24, 264 s: the longest in the set",
-      "holdout": true,
+      "style": "negative — performance footage with Japanese lyric subtitles, no notation; 264 s, the longest in the set",
+      "noTab": true,
       "expect": { "sequence": null }
     },
     {
@@ -226,7 +226,8 @@
       "id": "CuYhAiwoeDw",
       "title": "Avid / Voices of the Chord — 86 (Robert Chen)",
       "url": "https://www.youtube.com/watch?v=CuYhAiwoeDw",
-      "style": "unclassified — title mentions chords; decide from the frames whether it is a holdout or a negative",
+      "style": "negative — classified from its frames: performance footage throughout, no notation on screen",
+      "noTab": true,
       "expect": { "sequence": null }
     }
   ]
