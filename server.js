@@ -420,6 +420,15 @@ async function finishVideo(my) {
       '-i', VIDEO, '-frames:v', '1', '-q:v', '3', THUMB]);
     if (bail(my)) return;
   }
+  // YouTube sometimes 403s every stream for the default player client, and the
+  // fallback client can be left offering nothing but a 360p progressive
+  // rendition. Nothing rejects it — it satisfies height<=1080 — so a tab that
+  // ends up a few dozen pixels tall silently becomes "this video only had two
+  // pages". Record it on the source so it survives into every snapshot.
+  const advertised = Number(my.meta.height) || 0;
+  const lowRes = p.height > 0 && (p.height < 540 || (advertised >= 720 && p.height < advertised * 0.6))
+    ? { height: p.height, advertised: advertised > p.height ? advertised : 0 }
+    : null;
   Object.assign(my.meta, {
     duration: p.duration || my.meta.duration,
     width: p.width,
@@ -428,6 +437,7 @@ async function finishVideo(my) {
     thumb: fs.existsSync(THUMB),
     ready: true,
     suggestion: null,
+    lowRes,
   });
   my.phase = 'ready';
   broadcast({ phase: 'meta', meta: my.meta });

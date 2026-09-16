@@ -177,8 +177,9 @@
       "id": "QLsmMvw1rhQ",
       "title": "Metro 2033 Good Ending (Campfire Stalker)",
       "url": "https://www.youtube.com/watch?v=QLsmMvw1rhQ",
-      "style": "holdout — 1072p60, oldest of the holdout set (2021)",
+      "style": "holdout — page-flip tab over live video (verified: screens hold 4-12 s with no horizontal shift)",
       "holdout": true,
+      "notes": "The cached copy is 640x358, not the 1072p this video publishes: the default player client 403s on media, and the web_embedded fallback offers exactly one format (18, 640x358). At that size the tab band is 48 px tall, calibration locks no staff (spacing clamps to its floor of 3), 10 of 12 runs are dropped as empty, and the scan reports 2 captures from a 130 s video. Blind-run result, kept as the low-resolution case. Re-fetch if the default client starts serving media again — do not treat the 2 captures as a labelling target.",
       "expect": { "sequence": null }
     },
     {

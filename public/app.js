@@ -350,7 +350,16 @@
     $('sourceCard').hidden = false;
     $('how').hidden = true;
     $('metaTitle').textContent = meta.title || 'Untitled video';
-    $('metaSub').textContent = [meta.channel, meta.duration ? fmtTime(meta.duration) : ''].filter(Boolean).join(' · ');
+    const subBits = [meta.channel, meta.duration ? fmtTime(meta.duration) : ''];
+    // A 360p fallback stream makes the tab too small to read, and that has to be
+    // visible on the source card — otherwise the scan just reports very few
+    // pages and looks like the video simply had very few.
+    if (meta.lowRes) {
+      subBits.push(meta.lowRes.advertised
+        ? `only ${meta.lowRes.height}p came through (this video publishes ${meta.lowRes.advertised}p)`
+        : `${meta.lowRes.height}p — small tab text may not scan well`);
+    }
+    $('metaSub').textContent = subBits.filter(Boolean).join(' · ');
     if (newThumb || (meta.thumb && $('metaThumb').hidden)) {
       state.thumbVersion = Date.now();
       const img = $('metaThumb');

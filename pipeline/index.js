@@ -99,6 +99,19 @@ async function run(videoPath, opts, onProgress, job) {
   }
   const { frameCount, calib } = cache;
 
+  // No staff means calibration never found the six tab lines, and everything
+  // downstream is measured in units derived from their spacing. Measured across
+  // 17 runs of 10 videos: every run that worked locked a 6-line staff (spacing
+  // 11-25 half-res px, confidence 0.93-1.0) and dropped no pages; the one run
+  // that failed had no staff, spacing clamped to its floor of 3, and threw away
+  // 10 of 12 pages as empty — while reporting two captures as if all was well.
+  if (!calib.staff) {
+    onProgress({
+      phase: 'warning',
+      msg: 'Couldn’t lock onto the six tab lines in this area. Check the box sits on the tab — and if the video is low quality, the lines may be too small to read.',
+    });
+  }
+
   // ---- pass 1
   const makeFrames = () => inkFrameReader(inkPath, w2 * h2, frameCount, checkCancel);
   const p1 = await inkPass1(makeFrames, w2, h2, {
@@ -449,6 +462,11 @@ async function selfCheck() {
     assert.equal(blankManifest.debug.noPages, true);
     assert.ok(blankWarnings.some((m) => /no tab screens were recognised/i.test(m)),
       `expected a "no tab screens" warning, got: ${blankWarnings.join(' | ') || '(none)'}`);
+    // Calibration cannot lock a staff here either, and saying so is what tells
+    // the difference between "this area has no tab" and a silent bad scan.
+    // Verified not to fire on a working video (pyDajEy7__E locks 6 rows).
+    assert.ok(blankWarnings.some((m) => /lock onto the six tab lines/i.test(m)),
+      `expected a calibration warning, got: ${blankWarnings.join(' | ') || '(none)'}`);
     const timed = await runPipeline(blank, { ...blankOpts, workDir: path.join(dir, 'blankB'), allowFallback: true }, () => {});
     assert.ok(timed.length > 0, 'allowFallback must still give a timed capture when it is asked for');
   } finally {
