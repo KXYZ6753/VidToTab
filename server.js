@@ -7,7 +7,7 @@ import { spawn } from 'node:child_process';
 import { PDFDocument, PDFString, StandardFonts, rgb } from 'pdf-lib';
 import { runPipeline, cancelPipeline } from './pipeline/index.js';
 import { detectRegion } from './pipeline/detect.js';
-import { YT_BASE_ARGS, YT_DOWNLOAD_ARGS, YT_CLIENT_FALLBACKS } from './pipeline/config.js';
+import { YT_BASE_ARGS, YT_DOWNLOAD_ARGS, noteClientSuccess, orderedClients } from './pipeline/config.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(ROOT, 'public');
@@ -273,12 +273,15 @@ async function urlFlow(my, url) {
   // YouTube intermittently answers 403 on media requests for some player
   // clients; a fresh yt-dlp run through another client usually succeeds.
   let dl = null;
-  for (const [i, client] of YT_CLIENT_FALLBACKS.entries()) {
+  // Last client that actually worked goes first: the default client 403'd on 12
+  // of 13 videos in one sitting, and each doomed first attempt costs seconds and
+  // one more refused request against a service that is already rate-limiting.
+  for (const [i, client] of orderedClients().entries()) {
     clearDownloads();
     if (i > 0) broadcast({ phase: 'download', pct: 0, msg: `YouTube refused the stream — retrying via the ${client.label}` });
     dl = await download(my, url, client.args);
     if (bail(my)) return;
-    if (dl.code === 0 && findDownloaded()) break;
+    if (dl.code === 0 && findDownloaded()) { noteClientSuccess(client.label); break; }
     if (!/403|Forbidden|Unable to download video data|Requested format is not available|page needs to be reloaded/i.test(dl.err)) break;
   }
   if (dl.code !== 0) return flowError(my, friendlyYtError(dl.err, 'The download failed.'), dl.err);

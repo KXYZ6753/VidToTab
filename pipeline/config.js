@@ -33,3 +33,22 @@ export const YT_CLIENT_FALLBACKS = [
   { label: 'embedded player', args: ['--extractor-args', 'youtube:player_client=web_embedded'] },
   { label: 'mobile web (360p)', args: ['--extractor-args', 'youtube:player_client=mweb'] },
 ];
+
+// Remember which client actually served the last download and try it first.
+// Measured in one sitting: the default client 403'd on 12 of 13 videos while
+// the embedded player served every one, so a fixed order burns a failed request
+// per download and invites more rate limiting. Reordering the list to match
+// today's behaviour would be overfitting — YouTube changes which client works —
+// so this adapts instead, and falls back to the full list in the original order.
+let lastGoodClient = null;
+
+export function noteClientSuccess(label) {
+  lastGoodClient = label;
+}
+
+export function orderedClients() {
+  if (!lastGoodClient) return YT_CLIENT_FALLBACKS;
+  const winner = YT_CLIENT_FALLBACKS.find((c) => c.label === lastGoodClient);
+  if (!winner) return YT_CLIENT_FALLBACKS;
+  return [winner, ...YT_CLIENT_FALLBACKS.filter((c) => c !== winner)];
+}

@@ -20,7 +20,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { YT_DOWNLOAD_ARGS, YT_CLIENT_FALLBACKS } from '../pipeline/config.js';
+import { YT_DOWNLOAD_ARGS, noteClientSuccess, orderedClients } from '../pipeline/config.js';
 import { probeVideo, rawFrames } from '../pipeline/ffmpeg.js';
 import { detectRegion } from '../pipeline/detect.js';
 import { runPipeline } from '../pipeline/index.js';
@@ -62,12 +62,14 @@ async function ensureVideo(v, dir) {
   if (fs.existsSync(file)) return file;
   if (!v.url || flag('no-download')) return null;
   fs.mkdirSync(dir, { recursive: true });
-  for (const client of YT_CLIENT_FALLBACKS) {
+  // Same adaptation as the server: whichever client last worked is tried first,
+  // so fetching a set of videos does not repeat a doomed attempt every time.
+  for (const client of orderedClients()) {
     for (const f of fs.readdirSync(dir)) if (f.startsWith('video.')) fs.rmSync(path.join(dir, f), { force: true });
     log(`  downloading via ${client.label}…`);
     const r = await sh('yt-dlp', ['-q', '--no-warnings', ...YT_DOWNLOAD_ARGS, ...client.args,
       '-o', path.join(dir, 'video.%(ext)s'), '--', v.url]);
-    if (r.code === 0 && fs.existsSync(file)) return file;
+    if (r.code === 0 && fs.existsSync(file)) { noteClientSuccess(client.label); return file; }
     log(`  failed: ${r.err.trim().split('\n').pop()}`);
   }
   return null;
