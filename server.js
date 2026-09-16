@@ -1,6 +1,7 @@
 // VidToTab server — local single-user app. node:http, no framework.
 import http from 'node:http';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
@@ -433,14 +434,41 @@ const ENCODERS = [
   ['h264_amf', ['-c:v', 'h264_amf', '-b:v', '5M', '-pix_fmt', 'yuv420p']],
   ['libvpx-vp9', ['-c:v', 'libvpx-vp9', '-b:v', '0', '-crf', '32', '-row-mt', '1', '-pix_fmt', 'yuv420p']],
 ];
+// Listing an encoder only proves it was compiled in — not that the hardware and
+// driver behind it exist on this machine. The Windows and Linux builds ship
+// h264_nvenc, h264_qsv and h264_amf compiled in regardless, so choosing from the
+// list alone would pick nvenc on a machine with no NVIDIA card and fail at the
+// moment someone tried to convert a video. Each candidate is made to encode two
+// frames before it is trusted.
+async function encoderWorks(args) {
+  const raw = path.join(os.tmpdir(), 'vidtotab-encoder-probe.raw');
+  try {
+    if (!fs.existsSync(raw)) fs.writeFileSync(raw, Buffer.alloc(64 * 64 * 3, 16)); // 2 frames, yuv420p-sized below
+    const r = await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y',
+      '-f', 'rawvideo', '-pix_fmt', 'yuv420p', '-s', '64x64', '-r', '10', '-i', raw,
+      ...args, '-frames:v', '2', '-f', 'null', '-']);
+    return r.code === 0;
+  } catch {
+    return false;
+  }
+}
+
 let encoderArgs = null;
 async function videoEncoderArgs() {
   if (encoderArgs) return encoderArgs;
-  const r = await run('ffmpeg', ['-hide_banner', '-encoders']);
-  const found = ENCODERS.find(([name]) => new RegExp(`^\\s*\\S+\\s+${name}\\s`, 'm').test(r.out));
-  if (found) console.log(`transcoding with ${found[0]}`);
-  else console.error('no usable video encoder in this ffmpeg build — conversion will fail');
-  encoderArgs = found ? found[1] : ENCODERS[0][1];
+  const listed = await run('ffmpeg', ['-hide_banner', '-encoders']);
+  for (const [name, args] of ENCODERS) {
+    if (!new RegExp(`^\\s*\\S+\\s+${name}\\s`, 'm').test(listed.out)) continue;
+    if (!(await encoderWorks(args))) {
+      console.log(`${name} is compiled into this ffmpeg but not usable here — trying the next one`);
+      continue;
+    }
+    console.log(`transcoding with ${name}`);
+    encoderArgs = args;
+    return encoderArgs;
+  }
+  console.error('no usable video encoder on this machine — converting an unplayable video will fail');
+  encoderArgs = ENCODERS.at(-1)[1]; // vp9: software, no hardware to be missing
   return encoderArgs;
 }
 
