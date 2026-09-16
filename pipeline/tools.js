@@ -24,13 +24,18 @@ export const exeName = (name, platform = process.platform) => (platform === 'win
 export function candidates(name, env = process.env, platform = process.platform) {
   if (!TOOLS.includes(name)) throw new Error(`unknown tool: ${name}`);
   const bin = exeName(name, platform);
+  // Join with the target platform's separators rather than the host's. This
+  // function takes a platform, so it has to honour it: on Windows, path.join
+  // turned every candidate into backslashes, including the POSIX ones, which
+  // made it wrong for any platform but the one it happened to run on.
+  const P = platform === 'win32' ? path.win32 : path.posix;
   const out = [];
   const override = env[ENV_OVERRIDE[name]];
   if (override) out.push(override);
   // Set by the desktop shell: <resources>/bin ships with the app, <data>/bin is
   // where a managed yt-dlp installs and self-updates.
-  if (env.VIDTOTAB_RESOURCES_DIR) out.push(path.join(env.VIDTOTAB_RESOURCES_DIR, 'bin', bin));
-  if (env.VIDTOTAB_DATA_DIR) out.push(path.join(env.VIDTOTAB_DATA_DIR, 'bin', bin));
+  if (env.VIDTOTAB_RESOURCES_DIR) out.push(P.join(env.VIDTOTAB_RESOURCES_DIR, 'bin', bin));
+  if (env.VIDTOTAB_DATA_DIR) out.push(P.join(env.VIDTOTAB_DATA_DIR, 'bin', bin));
   if (platform === 'darwin') {
     out.push(`/opt/homebrew/bin/${bin}`, `/usr/local/bin/${bin}`); // Apple silicon, then Intel
   } else if (platform !== 'win32') {
@@ -91,6 +96,14 @@ export function selfCheck(assert) {
   assert.ok(win.every((c) => c.endsWith('ffmpeg.exe')));
   assert.equal(win.at(-1), 'ffmpeg.exe');
   assert.ok(!win.some((c) => c.startsWith('/usr'))); // no POSIX roots on Windows
+
+  // Separators follow the target platform, not whichever machine is running
+  // this. That distinction was invisible for a while: asking for Windows
+  // candidates on a Mac produced "C:\d/bin/ffmpeg.exe", and an assertion that
+  // only checked the suffix was perfectly happy with it. A Windows CI runner
+  // caught it instead, which is a test's job, not a runner's.
+  assert.ok(win.includes('C:\\d\\bin\\ffmpeg.exe'), `win32 separators: ${win.join(' ')}`);
+  assert.ok(order.every((c) => !c.includes('\\')), `posix separators: ${order.join(' ')}`);
 
   // A bare name is never probed on disk: relative paths must fall through to PATH.
   assert.equal(isExecutable('ffmpeg'), false);

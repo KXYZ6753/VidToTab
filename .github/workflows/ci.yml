@@ -41,18 +41,22 @@ jobs:
 
       - run: npm ci
 
-      # Pure logic: no ffmpeg, no network, no display.
+      # Must come before the tests. The module self-checks are not pure: ffmpeg.js
+      # and index.js encode real clips with ffmpeg, and a runner has none
+      # installed. This also checksum-verifies the pinned build, so a tampered or
+      # swapped upload fails here rather than shipping.
+      - name: Fetch bundled binaries
+        run: npm run binaries
+
+      - name: Put the bundled binaries on PATH
+        shell: bash
+        run: node -e "console.log(require('path').join(process.cwd(),'build','bin',process.platform+'-'+process.arch))" >> "$GITHUB_PATH"
+
       - name: Module self-checks
         run: npm test
 
       - name: Server checks
         run: npm run test:server
-
-      # Downloads the pinned, checksum-verified ffmpeg for this platform. A
-      # checksum mismatch fails the build rather than shipping something
-      # unexpected.
-      - name: Fetch bundled binaries
-        run: npm run binaries
 
       - name: Build the app
         run: npm run pack
