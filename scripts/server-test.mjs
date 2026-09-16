@@ -498,6 +498,53 @@ async function localNeedsNoOwner() {
   }
 }
 
+// Refusing a stranger the job-scoped routes is not the same protection as
+// refusing them the right to start a video: starting one replaces whatever is
+// there, deleting the pages the owner may still be reading.
+async function strangerCannotEraseTheJob() {
+  const port = await freePort();
+  const { srv } = await startServer(port, {
+    VIDTOTAB_PUBLIC: '1', VIDTOTAB_RATE_LIMIT: '200', VIDTOTAB_SESSION_IDLE_MIN: '0.03', // ~1.8s
+  });
+  const ready = async (cookie) => {
+    for (let i = 0; i < 120; i++) {
+      const r = await get(port, '/api/meta', { cookie });
+      if (r.status === 200 && /"ready":true/.test(r.body)) return true;
+      await sleep(100);
+    }
+    return false;
+  };
+  try {
+    const cookie = ((await get(port, '/')).setCookie || '').split(';')[0];
+    const stranger = 'vtt_owner=' + 'f'.repeat(32);
+    const clip = tinyVideo();
+
+    await put(port, 'ownerA.mp4', (req) => fs.createReadStream(clip).pipe(req), { cookie });
+    check('takeover: the owner\'s video became ready', await ready(cookie));
+
+    // The heavy slot is free now, so only ownership stands between a stranger
+    // and the delete.
+    const steal = await put(port, 'stranger.mp4', (req) => fs.createReadStream(clip).pipe(req), { cookie: stranger });
+    check('takeover: a stranger cannot start a video over someone else\'s', steal.status === 503, `${steal.status} ${steal.body}`);
+    const still = await get(port, '/api/meta', { cookie });
+    check('takeover: the owner\'s video survived the attempt', /ownerA/.test(still.body), still.body);
+
+    const own = await put(port, 'ownerB.mp4', (req) => fs.createReadStream(clip).pipe(req), { cookie });
+    check('takeover: the owner may replace their own video', own.status === 202, `${own.status} ${own.body}`);
+    await ready(cookie);
+
+    // Left alone past the idle window, the instance is anyone's again —
+    // otherwise one abandoned tab would lock a public instance forever.
+    await sleep(2200);
+    const later = await put(port, 'later.mp4', (req) => fs.createReadStream(clip).pipe(req), { cookie: stranger });
+    check('takeover: an abandoned instance can be claimed', later.status === 202, `${later.status} ${later.body}`);
+  } finally {
+    srv.kill('SIGKILL');
+    fs.rmSync(SMALL, { force: true });
+  }
+}
+
+await strangerCannotEraseTheJob();
 await publicJobIsPrivate();
 await localNeedsNoOwner();
 await uploadRace();

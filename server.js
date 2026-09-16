@@ -67,6 +67,8 @@ const LIMITS = (() => {
     // knob because the tests set it, and because it becomes a real one the day
     // jobs are per-session.
     maxJobs: num('VIDTOTAB_MAX_JOBS', 1),
+    // How long an instance stays claimed after its owner stops touching it.
+    sessionIdleMs: num('VIDTOTAB_SESSION_IDLE_MIN', 15) * 60000,
     // X-Forwarded-For is whatever the client typed unless something in front
     // rewrites it, so it is read only when the operator says there is one.
     trustProxy: process.env.VIDTOTAB_TRUST_PROXY === '1',
@@ -173,6 +175,7 @@ function freshJob(phase, meta) {
   return {
     id: ++jobCounter, phase, proc: null, cancelled: false, superseded: false, meta,
     owner: null, // public instances only; see attachOwner
+    touched: Date.now(), // last time the owner did anything; see takeoverRefused
     captures: [], prevCaptures: [], warnings: [],
     flow: null, analyze: null, detect: null, upload: null, uploadPath: null, runId: 0, lastAnalyze: null,
   };
@@ -1196,6 +1199,21 @@ function ownsJob(req) {
   return req.vttOwner === job.owner;
 }
 
+// Starting a video does not sit alongside the current one, it replaces it:
+// stopCurrent() and resetWork() between them end the running job and delete
+// every page it produced. Refusing strangers the job-scoped routes did nothing
+// about that — the concurrency limit only covers work still in flight, so the
+// moment the owner's scan finished, the next visitor's upload quietly erased
+// the songsheet they were still reading. An instance stays theirs until they
+// have actually been away. Returns the seconds to wait, or null if the caller
+// may go ahead.
+function takeoverRefused(req) {
+  if (!LIMITS.on || !job.owner || job.owner === req.vttOwner) return null;
+  const idleFor = Date.now() - (job.touched || 0);
+  if (idleFor >= LIMITS.sessionIdleMs) return null; // abandoned; anyone may take over
+  return Math.max(30, Math.ceil((LIMITS.sessionIdleMs - idleFor) / 1000));
+}
+
 function crossSiteReject(req) {
   if (LOOPBACK && !ALLOWED_HOSTS.has(String(req.headers.host || '').toLowerCase())) {
     return { code: 403, error: 'Unrecognised Host header.' };
@@ -1311,6 +1329,17 @@ async function route(req, res) {
   attachOwner(req, res);
   if (!ownsJob(req) && (JOB_SCOPED.has(key) || u.pathname.startsWith('/captures/'))) {
     return sendJson(res, 403, { error: 'Someone else is using this instance right now.' });
+  }
+  // Any sign of the owner keeps the instance theirs.
+  if (LIMITS.on && job.owner && req.vttOwner === job.owner) job.touched = Date.now();
+  if (key === 'POST /api/video/url' || key === 'PUT /api/video/file') {
+    const wait = takeoverRefused(req);
+    if (wait) {
+      res.setHeader('Retry-After', String(wait));
+      return sendJson(res, 503, {
+        error: 'Someone else is using this instance right now. Their scan would be erased by starting another video — try again in a few minutes.',
+      });
+    }
   }
   if (key === 'GET /api/events') return sse(req, res);
   if (key === 'GET /api/preflight') {
