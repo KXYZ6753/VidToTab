@@ -6,3 +6,4 @@ work/
 dist/
 build/
 .e2e-small.mp4
+.claude/
