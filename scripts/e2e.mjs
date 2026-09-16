@@ -456,7 +456,29 @@ try {
     if (reopened < 1) problems.push('a saved songsheet reopened with no pages');
     if (firstSrc !== 'blob:') problems.push(`saved pages are not blob-backed (src starts "${firstSrc}")`);
     if (!firstLoaded) problems.push('a saved page did not decode — the stored blob is unusable');
+
+    // A stored songsheet has no video behind it, so the steps that need one must
+    // stay shut — reaching them showed an empty video stage, which reads as
+    // broken rather than as "there is nothing here".
+    const stepState = await evalJs(`[...document.querySelectorAll('#stepper button')]
+      .map((b) => b.dataset.step + (b.disabled ? ':off' : ':on')).join(' ')`);
+    log('stepper with a stored songsheet open:', stepState);
+    if (!/2:off/.test(stepState) || !/3:off/.test(stepState)) {
+      problems.push(`steps needing a video should be disabled for a stored songsheet: ${stepState}`);
+    }
+    if (!/4:on/.test(stepState)) problems.push(`the songsheet step should stay reachable: ${stepState}`);
     await shot('6b-library-reopened');
+
+    // ...and that flag must clear when a real video arrives, or the steps stay
+    // dead for the rest of the session.
+    const doc3 = await send('DOM.getDocument');
+    const { nodeId: fileNode3 } = await send('DOM.querySelector', { nodeId: doc3.root.nodeId, selector: '#fileInput' });
+    await send('DOM.setFileInputFiles', { nodeId: fileNode3, files: [VIDEO] });
+    await waitFor(`!document.getElementById('step2').hidden`, 180000, 'video after a stored songsheet');
+    const stepsBack = await evalJs(`[...document.querySelectorAll('#stepper button')]
+      .map((b) => b.dataset.step + (b.disabled ? ':off' : ':on')).join(' ')`);
+    log('stepper after loading a video again:', stepsBack);
+    if (!/2:on/.test(stepsBack)) problems.push(`the tab-area step stayed disabled after loading a video: ${stepsBack}`);
   }
 } catch (e) {
   failure = e;

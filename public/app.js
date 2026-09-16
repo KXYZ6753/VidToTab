@@ -151,6 +151,7 @@ import { deleteSheet, getSheet, hasStorage, listSheets, newId, requestPersistenc
     title: '',
     sheetId: null,          // library record this scan belongs to
     practice: -1,           // page shown in the full-screen reader, -1 = closed
+    fromLibrary: false,     // opened from storage: no video, so no steps 2-3
     snapshotApplied: false,
   };
 
@@ -169,7 +170,13 @@ import { deleteSheet, getSheet, hasStorage, listSheets, newId, requestPersistenc
       const li = btn.parentElement;
       li.classList.toggle('active', n === state.step);
       li.classList.toggle('done', n < state.step);
-      btn.disabled = n > state.maxStep || (n === 3 && state.job !== 'analyzing');
+      // A songsheet opened from the library has no video behind it, so the
+      // steps that need one stay shut. Reaching them showed an empty video
+      // stage, which reads as broken rather than as "there is nothing here".
+      const needsVideo = n === 2 || n === 3;
+      btn.disabled = n > state.maxStep
+        || (n === 3 && state.job !== 'analyzing')
+        || (needsVideo && state.fromLibrary);
     }
   }
 
@@ -279,7 +286,7 @@ import { deleteSheet, getSheet, hasStorage, listSheets, newId, requestPersistenc
       // Sensitivity belongs to a video, not to the session: leaving it at the
       // previous song's "Fewer pages" silently merged pages in the next one,
       // from a control hidden inside a collapsed section.
-      sensitivity: 0.5, warnings: [], jobId: null, sheetId: null,
+      sensitivity: 0.5, warnings: [], jobId: null, sheetId: null, fromLibrary: false,
     });
     $('librarySection').hidden = true;
     updateSensSeg();
@@ -1538,8 +1545,11 @@ import { deleteSheet, getSheet, hasStorage, listSheets, newId, requestPersistenc
   function practiceKeys(e) {
     const k = e.key;
     if (k === 'Escape') { e.preventDefault(); closePractice(); return; }
+    // Backspace is deliberately not a page-turn key: it deletes a page in the
+    // review list one Esc away, and a key that means two different things
+    // depending on an invisible mode is a mistake waiting to happen.
     const forward = k === 'ArrowRight' || k === 'ArrowDown' || k === ' ' || k === 'PageDown' || k === 'Enter';
-    const back = k === 'ArrowLeft' || k === 'ArrowUp' || k === 'PageUp' || k === 'Backspace';
+    const back = k === 'ArrowLeft' || k === 'ArrowUp' || k === 'PageUp';
     if (forward || back) {
       e.preventDefault();
       showPracticePage(state.practice + (forward ? 1 : -1));
@@ -1659,6 +1669,7 @@ import { deleteSheet, getSheet, hasStorage, listSheets, newId, requestPersistenc
     state.videoSet = false;
     state.job = 'done';
     state.maxStep = 4;
+    state.fromLibrary = true;
     buildLookSeg();
     $('paperSelect').value = state.paper;
     buildReview(sheet.pages);
