@@ -308,6 +308,21 @@ for (const v of SET.videos) {
   log(`  detect: ${JSON.stringify(det?.crop)} conf=${det?.confidence} pol=${det?.polarity} iou=${detIou} (${detectS}s)`);
   const base = { id: v.id, detectIou: detIou, detectConf: det?.confidence ?? null, detectS };
   if (expected && detIou !== null && detIou < 0.7) failed = true;
+
+  // Videos with no tab on screen must be declined, not boxed. That is the other
+  // half of accuracy and it was only ever checked by eye: a change that starts
+  // finding "tabs" in piano videos should fail here, not in someone's export.
+  // Running the pipeline on them would only measure how convincing the junk is.
+  if (v.noTab) {
+    const declined = !det?.crop;
+    Object.assign(base, { noTab: true, declined });
+    log(`  negative: ${declined
+      ? 'declined, as it should be'
+      : `DETECTED A BOX ${JSON.stringify(det.crop)} conf=${det.confidence} — regression`}`);
+    if (!declined) failed = true;
+    rows.push(base);
+    continue;
+  }
   if (flag('detect-only')) {
     rows.push(base);
     continue;
