@@ -23,9 +23,9 @@ jobs:
           - { os: ubuntu-24.04, name: Linux (x64) }
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '26'
           cache: npm
@@ -61,6 +61,17 @@ jobs:
       - name: Build the app
         run: npm run pack
 
+      # Electron refuses to start rather than run unsandboxed, and an *unpacked*
+      # Linux build ships chrome-sandbox without its setuid bit. Installing the
+      # .deb sets it, so this only ever affects testing the unpacked tree. Set it
+      # here rather than passing --no-sandbox, so what gets tested is sandboxed
+      # the same way a real install is.
+      - name: Give chrome-sandbox its setuid bit (unpacked build only)
+        if: runner.os == 'Linux'
+        run: |
+          sudo chown root:root dist/linux-unpacked/chrome-sandbox
+          sudo chmod 4755 dist/linux-unpacked/chrome-sandbox
+
       # The one that matters: does the built app actually start, serve, and
       # leave nothing running when it is closed.
       - name: Packaged app checks
@@ -82,7 +93,7 @@ jobs:
 
       - name: Keep the build for inspection
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: dist-${{ matrix.os }}
           path: dist
