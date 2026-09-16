@@ -3,6 +3,11 @@ productName: VidToTab
 directories:
   output: dist
 
+# Drawn by scripts/make-icon.mjs (npm run icon) rather than committed, because
+# build/ is not in git. One 1024px png is enough for all three: electron-builder
+# derives the .icns and .ico from it.
+icon: build/icon.png
+
 # Only the shell goes in the asar. The server stays outside it: it spawns child
 # processes and reads its own files, both of which are unhappy inside an archive.
 files:

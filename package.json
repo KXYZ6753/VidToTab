@@ -11,10 +11,11 @@
     "eval": "node scripts/eval.mjs",
     "app": "electron .",
     "test:app": "node scripts/app-test.mjs",
-    "pack": "electron-builder --dir",
-    "dist": "electron-builder",
+    "pack": "npm run icon && electron-builder --dir",
+    "dist": "npm run icon && electron-builder",
     "test:app:packaged": "node scripts/app-test.mjs --packaged",
-    "binaries": "node scripts/fetch-binaries.mjs"
+    "binaries": "node scripts/fetch-binaries.mjs",
+    "icon": "node scripts/make-icon.mjs"
   },
   "dependencies": {
     "pdf-lib": "^1.17.1"
