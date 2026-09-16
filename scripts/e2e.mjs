@@ -6,7 +6,7 @@
 //   npm run e2e -- --keep              keep screenshots and downloads
 //
 // Screenshots, downloads and a log land in .e2e/ (or $E2E_OUT). Exits non-zero on failure.
-import { spawn } from 'node:child_process';
+import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
@@ -216,10 +216,27 @@ try {
   await shot('4-review-light');
   await shot('4-review-light-full', true);
 
+  const lookIds = await evalJs(`[...document.querySelectorAll('#lookSeg button')].map((b) => b.dataset.look).join(',')`);
+  log('looks offered:', lookIds);
+  if (!/print/.test(lookIds || '')) problems.push(`look buttons missing or unnamed: ${lookIds}`);
+
   await evalJs(`document.querySelector('#lookSeg [data-look=color]').click()`);
   await sleep(1200);
   await shot('4b-review-original-light');
-  await evalJs(`document.querySelector('#lookSeg [data-look=clean]').click()`);
+
+  // Dark recolours the stored greyscale page in the browser, so the preview
+  // image must become a data: URL and the paper behind it must go dark. A look
+  // that silently fell back to the plain render would still look plausible.
+  await evalJs(`document.querySelector('#lookSeg [data-look=dark]').click()`);
+  await sleep(1500);
+  const darkImg = await evalJs(`(document.querySelector('.sheet-item img')?.src || '').slice(0, 15)`);
+  const darkPaper = await evalJs(`getComputedStyle(document.querySelector('.sheet-item .paper')).backgroundColor`);
+  log('dark look: img src', darkImg, '| paper', darkPaper);
+  if (!String(darkImg).startsWith('data:image')) problems.push(`dark look did not recolour the preview (src ${darkImg})`);
+  if (!/17,\s*17,\s*19/.test(String(darkPaper))) problems.push(`dark look paper colour wrong: ${darkPaper}`);
+  await shot('4e-review-dark-look');
+
+  await evalJs(`document.querySelector('#lookSeg [data-look=print]').click()`);
 
   // delete + undo
   const n0 = await evalJs(`document.querySelectorAll('.sheet-item').length`);
@@ -243,6 +260,41 @@ try {
   for (let i = 0; i < 120 && !downloads().some((f) => f.endsWith('.png')); i++) await sleep(250);
   if (!downloads().some((f) => f.endsWith('.png'))) throw new Error('PNG export produced no download');
   log('downloads:', downloads());
+
+  // The Dark look has to reach the exported file, not just the screen. Every
+  // check above would still pass if the pages were dark tiles on a white sheet,
+  // so sample the corner of what actually landed on disk.
+  // The download name comes from the title, so Chrome overwrites the previous
+  // file rather than adding one. "The dark export arrived" therefore means a
+  // newer timestamp, not a new filename — matching on the name reported a
+  // failure here while the export had actually worked.
+  const pngPath = () => {
+    const f = downloads().find((n) => n.endsWith('.png'));
+    return f ? path.join(OUT, 'downloads', f) : null;
+  };
+  const beforePng = pngPath();
+  const beforeMtime = beforePng ? fs.statSync(beforePng).mtimeMs : 0;
+  await evalJs(`document.querySelector('#lookSeg [data-look=dark]').click()`);
+  await sleep(1200);
+  await evalJs(`document.getElementById('exportPng').click()`);
+  let darkPath = null;
+  for (let i = 0; i < 160 && !darkPath; i++) {
+    const p = pngPath();
+    if (p && fs.statSync(p).mtimeMs > beforeMtime) darkPath = p;
+    else await sleep(250);
+  }
+  if (!darkPath) {
+    problems.push('dark PNG export produced no download');
+  } else {
+    await sleep(800); // let the browser finish writing before sampling it
+    const raw = execSync(
+      `ffmpeg -v error -i ${JSON.stringify(darkPath)} -vf "crop=8:8:0:0,format=rgb24" -f rawvideo -`,
+      { maxBuffer: 1 << 20 });
+    const [r, g, b] = [raw[0], raw[1], raw[2]];
+    log(`dark PNG corner pixel: rgb(${r}, ${g}, ${b})`);
+    if (r > 60 || g > 60 || b > 60) problems.push(`dark export has a light background: rgb(${r}, ${g}, ${b})`);
+  }
+  await evalJs(`document.querySelector('#lookSeg [data-look=print]').click()`);
 
   // dark scheme and the earlier steps
   await scheme('dark');

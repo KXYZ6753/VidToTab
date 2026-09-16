@@ -488,10 +488,9 @@ button.chip { cursor: pointer; }
         <p class="quiet"><span id="rvCount"></span><span id="rvDot" hidden> · </span><a id="rvSource" target="_blank" rel="noopener" hidden>Source video</a></p>
       </div>
       <div class="review-controls">
-        <div class="seg" id="lookSeg" role="group" aria-label="Page look">
-          <button type="button" data-look="clean" aria-pressed="true">Clean</button>
-          <button type="button" data-look="color" aria-pressed="false">Original</button>
-        </div>
+        <!-- Filled from shared/look.js so the preview, the PNG and the PDF all
+             offer exactly the same set. -->
+        <div class="seg" id="lookSeg" role="group" aria-label="Page look"></div>
         <select id="paperSelect" class="select" aria-label="Paper size">
           <option value="letter">Letter</option>
           <option value="a4">A4</option>
@@ -540,6 +539,8 @@ button.chip { cursor: pointer; }
 <div id="toast" class="toast" role="status" hidden><span id="toastMsg"></span><button type="button" id="toastUndo">Undo</button></div>
 <div id="dropVeil" class="drop-veil" hidden><div>Drop the video to load it</div></div>
 
-<script src="/app.js" defer></script>
+<!-- A module: app.js imports the look maths that the PNG and PDF exports use,
+     so what the preview shows and what you export cannot drift apart. -->
+<script type="module" src="/app.js"></script>
 </body>
 </html>

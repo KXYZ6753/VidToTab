@@ -652,11 +652,25 @@ const PAPER = { letter: [612, 792], a4: [595.28, 841.89] }; // pt
 const MARGIN = 36;
 
 async function postExport(req, res) {
-  const body = await readJson(req, 32e6).catch(() => null);
+  let body = null;
+  let tooLarge = false;
+  try { body = await readJson(req, 64e6); }
+  catch (e) { tooLarge = /too large/i.test(e?.message || ''); }
+  if (tooLarge) {
+    return sendJson(res, 413, { error: 'That export is too big to send. Remove some pages, or use the Print look, which needs no upload.' });
+  }
   const items = Array.isArray(body?.items) ? body.items : null;
   if (!items || items.length === 0) return sendJson(res, 400, { error: 'Nothing to export.' });
   const files = [];
   for (const it of items) {
+    // A recoloured page (Dark, Sepia, a custom look) arrives as bytes, because
+    // the browser already had to recolour it for the preview and sending those
+    // exact pixels is what keeps the PDF identical to what was on screen.
+    // Print and Original need no upload: the file on disk is already right.
+    if (typeof it?.pngData === 'string' && it.pngData.startsWith('data:image/png;base64,')) {
+      files.push(Buffer.from(it.pngData.slice('data:image/png;base64,'.length), 'base64'));
+      continue;
+    }
     const name = path.basename(String(it?.png || '')); // trust only basename
     const f = path.join(WORK, name);
     if (!name.endsWith('.png') || !fs.existsSync(f)) {
@@ -671,7 +685,12 @@ async function postExport(req, res) {
     header = Buffer.from(body.headerPng.slice('data:image/png;base64,'.length), 'base64');
   }
   const paper = PAPER[body.paper] ? body.paper : 'letter';
-  const bytes = await buildPdf({ title, srcUrl, files, paper, header });
+  // The look's paper colour, clamped: a dark songsheet should be dark to the
+  // edge of the sheet rather than dark pages sitting on white.
+  const tint = Array.isArray(body.paperRgb) && body.paperRgb.length === 3
+    ? body.paperRgb.map((v) => Math.max(0, Math.min(255, Math.round(Number(v) || 0))))
+    : null;
+  const bytes = await buildPdf({ title, srcUrl, files, paper, header, paperRgb: tint });
   res.writeHead(200, {
     'Content-Type': 'application/pdf',
     'Content-Length': bytes.length,
@@ -692,7 +711,7 @@ function contentDisposition(name) {
   return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(name)}`;
 }
 
-async function buildPdf({ title, srcUrl, files, paper, header }) {
+async function buildPdf({ title, srcUrl, files, paper, header, paperRgb = null }) {
   const [PW, PH] = PAPER[paper];
   const CW = PW - 2 * MARGIN;
   const doc = await PDFDocument.create();
@@ -701,7 +720,15 @@ async function buildPdf({ title, srcUrl, files, paper, header }) {
   doc.setProducer('VidToTab');
   const helv = await doc.embedFont(StandardFonts.Helvetica);
   const bold = await doc.embedFont(StandardFonts.HelveticaBold);
-  const pages = [doc.addPage([PW, PH])];
+  // Every sheet is painted before anything is drawn on it, so the look reaches
+  // the margins as well as the pages.
+  const sheet = paperRgb ? rgb(paperRgb[0] / 255, paperRgb[1] / 255, paperRgb[2] / 255) : null;
+  const newPage = () => {
+    const p = doc.addPage([PW, PH]);
+    if (sheet) p.drawRectangle({ x: 0, y: 0, width: PW, height: PH, color: sheet });
+    return p;
+  };
+  const pages = [newPage()];
   let page = pages[0];
   let y = PH - MARGIN;
 
@@ -747,13 +774,16 @@ async function buildPdf({ title, srcUrl, files, paper, header }) {
   }
 
   for (const f of files) {
-    const img = await doc.embedPng(new Uint8Array(fs.readFileSync(f)));
+    // Each entry is either a path on disk (Print and Original use the stored
+    // capture untouched) or the recoloured bytes the browser already rendered
+    // for the preview, so the PDF shows exactly what was on screen.
+    const img = await doc.embedPng(new Uint8Array(Buffer.isBuffer(f) ? f : fs.readFileSync(f)));
     let w = CW;
     let h = img.height * (CW / img.width);
     const maxH = PH - 2 * MARGIN - 18;
     if (h > maxH) { h = maxH; w = img.width * (h / img.height); } // never split a capture
     if (y - h < MARGIN + 14) {
-      page = doc.addPage([PW, PH]);
+      page = newPage();
       pages.push(page);
       y = PH - MARGIN;
     }

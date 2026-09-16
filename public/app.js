@@ -1,7 +1,10 @@
 'use strict';
-/* VidToTab frontend — plain script, no dependencies. Talks to server.js over
-   JSON endpoints and one SSE stream (/api/events). Analysis events carry a
-   runId; anything from an older run is ignored. */
+/* VidToTab frontend — no dependencies. Talks to server.js over JSON endpoints
+   and one SSE stream (/api/events). Analysis events carry a runId; anything
+   from an older run is ignored. Loaded as a module so the preview can share the
+   look maths with the PNG and PDF exports instead of reimplementing it. */
+import { LOOKS, applyLook, inkRgb, isIdentity, isOriginal, lookById, mixRgb, paperRgb, rgbCss } from '/shared/look.js';
+
 (() => {
 
   // ---------- helpers ----------
@@ -62,6 +65,28 @@
     });
   }
 
+  // Recolour a clean (greyscale) capture with the shared look maths and hand
+  // back a canvas, usable as an image source or drawn straight into a larger
+  // one. Print and Original never come here: their pixels are already right, so
+  // the stored file is used untouched and nothing is uploaded for them.
+  async function recolouredCanvas(pngName, look) {
+    const img = await loadImage(capSrc(pngName));
+    const c = document.createElement('canvas');
+    c.width = img.naturalWidth;
+    c.height = img.naturalHeight;
+    const ctx = c.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(img, 0, 0);
+    const data = ctx.getImageData(0, 0, c.width, c.height);
+    applyLook(data.data, look);
+    ctx.putImageData(data, 0, 0);
+    return c;
+  }
+
+  // <img> exposes naturalWidth, <canvas> only width — normalise so the export
+  // maths works for both kinds of source.
+  const srcW = (i) => i.naturalWidth || i.width;
+  const srcH = (i) => i.naturalHeight || i.height;
+
   function downloadBlob(blob, name) {
     const url = URL.createObjectURL(blob);
     const a = el('a');
@@ -118,7 +143,9 @@
     undoStack: [],
     warnings: [],           // shown on both the scan and songsheet steps
     jobId: null,            // newest job seen; older events are ignored
-    look: store.get('vtt.look', 'clean') === 'color' ? 'color' : 'clean',
+    // 'clean' was the old id for Print. lookById falls back to Print for
+    // anything it does not recognise, so a stored value from before still works.
+    look: lookById(store.get('vtt.look', 'print')).id,
     paper: store.get('vtt.paper', defaultPaper) === 'a4' ? 'a4' : 'letter',
     title: '',
     snapshotApplied: false,
@@ -842,12 +869,21 @@
       del.addEventListener('click', (e) => { e.stopPropagation(); deleteItem(idx); });
       bar.appendChild(del);
 
-      const paper = el('div', 'paper' + (state.look === 'color' ? ' color' : ''));
+      const look = lookById(state.look);
+      const paper = el('div', 'paper' + (isOriginal(look) ? ' color' : ''));
+      if (!isOriginal(look)) paper.style.background = rgbCss(paperRgb(look));
       const img = el('img');
-      img.src = capSrc(state.look === 'color' ? it.pngColor : it.png);
+      img.src = capSrc(isOriginal(look) ? it.pngColor : it.png);
       img.alt = `Page ${pageNo}, ${fmtTime(it.tStart)} to ${fmtTime(it.tEnd)}`;
       img.loading = 'lazy';
       if (it.w && it.h) { img.width = it.w; img.height = it.h; }
+      // Dark and Sepia map the clean render pixel by pixel, so the preview
+      // shows precisely the bytes the export will use — one recipe, not two.
+      if (!isIdentity(look) && !isOriginal(look)) {
+        recolouredCanvas(it.png, look)
+          .then((c) => { img.src = c.toDataURL('image/png'); })
+          .catch(() => { /* keep the plain render rather than blanking the page */ });
+      }
       paper.appendChild(img);
 
       row.appendChild(bar);
@@ -919,12 +955,26 @@
   $('toastUndo').addEventListener('click', undo);
 
   $('titleInput').addEventListener('input', () => { state.title = $('titleInput').value; });
-  for (const b of $('lookSeg').querySelectorAll('button')) {
-    b.addEventListener('click', () => {
-      state.look = b.dataset.look;
-      store.set('vtt.look', state.look);
-      renderReview();
-    });
+  // Built from the shared list, so the preview, the PNG and the PDF always
+  // offer exactly the same looks. Each button gets its listener as it is
+  // created — the markup ships empty, so querying for buttons at start-up
+  // would find none.
+  function buildLookSeg() {
+    const seg = $('lookSeg');
+    seg.textContent = '';
+    for (const look of LOOKS) {
+      const b = el('button', null, look.label);
+      b.type = 'button';
+      b.dataset.look = look.id;
+      b.title = look.hint;
+      b.setAttribute('aria-pressed', String(look.id === state.look));
+      b.addEventListener('click', () => {
+        state.look = look.id;
+        store.set('vtt.look', state.look);
+        renderReview();
+      });
+      seg.appendChild(b);
+    }
   }
   $('paperSelect').addEventListener('change', () => {
     state.paper = $('paperSelect').value === 'a4' ? 'a4' : 'letter';
@@ -974,8 +1024,13 @@
 
   // The songsheet header (thumbnail, title, channel, link) drawn with system
   // fonts so any script renders; the PDF embeds it as an image.
-  async function headerCanvas(W, pages) {
+  async function headerCanvas(W, pages, look = null) {
     const meta = state.meta || {};
+    // The header shares the sheet with the pages, so it takes the look's
+    // colours too — otherwise a dark songsheet gets a white slab across the top.
+    const tinted = look && !isOriginal(look);
+    const paperC = tinted ? paperRgb(look) : [255, 255, 255];
+    const inkC = tinted ? inkRgb(look) : [22, 20, 15];
     const title = (state.title || meta.title || 'Untitled').trim();
     const thumb = meta.thumb ? await loadImage('/thumb.jpg?v=' + state.thumbVersion).catch(() => null) : null;
     const th = Math.round(W * 0.1);
@@ -994,7 +1049,7 @@
     c.width = W;
     c.height = H;
     const ctx = c.getContext('2d');
-    ctx.fillStyle = '#ffffff';
+    ctx.fillStyle = rgbCss(paperC);
     ctx.fillRect(0, 0, W, H);
     if (thumb) {
       ctx.save();
@@ -1007,19 +1062,21 @@
     }
     ctx.textBaseline = 'top';
     let y = 0;
-    ctx.fillStyle = '#16140f';
+    ctx.fillStyle = rgbCss(inkC);
     ctx.font = `700 ${titleSize}px ${FONT}`;
     for (const l of lines) { ctx.fillText(l, tx, y); y += lineH; }
     y += Math.round(subSize * 0.4);
     ctx.font = `500 ${subSize}px ${FONT}`;
-    if (sub) { ctx.fillStyle = '#6e685f'; ctx.fillText(ellipsize(ctx, sub, textW), tx, y); y += subH; }
+    if (sub) { ctx.fillStyle = rgbCss(mixRgb(paperC, inkC, 0.55)); ctx.fillText(ellipsize(ctx, sub, textW), tx, y); y += subH; }
+    // The link keeps the accent colour: it reads on cream and on near-black.
     if (meta.url) { ctx.fillStyle = '#c2410c'; ctx.fillText(ellipsize(ctx, meta.url, textW), tx, y); }
-    ctx.fillStyle = '#e7e1d7';
+    ctx.fillStyle = rgbCss(mixRgb(paperC, inkC, 0.12));
     ctx.fillRect(0, H - 3, W, 3);
     return c;
   }
 
-  const visibleFiles = () => state.items.filter((it) => !it.deleted).map((it) => (state.look === 'color' ? it.pngColor : it.png));
+  const visibleFiles = () => state.items.filter((it) => !it.deleted)
+    .map((it) => (isOriginal(lookById(state.look)) ? it.pngColor : it.png));
   const exportBase = () => fileSafe(state.title || state.meta?.title);
 
   async function busy(btn, label, fn) {
@@ -1033,7 +1090,18 @@
     const files = visibleFiles();
     if (!files.length) return;
     try {
-      const header = await headerCanvas(1800, files.length);
+      const look = lookById(state.look);
+      const header = await headerCanvas(1800, files.length, look);
+      // Print and Original are the stored pixels, so only their names travel.
+      // A recoloured look sends the bytes the preview showed, which is what
+      // makes the PDF match the screen instead of merely resembling it.
+      const recolour = !isIdentity(look) && !isOriginal(look);
+      const items = [];
+      for (const png of files) {
+        items.push(recolour
+          ? { png, pngData: (await recolouredCanvas(png, look)).toDataURL('image/png') }
+          : { png });
+      }
       const res = await fetch('/api/export', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -1041,8 +1109,10 @@
           title: state.title || state.meta?.title || 'VidToTab',
           url: state.meta?.url || '',
           paper: state.paper,
+          // So the PDF sheet itself carries the look, not just the pages on it.
+          paperRgb: isOriginal(look) ? null : paperRgb(look),
           headerPng: header.toDataURL('image/png'),
-          items: files.map((png) => ({ png })),
+          items,
         }),
       });
       if (!res.ok) throw new Error((await res.json().catch(() => null))?.error || `HTTP ${res.status}`);
@@ -1057,12 +1127,14 @@
     const files = visibleFiles();
     if (!files.length) return;
     try {
-      const imgs = await Promise.all(files.map((f) => loadImage(capSrc(f))));
+      const look = lookById(state.look);
+      const plain = isIdentity(look) || isOriginal(look);
+      const imgs = await Promise.all(files.map((f) => (plain ? loadImage(capSrc(f)) : recolouredCanvas(f, look))));
       const pad = 56, gap = 22;
-      const W = Math.max(1400, ...imgs.map((i) => i.naturalWidth)) + 2 * pad;
+      const W = Math.max(1400, ...imgs.map(srcW)) + 2 * pad;
       const inner = W - 2 * pad;
-      const header = await headerCanvas(inner, imgs.length);
-      const heights = imgs.map((i) => Math.round((i.naturalHeight * inner) / i.naturalWidth));
+      const header = await headerCanvas(inner, imgs.length, look);
+      const heights = imgs.map((i) => Math.round((srcH(i) * inner) / srcW(i)));
       const H = pad + header.height + 30 + heights.reduce((s, h) => s + h + gap, 0) - gap + pad;
       const k = Math.min(1, 32000 / H); // browsers cap canvas height around 32k px
       const c = document.createElement('canvas');
@@ -1070,7 +1142,9 @@
       c.height = Math.round(H * k);
       const ctx = c.getContext('2d');
       ctx.scale(k, k);
-      ctx.fillStyle = '#ffffff';
+      // The sheet behind the pages follows the look too, or a dark songsheet
+      // exports as dark pages floating on white with white gaps between them.
+      ctx.fillStyle = isOriginal(look) ? '#ffffff' : rgbCss(paperRgb(look));
       ctx.fillRect(0, 0, W, H);
       ctx.drawImage(header, pad, pad);
       let y = pad + header.height + 30;
@@ -1323,6 +1397,7 @@
   // ---------- init ----------
 
   $('paperSelect').value = state.paper;
+  buildLookSeg();
   updateSensSeg();
   checkPreflight();
   connectSSE();
