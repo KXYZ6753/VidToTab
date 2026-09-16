@@ -594,15 +594,44 @@ async function slowStartCannotBeGazumped() {
       setTimeout(() => rq.end('lid/never-downloaded"}'), 1500);
     });
     await sleep(500);                                       // parked inside readJson
-    const gazump = await put(port, 'gazump.mp4', (req) => fs.createReadStream(tinyVideo()).pipe(req), { cookie: b });
-    await parked;
-    check('race: a start already in progress cannot be gazumped', gazump.status === 503, `${gazump.status} ${gazump.body}`);
+    const second = await put(port, 'gazump.mp4', (req) => fs.createReadStream(tinyVideo()).pipe(req), { cookie: b });
+    const first = await parked;
+    // Whoever reaches the destructive step first keeps the instance — the
+    // parked request has not taken anything yet, so the second visitor is
+    // entitled to it. What must never happen is the late one waking up and
+    // erasing the job that appeared while it waited.
+    check('race: the visitor who got there first keeps it', second.status === 202, `${second.status} ${second.body}`);
+    check('race: the parked start is refused rather than erasing it', first.status === 503, `${first.status} ${first.body}`);
+    const survivor = await get(port, '/api/meta', { cookie: b });
+    check('race: the job that existed is still there', /gazump/.test(survivor.body), survivor.body);
   } finally {
     srv.kill('SIGKILL');
     fs.rmSync(SMALL, { force: true });
   }
 }
 
+// A start that never reaches the destructive step must leave nothing behind.
+// While the claim was taken at admission, a request that failed validation kept
+// the instance reserved until the claim aged out — so a bad link every half
+// minute, or one request held open and never finished, denied the instance to
+// everyone else.
+async function failedStartReleasesTheInstance() {
+  const port = await freePort();
+  const { srv } = await startServer(port, { VIDTOTAB_PUBLIC: '1', VIDTOTAB_RATE_LIMIT: '200' });
+  try {
+    const a = ((await get(port, '/')).setCookie || '').split(';')[0];
+    const b = 'vtt_owner=' + 'c'.repeat(32);
+    const bad = await post(port, '/api/video/url', { cookie: a }); // body is {} — no url
+    check('claim: a start with no link is rejected', bad.status === 400, String(bad.status));
+    const other = await put(port, 'after.mp4', (req) => fs.createReadStream(tinyVideo()).pipe(req), { cookie: b });
+    check('claim: a failed start leaves the instance free', other.status === 202, `${other.status} ${other.body}`);
+  } finally {
+    srv.kill('SIGKILL');
+    fs.rmSync(SMALL, { force: true });
+  }
+}
+
+await failedStartReleasesTheInstance();
 await slowStartCannotBeGazumped();
 await concurrentStartsDoNotBothWin();
 await strangerCannotEraseTheJob();

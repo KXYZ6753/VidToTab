@@ -664,6 +664,7 @@ async function postUrl(req, res) {
     return sendJson(res, 400, { error: 'Paste a full http(s) link.' });
   }
   if (!preflight.ytdlp) return sendJson(res, 500, { error: 'yt-dlp is not installed (brew install yt-dlp)' });
+  if (!takeClaim(req, res)) return;
   await stopCurrent();
   resetWork();
   job = freshJob('downloading', null);
@@ -685,6 +686,7 @@ async function putFile(req, res, u) {
     return sendJson(res, 413, { error: capMsg });
   }
   const name = path.basename(u.searchParams.get('name') || 'video');
+  if (!takeClaim(req, res)) return;
   await stopCurrent();
   resetWork();
   job = freshJob('downloading', {
@@ -1194,6 +1196,26 @@ function attachOwner(req, res) {
   res.setHeader('Set-Cookie', `${OWNER_COOKIE}=${req.vttOwner}; HttpOnly; SameSite=Lax; Path=/; Max-Age=86400`);
 }
 
+// Check and claim in one synchronous step, immediately before the destructive
+// part, and answer 503 if the instance is not available. Claiming at admission
+// instead put the claim on the wrong side of the request body: the body is the
+// client's to deliver, so a slow one held the instance against everyone else, a
+// start that failed validation left a claim behind to expire on its own, and a
+// client slower than the expiry reopened the very race the claim closed. Here
+// it spans stopCurrent() alone, which is our own code.
+function takeClaim(req, res) {
+  const wait = takeoverRefused(req);
+  if (wait) {
+    res.setHeader('Retry-After', String(wait));
+    sendJson(res, 503, {
+      error: 'Someone else is using this instance right now. Their scan would be erased by starting another video — try again in a few minutes.',
+    });
+    return false;
+  }
+  if (LIMITS.on) claim = { owner: req.vttOwner, at: Date.now() };
+  return true;
+}
+
 // True when there is nothing to protect — local, or no job started yet — or the
 // caller is the one who started it.
 function ownsJob(req) {
@@ -1218,7 +1240,9 @@ function ownsJob(req) {
 // mid-flight. It is dropped the moment the new job records its owner, and
 // expires on its own if a start request dies before getting that far.
 let claim = { owner: null, at: 0 };
-const CLAIM_MS = 30000;
+// Only ever held across stopCurrent(), so this is a backstop for a start that
+// throws in between, not a working timeout.
+const CLAIM_MS = 10000;
 
 function takeoverRefused(req) {
   if (!LIMITS.on) return null;
@@ -1358,8 +1382,6 @@ async function route(req, res) {
         error: 'Someone else is using this instance right now. Their scan would be erased by starting another video — try again in a few minutes.',
       });
     }
-    // Synchronously, before the handler's first await can let another in.
-    if (LIMITS.on) claim = { owner: req.vttOwner, at: Date.now() };
   }
   if (key === 'GET /api/events') return sse(req, res);
   if (key === 'GET /api/preflight') {
