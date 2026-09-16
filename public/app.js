@@ -1704,6 +1704,23 @@ import { deleteSheet, getSheet, hasStorage, listSheets, newId, requestPersistenc
   // Every finished scan is kept here. The pages are stored as image blobs
   // rather than links, because the server deletes the work folder as soon as
   // another video is loaded — a saved sheet that kept links would open empty.
+  // fetch does not reject on 404 — it resolves with ok:false, and .blob() on
+  // that succeeds and hands back the error body. So a capture the server had
+  // already deleted came back as a small non-null blob, the completeness check
+  // counted it a page, and the songsheet was stored with an error body where the
+  // image should be. Worse than the dropped page it was meant to catch, and
+  // invisible until the songsheet was opened again.
+  async function grabBlob(url) {
+    try {
+      const r = await fetch(url);
+      if (!r.ok) return null;
+      const b = await r.blob();
+      return b.size > 0 ? b : null;
+    } catch {
+      return null; // network failure, or a blob: URL already revoked
+    }
+  }
+
   async function saveCurrentSheet() {
     if (!hasStorage() || !state.items.length) return;
     // Bind the record, and everything that describes it, before the first
@@ -1731,10 +1748,8 @@ import { deleteSheet, getSheet, hasStorage, listSheets, newId, requestPersistenc
       if (it.deleted) continue;
       // Works for both a live capture (/captures/…) and a page already held as
       // a blob, so re-saving an opened songsheet needs no special case.
-      const clean = await fetch(it.src).then((r) => r.blob()).catch(() => null);
-      const color = it.srcColor && it.srcColor !== it.src
-        ? await fetch(it.srcColor).then((r) => r.blob()).catch(() => null)
-        : null;
+      const clean = await grabBlob(it.src);
+      const color = it.srcColor && it.srcColor !== it.src ? await grabBlob(it.srcColor) : null;
       if (!clean) continue;
       pages.push({ tStart: it.tStart, tEnd: it.tEnd, alsoAt: it.alsoAt, w: it.w, h: it.h, clean, color });
     }
@@ -1748,9 +1763,9 @@ import { deleteSheet, getSheet, hasStorage, listSheets, newId, requestPersistenc
       return;
     }
     if (!pages.length) return;
-    const thumb = target.thumbUrl
-      ? await fetch(target.thumbUrl).then((r) => r.blob()).catch(() => null)
-      : null;
+    // Same trap, and the thumbnail is optional — a missing one must leave the
+    // songsheet saveable rather than storing an error body as its picture.
+    const thumb = target.thumbUrl ? await grabBlob(target.thumbUrl) : null;
     // Only claim the id for what is on screen if what is on screen is still
     // this scan. If something else was opened meanwhile, this saves as its own
     // record and leaves their view alone.
