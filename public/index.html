@@ -197,6 +197,21 @@ code { font: 13px var(--mono); background: color-mix(in srgb, currentColor 10%, 
 .how-num { width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center; font-weight: 700; font-size: 13px; background: var(--accent-soft); color: var(--accent); flex: none; }
 .how b { font-size: 14.5px; }
 .how p { font-size: 13.5px; color: var(--muted); margin-top: 2px; }
+/* ---------- practice view ---------- */
+/* Above the drop veil: while reading, nothing else should show through. */
+.practice { position: fixed; inset: 0; z-index: 60; display: flex; flex-direction: column; background: #111113; color: #f2f2f4; }
+.practice-page { flex: 1; min-height: 0; display: grid; place-items: center; padding: 12px; }
+.practice-page img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.practice-bar { display: flex; align-items: center; gap: 14px; padding: 10px 16px; background: rgba(255, 255, 255, .06); font-size: 14px; }
+.practice-bar .spacer { flex: 1; }
+.practice-bar button { background: rgba(255, 255, 255, .12); border: none; color: inherit; font: inherit; font-weight: 600; padding: 7px 14px; border-radius: 9px; cursor: pointer; }
+.practice-bar button:hover { background: rgba(255, 255, 255, .2); }
+.practice-bar .quiet { color: #a9a9b2; }
+/* Big invisible tap targets so a phone or tablet turns pages by touch. */
+.practice-tap { position: absolute; top: 0; bottom: 56px; width: 28%; background: none; border: none; cursor: pointer; opacity: 0; }
+.practice-tap.prev { left: 0; }
+.practice-tap.next { right: 0; }
+
 .drop-veil { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; background: color-mix(in srgb, var(--bg) 75%, transparent); backdrop-filter: blur(3px); pointer-events: none; }
 .drop-veil div { border: 2px dashed var(--accent); border-radius: 20px; padding: 40px 60px; font-size: 20px; font-weight: 650; color: var(--accent); background: var(--surface); }
 
@@ -512,6 +527,8 @@ button.chip { cursor: pointer; }
         <p class="quiet"><span id="rvCount"></span><span id="rvDot" hidden> · </span><a id="rvSource" target="_blank" rel="noopener" hidden>Source video</a></p>
       </div>
       <div class="review-controls">
+        <button type="button" class="btn" id="practiceBtn" title="Full-screen pages for playing along (P)">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4h5a2 2 0 0 1 2 2v9a2 2 0 0 0-2-2H3Z"/><path d="M17 4h-5a2 2 0 0 0-2 2v9a2 2 0 0 1 2-2h5Z"/></svg>Practice</button>
         <!-- Filled from shared/look.js so the preview, the PNG and the PDF all
              offer exactly the same set. -->
         <div class="seg" id="lookSeg" role="group" aria-label="Page look"></div>
@@ -561,6 +578,20 @@ button.chip { cursor: pointer; }
 </main>
 
 <div id="toast" class="toast" role="status" hidden><span id="toastMsg"></span><button type="button" id="toastUndo">Undo</button></div>
+<!-- Full-screen reader for playing along. Arrows, space and PageUp/PageDown turn
+     pages, which is also what a Bluetooth page-turner pedal sends. -->
+<div id="practice" class="practice" hidden>
+  <div class="practice-page"><img id="practicePage" alt=""></div>
+  <button type="button" id="practicePrev" class="practice-tap prev" aria-label="Previous page"></button>
+  <button type="button" id="practiceNext" class="practice-tap next" aria-label="Next page"></button>
+  <div class="practice-bar">
+    <button type="button" id="practiceBack">Back</button>
+    <span id="practicePos" class="quiet" role="status"></span>
+    <span class="spacer"></span>
+    <span class="quiet">← → or space to turn · Esc to leave</span>
+  </div>
+</div>
+
 <div id="dropVeil" class="drop-veil" hidden><div>Drop the video to load it</div></div>
 
 <!-- A module: app.js imports the look maths that the PNG and PDF exports use,

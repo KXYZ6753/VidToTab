@@ -257,6 +257,33 @@ try {
   await shot('4-review-light');
   await shot('4-review-light-full', true);
 
+  // Practice mode is wiring again: it could open showing a blank image, or the
+  // key interception could swallow every key without turning a page, and a
+  // screenshot would look right either way. Check the page actually resolves
+  // and that a keypress moves it.
+  await evalJs(`document.getElementById('practiceBtn').click()`);
+  await sleep(700);
+  const pracOpen = await evalJs(`!document.getElementById('practice').hidden`);
+  const pracFirst = await evalJs(`document.getElementById('practicePos').textContent`);
+  const pracLoaded = await evalJs(`(() => { const i = document.getElementById('practicePage'); return !!i && i.complete && i.naturalWidth > 0; })()`);
+  log(`practice: open=${pracOpen}, "${pracFirst}", image decoded=${pracLoaded}`);
+  if (!pracOpen) problems.push('the practice view did not open');
+  if (!pracLoaded) problems.push('the practice view opened with no readable page');
+
+  // Space is what a page-turner pedal sends, and it is the key most likely to
+  // be stolen by a focused button.
+  await evalJs(`document.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true }))`);
+  await sleep(500);
+  const pracSecond = await evalJs(`document.getElementById('practicePos').textContent`);
+  log('practice after space ->', pracSecond);
+  if (pracSecond === pracFirst) problems.push(`space did not turn the page (still "${pracSecond}")`);
+  await shot('7-practice');
+
+  await evalJs(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))`);
+  await sleep(400);
+  const pracClosed = await evalJs(`document.getElementById('practice').hidden`);
+  if (!pracClosed) problems.push('Escape did not leave the practice view');
+
   const lookIds = await evalJs(`[...document.querySelectorAll('#lookSeg button')].map((b) => b.dataset.look).join(',')`);
   log('looks offered:', lookIds);
   if (!/print/.test(lookIds || '')) problems.push(`look buttons missing or unnamed: ${lookIds}`);

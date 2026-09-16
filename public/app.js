@@ -150,6 +150,7 @@ import { deleteSheet, getSheet, hasStorage, listSheets, newId, requestPersistenc
     paper: store.get('vtt.paper', defaultPaper) === 'a4' ? 'a4' : 'letter',
     title: '',
     sheetId: null,          // library record this scan belongs to
+    practice: -1,           // page shown in the full-screen reader, -1 = closed
     snapshotApplied: false,
   };
 
@@ -1250,6 +1251,10 @@ import { deleteSheet, getSheet, hasStorage, listSheets, newId, requestPersistenc
 
   document.addEventListener('keydown', (e) => {
     if (e.metaKey || e.ctrlKey) return;
+    // Practice mode takes keys first and unconditionally: the guards below skip
+    // Space over a focused button, which would activate that button instead of
+    // turning the page — and Space is what a page-turner pedal sends.
+    if (state.practice >= 0) { practiceKeys(e); return; }
     const t = e.target;
     if (t instanceof Element) {
       if (t.matches('input, textarea, select')) return;
@@ -1311,6 +1316,11 @@ import { deleteSheet, getSheet, hasStorage, listSheets, newId, requestPersistenc
       case 'u':
         e.preventDefault();
         undo();
+        break;
+      case 'p': case 'P':
+        // The Practice button offers this shortcut, so it has to exist.
+        e.preventDefault();
+        openPractice();
         break;
       case 'Enter': {
         const it = state.items[state.selected];
@@ -1482,6 +1492,68 @@ import { deleteSheet, getSheet, hasStorage, listSheets, newId, requestPersistenc
     };
     // EventSource reconnects by itself; the server re-sends a state snapshot.
   }
+
+  // ---------- practice view ----------
+
+  // A full-screen page at a time, for playing along. Arrows, space and
+  // PageUp/PageDown turn pages — the last pair is what most Bluetooth
+  // page-turner pedals send, so a pedal works without any extra support.
+  let wakeLock = null;
+
+  async function holdScreenAwake() {
+    try { wakeLock = await navigator.wakeLock?.request('screen'); } catch { wakeLock = null; }
+  }
+  function releaseScreen() {
+    try { wakeLock?.release(); } catch { /* already gone */ }
+    wakeLock = null;
+  }
+
+  function showPracticePage(i) {
+    const pages = visibleItems();
+    if (!pages.length) return;
+    const n = clamp(i, 0, pages.length - 1);
+    state.practice = n;
+    const it = pages[n];
+    const img = $('practicePage');
+    img.src = isOriginal(lookById(state.look)) ? it.srcColor : it.src;
+    img.alt = `Page ${n + 1} of ${pages.length}, ${fmtTime(it.tStart)} to ${fmtTime(it.tEnd)}`;
+    $('practicePos').textContent = `Page ${n + 1} of ${pages.length}  ·  ${fmtTime(it.tStart)}`;
+  }
+
+  function openPractice() {
+    const pages = visibleItems();
+    if (!pages.length) return;
+    $('practice').hidden = false;
+    showPracticePage(state.selected >= 0 ? visibleIndices().indexOf(state.selected) : 0);
+    holdScreenAwake();
+  }
+
+  function closePractice() {
+    state.practice = -1;
+    $('practice').hidden = true;
+    releaseScreen();
+    $('practiceBtn').focus();
+  }
+
+  function practiceKeys(e) {
+    const k = e.key;
+    if (k === 'Escape') { e.preventDefault(); closePractice(); return; }
+    const forward = k === 'ArrowRight' || k === 'ArrowDown' || k === ' ' || k === 'PageDown' || k === 'Enter';
+    const back = k === 'ArrowLeft' || k === 'ArrowUp' || k === 'PageUp' || k === 'Backspace';
+    if (forward || back) {
+      e.preventDefault();
+      showPracticePage(state.practice + (forward ? 1 : -1));
+    }
+  }
+
+  $('practiceBtn').addEventListener('click', openPractice);
+  $('practiceBack').addEventListener('click', closePractice);
+  $('practiceNext').addEventListener('click', () => showPracticePage(state.practice + 1));
+  $('practicePrev').addEventListener('click', () => showPracticePage(state.practice - 1));
+  // A phone that locks its screen drops the wake lock; take it again on return.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && state.practice >= 0) holdScreenAwake();
+  });
 
   // ---------- songsheet library ----------
 

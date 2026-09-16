@@ -8,6 +8,7 @@
 import http from 'node:http';
 import fs from 'node:fs';
 import net from 'node:net';
+import os from 'node:os';
 import path from 'node:path';
 import { spawn, execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -22,7 +23,10 @@ const freePort = () => new Promise((resolve, reject) => {
   s.listen(0, '127.0.0.1', () => { const { port } = s.address(); s.close(() => resolve(port)); });
 });
 
-const SMALL = path.join(WORK, '..', '.e2e-small.mp4');
+// In the OS temp directory, not the project root: the upload tests reset WORK,
+// and a fixture written next to the source tree survives a failed run and shows
+// up as an untracked file waiting to be committed by accident.
+const SMALL = path.join(os.tmpdir(), 'vidtotab-server-test-small.mp4');
 function tinyVideo() {
   execSync(`ffmpeg -y -v error -f lavfi -i testsrc=size=320x240:rate=10:duration=2 -pix_fmt yuv420p ${JSON.stringify(SMALL)}`);
   return SMALL;
