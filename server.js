@@ -222,9 +222,23 @@ function bail(my) {
   return false;
 }
 
+// A job that failed without producing anything has no claim on the instance.
+// Ownership outliving the request that created it is what let a stalled upload
+// reserve a public instance for the whole idle window: putFile records the owner
+// before it reads the body, so an upload that died — or was abandoned on
+// purpose, cheaply, again and again — kept everyone else out for fifteen minutes
+// having produced nothing. A job with pages in it is a different matter: that is
+// someone's songsheet and it stays theirs.
+function releaseIfEmpty(my) {
+  if (my !== job || !job.owner || job.captures.length) return;
+  job.owner = null;
+  claim = { owner: null, at: 0 };
+}
+
 function flowError(my, msg, detail) {
   if (my !== job) return;
   my.phase = 'idle';
+  releaseIfEmpty(my);
   const ev = { phase: 'error', msg };
   if (detail) ev.detail = String(detail).slice(-1500);
   broadcast(ev);
@@ -739,6 +753,7 @@ async function putFile(req, res, u) {
     my.upload = null;
     fs.rmSync(src, { force: true });
     if (my === job) my.phase = 'idle';
+    releaseIfEmpty(my); // a dead upload does not reserve the instance
     if (!res.headersSent) {
       // A chunked upload declares no length, so the cap is only reached part
       // way through — say the same useful thing the header check says, then

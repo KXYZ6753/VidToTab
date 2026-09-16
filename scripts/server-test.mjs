@@ -676,20 +676,24 @@ async function stalledUploadDoesNotLockTheInstance() {
   });
   try {
     const a = ((await get(port, '/')).setCookie || '').split(';')[0];
-    // The probe is the SAME visitor: putFile records the owner before it reads
-    // the body, so a stalled upload already owns the instance and a different
-    // visitor would be refused by ownership rather than by the slot — which is
-    // what the first version of this check actually measured.
+    const stranger = 'vtt_owner=' + 'e'.repeat(32);
     const clip = tinyVideo();
 
-    // A few bytes, then silence — never ended.
+    // A few bytes and then silence, never ended. putFile records the owner
+    // before it reads the body, so this upload holds the heavy slot and
+    // ownership of the instance at once while it sits there.
     const stalled = put(port, 'stalled.mp4', (req) => { req.write(Buffer.alloc(2048, 3)); }, { cookie: a });
     await sleep(600);
     await sleep(2800); // past the stall timeout
-    const after = await put(port, 'after-stall.mp4', (req) => fs.createReadStream(clip).pipe(req), { cookie: a });
-    check('stalled upload: the slot is reclaimed rather than held forever', after.status === 202, `${after.status} ${after.body}`);
-    // Bounded: with the guard removed this request never settles, and a check
-    // that hangs is not a check that fails — it just stops the suite.
+
+    // One probe covers both failures, and the body says which: "busy" if the
+    // slot is still held, "someone else is using this instance" if the dead
+    // upload still owns it. Each was true in turn while this was being written.
+    const other = await put(port, 'stranger.mp4', (req) => fs.createReadStream(clip).pipe(req), { cookie: stranger });
+    check('stalled upload: an abandoned upload frees the instance', other.status === 202, `${other.status} ${other.body}`);
+
+    // Bounded: with the guard removed this never settles, and a check that
+    // hangs is not a check that fails — it stops the suite instead.
     await Promise.race([stalled.catch(() => {}), sleep(3000)]);
   } finally {
     srv.kill('SIGKILL');
