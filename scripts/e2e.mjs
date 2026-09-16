@@ -452,8 +452,22 @@ try {
   if (!busyNote) problems.push('the sidebar did not say a scan was running');
   if (sideCount > 0 && itemsOff !== true) problems.push('sidebar songsheets stayed clickable during a scan');
   if (wentToSheet) problems.push('a stored songsheet opened during a scan — the finishing scan would save over it');
-  await evalJs(`document.getElementById('viewToggle').click()`); // back to home view for the rest
+  await evalJs(`document.getElementById('viewToggle').click()`); // back to home view
   await sleep(200);
+
+  // The grid on step 1 is the other way in, and unlike the sidebar rows it is
+  // not disabled — step 1 stays reachable throughout a scan. This is the path
+  // the guard inside openSheet exists for, and the sidebar check above cannot
+  // exercise it, because a disabled row never reaches openSheet at all.
+  await evalJs(`document.querySelector('#stepper [data-step="1"]').click()`);
+  await sleep(400);
+  const gridCards = await evalJs(`document.querySelectorAll('#libraryGrid .lib-card').length`);
+  await evalJs(`document.querySelector('#libraryGrid .lib-card')?.click()`);
+  await sleep(500);
+  const gridOpened = await evalJs(`!document.getElementById('step4').hidden`);
+  log(`mid-scan library grid: ${gridCards} card(s), opened a sheet=${gridOpened}`);
+  if (gridCards < 1) problems.push('no library card to test the mid-scan grid guard against');
+  if (gridOpened) problems.push('a songsheet opened from the grid during a scan — the finishing scan would save over it');
 
   await waitFor(`!document.getElementById('step4').hidden && document.getElementById('stepper').querySelector('[data-step="3"]').disabled`, 300000, 'rescan done');
   log('after rescan at 0.75:', await evalJs(`document.getElementById('rvCount').textContent`));
