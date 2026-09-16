@@ -544,6 +544,67 @@ async function strangerCannotEraseTheJob() {
   }
 }
 
+// Two visitors starting at the same instant. The ownership check reads
+// job.owner, and both handlers await — the body, then stopCurrent() — before
+// anything is deleted, so without a claim taken synchronously at admission both
+// requests pass the check and the second erases the first one's job.
+async function concurrentStartsDoNotBothWin() {
+  const port = await freePort();
+  // MAX_JOBS is raised deliberately: with the default of 1 the concurrency
+  // limiter refuses the second request on its own, and this test passes whether
+  // or not the claim exists — which is exactly what it did at first.
+  const { srv } = await startServer(port, { VIDTOTAB_PUBLIC: '1', VIDTOTAB_RATE_LIMIT: '200', VIDTOTAB_MAX_JOBS: '4' });
+  try {
+    const a = ((await get(port, '/')).setCookie || '').split(';')[0];
+    const b = 'vtt_owner=' + 'a'.repeat(32);
+    const clip = tinyVideo();
+    const [ra, rb] = await Promise.all([
+      put(port, 'raceA.mp4', (req) => fs.createReadStream(clip).pipe(req), { cookie: a }),
+      put(port, 'raceB.mp4', (req) => fs.createReadStream(clip).pipe(req), { cookie: b }),
+    ]);
+    const codes = [ra.status, rb.status].sort().join(',');
+    check('race: two simultaneous starts, exactly one wins', codes === '202,503', codes);
+  } finally {
+    srv.kill('SIGKILL');
+    fs.rmSync(SMALL, { force: true });
+  }
+}
+
+// The window that actually matters is wider than two near-simultaneous
+// uploads. postUrl awaits the request body before it deletes anything, and
+// route() has already run by then because it fires on the headers — so a client
+// that dribbles its JSON parks the handler inside that await for as long as it
+// likes. This needs a server where nobody owns anything yet, or the ownership
+// check refuses the second visitor on its own and the claim is never exercised.
+async function slowStartCannotBeGazumped() {
+  const port = await freePort();
+  const { srv } = await startServer(port, {
+    VIDTOTAB_PUBLIC: '1', VIDTOTAB_RATE_LIMIT: '200', VIDTOTAB_MAX_JOBS: '4',
+  });
+  try {
+    const a = ((await get(port, '/')).setCookie || '').split(';')[0];
+    const b = 'vtt_owner=' + 'b'.repeat(32);
+    const parked = new Promise((resolve) => {
+      const rq = http.request({
+        host: '127.0.0.1', port, method: 'POST', path: '/api/video/url',
+        headers: { 'content-type': 'application/json', cookie: a },
+      }, (res) => { let t2 = ''; res.on('data', (d) => (t2 += d)); res.on('end', () => resolve({ status: res.statusCode, body: t2 })); });
+      rq.on('error', () => resolve({ status: 0, body: '' }));
+      rq.write('{"url":"https://example.inva');            // half a body
+      setTimeout(() => rq.end('lid/never-downloaded"}'), 1500);
+    });
+    await sleep(500);                                       // parked inside readJson
+    const gazump = await put(port, 'gazump.mp4', (req) => fs.createReadStream(tinyVideo()).pipe(req), { cookie: b });
+    await parked;
+    check('race: a start already in progress cannot be gazumped', gazump.status === 503, `${gazump.status} ${gazump.body}`);
+  } finally {
+    srv.kill('SIGKILL');
+    fs.rmSync(SMALL, { force: true });
+  }
+}
+
+await slowStartCannotBeGazumped();
+await concurrentStartsDoNotBothWin();
 await strangerCannotEraseTheJob();
 await publicJobIsPrivate();
 await localNeedsNoOwner();

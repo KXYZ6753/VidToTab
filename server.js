@@ -668,6 +668,7 @@ async function postUrl(req, res) {
   resetWork();
   job = freshJob('downloading', null);
   job.owner = req.vttOwner;
+  claim = { owner: null, at: 0 }; // the job itself carries ownership now
   sendJson(res, 202, { ok: true });
   const my = job;
   // A synchronous fs throw inside the flow used to surface as an unhandled
@@ -698,6 +699,7 @@ async function putFile(req, res, u) {
     ready: false,
   });
   job.owner = req.vttOwner;
+  claim = { owner: null, at: 0 }; // the job itself carries ownership now
   const my = job;
   broadcast({ phase: 'meta', meta: my.meta });
   // Per-job filename: with a shared upload.bin, dropping a second file made the
@@ -1207,8 +1209,24 @@ function ownsJob(req) {
 // the songsheet they were still reading. An instance stays theirs until they
 // have actually been away. Returns the seconds to wait, or null if the caller
 // may go ahead.
+// A reservation taken the instant a start request is admitted. The check below
+// reads job.owner, but postUrl and putFile then await — the request body, then
+// stopCurrent() — before anything is deleted. Two start requests could both
+// pass the check in that window, and the second would erase a job that had
+// appeared in between, including one belonging to whoever won the first race.
+// The claim is taken synchronously, so no second request can pass while one is
+// mid-flight. It is dropped the moment the new job records its owner, and
+// expires on its own if a start request dies before getting that far.
+let claim = { owner: null, at: 0 };
+const CLAIM_MS = 30000;
+
 function takeoverRefused(req) {
-  if (!LIMITS.on || !job.owner || job.owner === req.vttOwner) return null;
+  if (!LIMITS.on) return null;
+  const claimAge = Date.now() - claim.at;
+  if (claim.owner && claim.owner !== req.vttOwner && claimAge < CLAIM_MS) {
+    return Math.max(5, Math.ceil((CLAIM_MS - claimAge) / 1000));
+  }
+  if (!job.owner || job.owner === req.vttOwner) return null;
   const idleFor = Date.now() - (job.touched || 0);
   if (idleFor >= LIMITS.sessionIdleMs) return null; // abandoned; anyone may take over
   return Math.max(30, Math.ceil((LIMITS.sessionIdleMs - idleFor) / 1000));
@@ -1340,6 +1358,8 @@ async function route(req, res) {
         error: 'Someone else is using this instance right now. Their scan would be erased by starting another video — try again in a few minutes.',
       });
     }
+    // Synchronously, before the handler's first await can let another in.
+    if (LIMITS.on) claim = { owner: req.vttOwner, at: Date.now() };
   }
   if (key === 'GET /api/events') return sse(req, res);
   if (key === 'GET /api/preflight') {
