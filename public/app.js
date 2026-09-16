@@ -178,6 +178,7 @@ import { deleteSheet, getSheet, hasStorage, listSheets, newId, requestPersistenc
         || (n === 3 && state.job !== 'analyzing')
         || (needsVideo && state.fromLibrary);
     }
+    syncSidebar();
   }
 
   function showStep(n) {
@@ -211,6 +212,75 @@ import { deleteSheet, getSheet, hasStorage, listSheets, newId, requestPersistenc
       const n = +btn.dataset.step;
       if (n <= state.maxStep && n !== state.step) showStep(n);
     });
+  }
+
+  // ---------- home / app view ----------
+
+  // Two front doors onto the same document. The landing page still explains the
+  // thing to someone who arrived from a link; the app view drops the pitch and
+  // puts a sidebar beside the workspace, because someone who already has
+  // songsheets wants to switch between them, not be sold to again.
+  //
+  // The starting value is chosen by the inline script in index.html — before
+  // paint, so a desktop launch does not flash the landing page. Here we only
+  // read it back, keep the button honest, and remember what was chosen.
+  const isAppView = () => document.body.dataset.view === 'app';
+
+  function setView(view, remember = true) {
+    const app = view === 'app';
+    document.body.dataset.view = app ? 'app' : 'home';
+    $('viewToggleLabel').textContent = app ? 'Home' : 'Open the app';
+    // The label is hidden on a phone, so the name has to survive without it.
+    $('viewToggle').setAttribute('aria-label', app ? 'Back to the home page' : 'Open the app view');
+    $('viewToggle').title = app
+      ? 'Back to the home page'
+      : 'A working layout, with your songsheets alongside';
+    $('viewIconApp').hidden = app;
+    $('viewIconHome').hidden = !app;
+    if (remember) store.set('vtt.view', app ? 'app' : 'home');
+  }
+
+  $('viewToggle').addEventListener('click', () => {
+    setView(isAppView() ? 'home' : 'app');
+    // The sidebar must be right the moment it appears, and a songsheet may have
+    // been saved or removed since it was last drawn.
+    if (isAppView()) renderLibrary();
+  });
+
+  // "New scan". A songsheet opened from the library has no video behind it, so
+  // leaving it loaded would put its title on the source card as though a video
+  // were ready — clear it exactly the way a cancelled download is cleared. A
+  // real video is left alone: throwing away a download or a scan in progress is
+  // not what "new" means, and the stepper is still the way back to it.
+  function newScan() {
+    if (state.fromLibrary) {
+      releaseHeldUrls();
+      Object.assign(state, {
+        fromLibrary: false, sheetId: null, meta: null, captures: [], items: [],
+        selected: -1, undoStack: [], maxStep: 1, title: '',
+      });
+      $('reviewList').textContent = '';
+      state.meta = null;
+      backToSource();
+      return;
+    }
+    showStep(1);
+  }
+
+  $('sideNew').addEventListener('click', newScan);
+  $('sidePractice').addEventListener('click', () => openPractice());
+
+  // The sidebar follows state that changes three steps away — a scan finishing,
+  // a page being removed, a stored sheet being opened — so it is refreshed from
+  // the two places that already redraw the chrome rather than from each action.
+  function syncSidebar() {
+    for (const b of $('sideList').querySelectorAll('.side-item')) {
+      if (state.sheetId && b.dataset.sheet === state.sheetId) b.setAttribute('aria-current', 'true');
+      else b.removeAttribute('aria-current');
+    }
+    const ready = state.items.some((it) => !it.deleted);
+    $('sidePractice').disabled = !ready;
+    $('sidePracticeWhy').hidden = ready;
   }
 
   // ---------- banners ----------
@@ -924,6 +994,8 @@ import { deleteSheet, getSheet, hasStorage, listSheets, newId, requestPersistenc
     $('paperSelect').value = state.paper;
     $('exportPdf').disabled = vis.length === 0;
     $('exportPng').disabled = vis.length === 0;
+    // Same rule as the exports: with no page left there is nothing to practise.
+    syncSidebar();
 
     const list = $('reviewList');
     list.textContent = '';
@@ -1641,11 +1713,46 @@ import { deleteSheet, getSheet, hasStorage, listSheets, newId, requestPersistenc
     }
   }
 
+  // The sidebar's copy of the same records. Different job: the grid on the home
+  // screen is for browsing and removing, this is for switching songsheets from
+  // wherever you are — which is the whole reason the app view exists.
+  function renderSideList(sheets) {
+    const host = $('sideList');
+    host.textContent = '';
+    $('sideListLabel').hidden = sheets.length === 0;
+    $('sideEmpty').hidden = sheets.length > 0;
+    for (const s of sheets) {
+      const b = el('button', 'side-item');
+      b.type = 'button';
+      b.dataset.sheet = s.id;
+      b.title = s.title;
+      const img = el('img', 'side-thumb');
+      img.alt = '';
+      img.loading = 'lazy';
+      if (s.thumb) {
+        const u = URL.createObjectURL(s.thumb);
+        img.src = u;
+        img.addEventListener('load', () => URL.revokeObjectURL(u), { once: true });
+      }
+      b.appendChild(img);
+      const text = el('span', 'side-text');
+      text.appendChild(el('span', 'side-name', s.title));
+      text.appendChild(el('span', 'side-sub', `${s.pageCount} page${s.pageCount === 1 ? '' : 's'}`));
+      b.appendChild(text);
+      b.addEventListener('click', () => openSheet(s.id));
+      const li = el('li');
+      li.appendChild(b);
+      host.appendChild(li);
+    }
+    syncSidebar();
+  }
+
   async function renderLibrary() {
     const section = $('librarySection');
-    if (!hasStorage()) { section.hidden = true; return; }
+    if (!hasStorage()) { section.hidden = true; renderSideList([]); return; }
     let sheets = [];
     try { sheets = await listSheets(); } catch { sheets = []; }
+    renderSideList(sheets);
     const host = $('libraryGrid');
     host.textContent = '';
     $('libCount').textContent = sheets.length ? `${sheets.length} saved` : '';
@@ -1715,6 +1822,9 @@ import { deleteSheet, getSheet, hasStorage, listSheets, newId, requestPersistenc
 
   $('paperSelect').value = state.paper;
   buildLookSeg();
+  // The attribute is already right (set inline, before paint); this catches the
+  // button up with it. No write-back: nothing was chosen yet.
+  setView(document.body.dataset.view, false);
   renderLibrary();
 
   // ?url=… lets a bookmark button, a shared link or (later) a vidtotab:// deep

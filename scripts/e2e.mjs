@@ -520,6 +520,178 @@ try {
     log('stepper after loading a video again:', stepsBack);
     if (!/2:on/.test(stepsBack)) problems.push(`the tab-area step stayed disabled after loading a video: ${stepsBack}`);
   }
+
+  // ---------------------------------------------------------------- app view
+  // Two front doors onto one document, which is exactly the shape of thing that
+  // can ship as dead CSS: a class flips, nothing moves. So every check below
+  // reads computed styles and real behaviour, never a class name.
+  //
+  // #how is also hidden by the app's own `hidden` attribute whenever a video is
+  // loaded, so asking for its display would answer "none" in both views and
+  // prove nothing. Lift the attribute for the measurement and put it back — the
+  // question is what the view's stylesheet does, not what the app did.
+  await desktop();
+  await scheme('light');
+  await evalJs(`document.querySelector('#stepper [data-step="1"]').click()`);
+  await sleep(500);
+  const viewState = () => evalJs(`(() => {
+    const disp = (sel) => { const n = document.querySelector(sel); return n ? getComputedStyle(n).display : 'missing'; };
+    const how = document.getElementById('how');
+    const was = how.hidden;
+    how.hidden = false;
+    const howDisp = getComputedStyle(how).display;
+    how.hidden = was;
+    return [document.body.dataset.view, disp('#sidebar'), disp('.hero h1'), disp('.lede'), howDisp,
+      document.getElementById('viewToggleLabel').textContent.trim(),
+      Math.round(document.getElementById('sidebar').getBoundingClientRect().width)].join('|');
+  })()`);
+
+  const [hView, hSide, hH1, hLede, hHow, hLabel] = String(await viewState()).split('|');
+  log(`home view -> data-view=${hView} sidebar=${hSide} h1=${hH1} lede=${hLede} how=${hHow} button="${hLabel}"`);
+  if (hView !== 'home') problems.push(`the web build should open on the landing page (data-view=${hView})`);
+  if (hSide !== 'none') problems.push(`the sidebar is on screen in home view (display ${hSide})`);
+  if (hH1 === 'none') problems.push('the landing headline is hidden in home view');
+  if (hLede === 'none') problems.push('the landing subheading is hidden in home view');
+  if (hHow === 'none') problems.push('the explainer is hidden in home view');
+  if (hLabel !== 'Open the app') problems.push(`the toggle does not offer the app view (reads "${hLabel}")`);
+
+  await evalJs(`document.getElementById('viewToggle').click()`);
+  await sleep(500);
+  const [aView, aSide, aH1, aLede, aHow, aLabel, aWidth] = String(await viewState()).split('|');
+  log(`app view -> data-view=${aView} sidebar=${aSide} (${aWidth}px) h1=${aH1} lede=${aLede} how=${aHow} button="${aLabel}"`);
+  if (aView !== 'app') problems.push(`the toggle did not enter the app view (data-view=${aView})`);
+  if (aSide === 'none') problems.push('the app view has no sidebar');
+  if (aH1 !== 'none') problems.push('the marketing headline is still on screen in the app view');
+  if (aLede !== 'none') problems.push('the marketing subheading is still on screen in the app view');
+  if (aHow !== 'none') problems.push('the explainer is still on screen in the app view');
+  if (aLabel !== 'Home') problems.push(`the toggle does not offer the way back (reads "${aLabel}")`);
+  if (Number(aWidth) < 180 || Number(aWidth) > 300) problems.push(`the sidebar is not a narrow column: ${aWidth}px`);
+  await shot('8-app-view');
+  await scheme('dark');
+  await sleep(400);
+  await shot('8d-app-view-dark');
+  await scheme('light');
+  await sleep(300);
+
+  // The point of the sidebar: a saved songsheet is reachable from anywhere,
+  // instead of only from step 1. Proving that means starting somewhere else —
+  // step 4 has to be shut before the click, or "it is open afterwards" is true
+  // either way.
+  const sideRows = await evalJs(`document.querySelectorAll('#sideList .side-item').length`);
+  const sideName = await evalJs(`document.querySelector('#sideList .side-name')?.textContent || ''`);
+  const sideEmptyShown = await evalJs(`!document.getElementById('sideEmpty').hidden`);
+  log(`sidebar: ${sideRows} songsheet(s), first "${sideName}", empty note shown=${sideEmptyShown}`);
+  if (sideRows < 1) problems.push('the sidebar lists no songsheet although one is saved');
+  if (!sideName) problems.push('a sidebar songsheet has no title');
+  if (sideEmptyShown) problems.push('the sidebar shows its empty note with songsheets in the list');
+
+  const beforeOpen = await evalJs(`document.getElementById('step4').hidden ? 'shut' : 'already open'`);
+  if (beforeOpen !== 'shut') problems.push(`cannot prove the sidebar opens a songsheet: step 4 was ${beforeOpen}`);
+  await evalJs(`document.querySelector('#sideList .side-item').click()`);
+  await waitFor(`!document.getElementById('step4').hidden`, 20000, 'songsheet opened from the sidebar');
+  await sleep(1500);
+  const openedPages = await evalJs(`document.querySelectorAll('#reviewList .sheet-item').length`);
+  const openedCurrent = await evalJs(`(document.querySelector('#sideList .side-item[aria-current="true"] .side-name') || {}).textContent || 'none'`);
+  const practiceOff = await evalJs(`document.getElementById('sidePractice').disabled`);
+  log(`sidebar opened "${sideName}": ${openedPages} page(s), marked current="${openedCurrent}", practice disabled=${practiceOff}`);
+  if (openedPages < 1) problems.push('the sidebar opened a songsheet with no pages');
+  if (openedCurrent !== sideName) problems.push(`the open songsheet is not marked in the sidebar (marked "${openedCurrent}")`);
+  if (practiceOff) problems.push('sidebar Practice stayed disabled with a songsheet open');
+
+  // Phone width, app view: the sidebar has to fall under the workspace rather
+  // than push it off the side.
+  await send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
+  await sleep(500);
+  for (const [step, name] of [['4', '8b-phone-app-review'], ['1', '8c-phone-app-source']]) {
+    await evalJs(`document.querySelector('#stepper [data-step="${step}"]').click()`);
+    await sleep(700);
+    const over = await evalJs(`document.documentElement.scrollWidth - innerWidth`);
+    log(`app view phone overflow step ${step}: ${over}px`);
+    if (over > 1) problems.push(`horizontal overflow in the app view on step ${step}: ${over}px`);
+    await shot(name);
+  }
+  const stackedBelow = await evalJs(`(() => {
+    const s = document.getElementById('sidebar').getBoundingClientRect();
+    const m = document.querySelector('main').getBoundingClientRect();
+    return (s.top >= m.top + m.height - 2) ? 'below' : 'beside';
+  })()`);
+  log('sidebar at phone width sits', stackedBelow, 'the workspace');
+  if (stackedBelow !== 'below') problems.push(`the sidebar did not collapse under the workspace at phone width (${stackedBelow})`);
+
+  // "New scan" has to put the songsheet down, not just change step: leaving it
+  // loaded is how a stored sheet's title ends up on the source card as though a
+  // video were ready.
+  await desktop();
+  await sleep(400);
+  await evalJs(`document.getElementById('sideNew').click()`);
+  await sleep(700);
+  const afterNew = await evalJs(`[
+    document.getElementById('step1').hidden ? 'not-step1' : 'step1',
+    document.getElementById('sidePractice').disabled,
+    document.getElementById('sidePracticeWhy').hidden,
+    document.querySelectorAll('#reviewList .sheet-item').length,
+    document.querySelectorAll('#sideList .side-item[aria-current="true"]').length].join('|')`);
+  const [nStep, nPracticeOff, nWhyHidden, nRows, nCurrent] = String(afterNew).split('|');
+  log(`after "New scan" -> ${nStep}, practice disabled=${nPracticeOff}, reason hidden=${nWhyHidden}, ${nRows} page rows, ${nCurrent} marked current`);
+  if (nStep !== 'step1') problems.push(`"New scan" did not go back to the first step (${nStep})`);
+  if (nRows !== '0') problems.push(`"New scan" left ${nRows} page(s) of the old songsheet loaded`);
+  if (nCurrent !== '0') problems.push('"New scan" left a songsheet marked open in the sidebar');
+  if (nPracticeOff !== 'true') problems.push('sidebar Practice stayed enabled with no songsheet open');
+  if (nWhyHidden !== 'false') problems.push('sidebar Practice is disabled without saying why');
+
+  // ...and back. The landing page has to come back whole, not as a stripped app
+  // view wearing its name.
+  await evalJs(`document.getElementById('viewToggle').click()`);
+  await sleep(500);
+  const [bView, bSide, bH1, bLede, bHow, bLabel] = String(await viewState()).split('|');
+  log(`back home -> data-view=${bView} sidebar=${bSide} h1=${bH1} lede=${bLede} how=${bHow} button="${bLabel}"`);
+  if (bView !== 'home') problems.push(`the toggle did not return to the landing page (data-view=${bView})`);
+  if (bSide !== 'none') problems.push(`the sidebar stayed on screen after returning home (display ${bSide})`);
+  if (bH1 === 'none' || bLede === 'none' || bHow === 'none') {
+    problems.push(`the landing page came back stripped (h1=${bH1} lede=${bLede} how=${bHow})`);
+  }
+  if (bLabel !== 'Open the app') problems.push(`the toggle did not reset its label (reads "${bLabel}")`);
+
+  // The choice has to outlive the tab. Checked after a real reload rather than
+  // by reading localStorage, because writing the key and never reading it back
+  // would pass that weaker test.
+  await evalJs(`document.getElementById('viewToggle').click()`);
+  await sleep(400);
+  await send('Page.reload');
+  await waitFor(`document.readyState === 'complete' && !!document.getElementById('viewToggle')`, 20000, 'reload in app view');
+  await sleep(700);
+  const reloadView = await evalJs(`document.body.dataset.view`);
+  const reloadLabel = await evalJs(`document.getElementById('viewToggleLabel').textContent.trim()`);
+  const reloadSide = await evalJs(`getComputedStyle(document.getElementById('sidebar')).display`);
+  log(`after reload -> data-view=${reloadView}, button="${reloadLabel}", sidebar=${reloadSide}`);
+  if (reloadView !== 'app') problems.push(`the app view did not survive a reload (data-view=${reloadView})`);
+  if (reloadLabel !== 'Home') problems.push(`the toggle came back out of step with the view (reads "${reloadLabel}")`);
+  if (reloadSide === 'none') problems.push('the app view came back after a reload with no sidebar');
+
+  // A downloaded app should not show a landing page every launch — and the web
+  // build must not be dragged along with it. Both halves are checked by faking
+  // the preload bridge the desktop build injects, with the remembered choice
+  // cleared so the default is what decides.
+  const forgetView = `(() => { try { localStorage.removeItem('vtt.view'); } catch { /* no storage */ } return 'ok'; })()`;
+  await evalJs(forgetView);
+  const { identifier: shellScript } = await send('Page.addScriptToEvaluateOnNewDocument', {
+    source: `window.vidtotab = { shell: 'desktop', platform: 'darwin' };`,
+  });
+  await send('Page.reload');
+  await waitFor(`document.readyState === 'complete' && !!document.getElementById('viewToggle')`, 20000, 'reload as the desktop app');
+  await sleep(600);
+  const desktopDefault = await evalJs(`document.body.dataset.view + '/' + (window.vidtotab ? window.vidtotab.shell : 'no-bridge')`);
+  log('desktop shell, nothing remembered ->', desktopDefault);
+  if (desktopDefault !== 'app/desktop') problems.push(`the desktop app should start in the app view (got ${desktopDefault})`);
+
+  await evalJs(forgetView);
+  await send('Page.removeScriptToEvaluateOnNewDocument', { identifier: shellScript });
+  await send('Page.reload');
+  await waitFor(`document.readyState === 'complete' && !!document.getElementById('viewToggle')`, 20000, 'reload as the web build');
+  await sleep(600);
+  const webDefault = await evalJs(`document.body.dataset.view + '/' + (window.vidtotab ? window.vidtotab.shell : 'no-bridge')`);
+  log('web build, nothing remembered ->', webDefault);
+  if (webDefault !== 'home/no-bridge') problems.push(`the web build should still open on the landing page (got ${webDefault})`);
 } catch (e) {
   failure = e;
   log('E2E FAILED:', e.message);

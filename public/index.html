@@ -205,6 +205,60 @@ code { font: 13px var(--mono); background: color-mix(in srgb, currentColor 10%, 
 .how-num { width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center; font-weight: 700; font-size: 13px; background: var(--accent-soft); color: var(--accent); flex: none; }
 .how b { font-size: 14.5px; }
 .how p { font-size: 13.5px; color: var(--muted); margin-top: 2px; }
+
+/* ---------- home / app view ----------
+   One document, two front doors. The landing page still sells the thing to
+   someone who arrived from a link; the app view is for someone who already has
+   songsheets and wants them one click away instead of four steps back. A
+   data-view on <body> swaps only the chrome, so steps 2-4 are untouched by it.
+   Colours are existing tokens throughout — the ones this project already
+   measured for AA in both themes. */
+.shell { display: contents; }
+.sidebar { display: none; }
+.view-toggle { flex: none; }
+
+body[data-view="app"] .shell { display: flex; align-items: flex-start; max-width: 1400px; margin: 0 auto; }
+body[data-view="app"] main { flex: 1; min-width: 0; }
+body[data-view="app"] .sidebar {
+  display: flex; flex-direction: column; gap: 10px; flex: none; width: 240px; min-width: 0;
+  padding: 16px 14px; background: var(--surface); border-right: 1px solid var(--line);
+  /* Full height on purpose: a panel that stops where its content does reads as
+     a floating card, and the border has to look like a spine, not an edge. */
+  position: sticky; top: 57px; height: calc(100vh - 57px); overflow-y: auto;
+}
+/* The pitch, hidden — not deleted. Toggling back must give the landing page
+   exactly as it was, so none of this is torn out of the DOM. */
+body[data-view="app"] .eyebrow,
+body[data-view="app"] .hero h1,
+body[data-view="app"] .lede,
+body[data-view="app"] #how { display: none; }
+body[data-view="app"] .hero { max-width: none; margin: 0 0 4px; text-align: left; }
+body[data-view="app"] .url-form { max-width: none; margin: 0 0 8px; border-radius: 11px; padding: 4px 4px 4px 12px; box-shadow: var(--shadow-sm); }
+body[data-view="app"] .url-form svg { width: 17px; height: 17px; }
+body[data-view="app"] .url-form input { font-size: 15px; padding: 6px 2px; }
+body[data-view="app"] .url-form .btn { padding: 7px 14px; font-size: 14px; }
+body[data-view="app"] .source-card { margin: 14px 0 0; }
+
+.sidebar .btn { width: 100%; }
+.side-label { font-size: 12px; font-weight: 650; text-transform: uppercase; letter-spacing: .05em; color: var(--faint); margin-top: 4px; }
+.side-list { list-style: none; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.side-item {
+  display: flex; gap: 9px; align-items: center; width: 100%; text-align: left; cursor: pointer;
+  border: 1px solid transparent; background: none; border-radius: 10px; padding: 6px;
+}
+.side-item:hover { background: var(--surface-2); border-color: var(--line); }
+.side-item[aria-current="true"] { background: var(--accent-soft); border-color: var(--accent); }
+.side-thumb { width: 44px; height: 27px; flex: none; border-radius: 5px; object-fit: cover; background: var(--paper); border: 1px solid var(--line); }
+.side-text { min-width: 0; flex: 1; }
+.side-name { display: block; font-size: 13.5px; font-weight: 600; line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.side-sub { display: block; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.side-empty { font-size: 13px; }
+/* Sits with the list, not pinned to the bottom of the screen: it acts on
+   whichever songsheet is open, so it belongs next to them. */
+.side-foot { padding-top: 12px; border-top: 1px solid var(--line); }
+/* Why, not just "no". A disabled button with no reason next to it is the same
+   as a broken one to anyone who cannot guess the rule. */
+.side-why { font-size: 12.5px; color: var(--muted); margin-top: 6px; }
 /* ---------- practice view ---------- */
 /* Above the drop veil: while reading, nothing else should show through. */
 .practice { position: fixed; inset: 0; z-index: 60; display: flex; flex-direction: column; background: #111113; color: #f2f2f4; }
@@ -353,12 +407,24 @@ button.chip { cursor: pointer; }
   .stage-grid { grid-template-columns: 1fr; }
   .panel { position: static; }
   .how { grid-template-columns: 1fr; margin-top: 34px; }
+  /* Narrow enough that 240px of sidebar would squeeze the workspace, so it
+     collapses under it rather than beside it. order keeps the work on top. */
+  body[data-view="app"] .shell { flex-direction: column; }
+  body[data-view="app"] main { width: 100%; }
+  body[data-view="app"] .sidebar {
+    order: 2; width: 100%; position: static; height: auto;
+    border-right: none; border-top: 1px solid var(--line);
+  }
 }
 @media (max-width: 640px) {
   main { padding: 14px 16px 100px; }
   .topbar-inner { padding: 8px 16px; }
   .stepper .lbl { display: none; }
   .stepper button { padding: 5px; }
+  /* The brand, four step pills and a labelled button do not fit across a phone.
+     The icon keeps the button; the label lives on in its aria-label. */
+  .view-toggle .lbl { display: none; }
+  .view-toggle { padding: 6px 9px; }
   .hero { margin-top: 18px; }
   .url-form { flex-wrap: wrap; padding: 8px; }
   .url-form input { flex-basis: calc(100% - 40px); }
@@ -371,7 +437,21 @@ button.chip { cursor: pointer; }
 }
 </style>
 </head>
-<body>
+<body data-view="home">
+<!-- Inline and first, because app.js is a module and therefore deferred: choosing
+     the view after paint means the desktop app flashes the landing page on every
+     launch, which is the exact thing the app view exists to stop. Only the
+     starting value is decided here — app.js owns the toggle and the writes.
+     Storage throws in a private window, so every read is guarded. -->
+<script>
+  (() => {
+    let saved = null;
+    try { saved = localStorage.getItem('vtt.view'); } catch { /* no storage */ }
+    let desktop = false;
+    try { desktop = window.vidtotab?.shell === 'desktop'; } catch { /* web build */ }
+    document.body.dataset.view = (saved === 'app' || saved === 'home') ? saved : (desktop ? 'app' : 'home');
+  })();
+</script>
 
 <header class="topbar">
   <div class="topbar-inner">
@@ -385,8 +465,36 @@ button.chip { cursor: pointer; }
       <li><button type="button" data-step="3" disabled><span class="num">3</span><span class="lbl">Scan</span></button></li>
       <li><button type="button" data-step="4" disabled><span class="num">4</span><span class="lbl">Songsheet</span></button></li>
     </ol>
+    <!-- The way between the landing page and the working layout. Label and icon
+         both name the destination, so the button says where it goes rather than
+         which mode you are in. -->
+    <button type="button" id="viewToggle" class="btn small view-toggle">
+      <svg id="viewIconApp" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="3.5" width="15" height="13" rx="2.5"/><path d="M8 3.5v13"/></svg>
+      <svg id="viewIconHome" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" hidden><path d="m2.8 9 7.2-6 7.2 6"/><path d="M4.6 8v8.5h10.8V8"/></svg>
+      <span class="lbl" id="viewToggleLabel">Open the app</span>
+    </button>
   </div>
 </header>
+
+<div class="shell">
+<!-- The app view's spine: new scan, every saved songsheet, practice. It is a
+     sibling of <main> rather than part of a step, because its whole point is to
+     reach a songsheet from wherever you are — until now a saved sheet was only
+     reachable from step 1, so switching between two of them mid-session meant
+     unwinding the stepper. In home view .shell is display:contents and this is
+     display:none, so the landing page is byte-for-byte what it was. -->
+<aside id="sidebar" class="sidebar" aria-label="Songsheets">
+  <button type="button" class="btn primary" id="sideNew">
+    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M10 4.5v11M4.5 10h11"/></svg>New scan</button>
+  <p class="side-label" id="sideListLabel" hidden>Your songsheets</p>
+  <ul class="side-list" id="sideList"></ul>
+  <p id="sideEmpty" class="side-empty quiet">Scanned songsheets are kept here.</p>
+  <div class="side-foot">
+    <button type="button" class="btn" id="sidePractice" disabled>
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4h5a2 2 0 0 1 2 2v9a2 2 0 0 0-2-2H3Z"/><path d="M17 4h-5a2 2 0 0 0-2 2v9a2 2 0 0 1 2-2h5Z"/></svg>Practice</button>
+    <p class="side-why" id="sidePracticeWhy">Open a songsheet first — practice shows its pages full screen.</p>
+  </div>
+</aside>
 
 <main>
   <div id="errorBanner" class="banner error" role="alert" hidden>
@@ -586,6 +694,7 @@ button.chip { cursor: pointer; }
     <p class="keyhint center"><kbd>j</kbd>/<kbd>k</kbd> select · <kbd>x</kbd> remove · <kbd>u</kbd> undo · <kbd>Enter</kbd> jump to the video · <kbd>p</kbd> practice</p>
   </section>
 </main>
+</div>
 
 <div id="toast" class="toast" role="status" hidden><span id="toastMsg"></span><button type="button" id="toastUndo">Undo</button></div>
 <!-- Full-screen reader for playing along. Arrows, space and PageUp/PageDown turn
