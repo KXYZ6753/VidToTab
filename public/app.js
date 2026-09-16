@@ -327,6 +327,37 @@ import { deleteSheet, getSheet, hasStorage, listSheets, newId, requestPersistenc
     }, 0);
   });
 
+  // Paste a link anywhere on the page, not just into the box. Everything routes
+  // through the form so there is one code path that loads a video.
+  const looksLikeLink = (s) => /^https?:\/\/\S+$/i.test(String(s || '').trim());
+
+  function loadLink(url) {
+    $('urlInput').value = url.trim();
+    $('urlForm').requestSubmit();
+  }
+
+  // A finished songsheet is saved to the library before anything can replace
+  // it, so loading another video is not destructive. Two cases still are: work
+  // in progress, and a scan that found nothing — that one saves no songsheet,
+  // so replacing it would silently discard the explanation of why.
+  const busyWithWork = () => state.job === 'downloading' || state.job === 'analyzing'
+    || (state.job === 'done' && state.items.length === 0);
+
+  document.addEventListener('paste', (e) => {
+    const t = e.target;
+    // The URL box has its own handler; reacting here too would submit twice.
+    if (t && (t.id === 'urlInput' || t.matches?.('input, textarea, [contenteditable]'))) return;
+    const text = e.clipboardData?.getData('text');
+    if (!looksLikeLink(text)) return;
+    if (busyWithWork()) {
+      showToast('Still working on the current video — cancel it first', false);
+      return;
+    }
+    e.preventDefault();
+    showStep(1);
+    loadLink(text);
+  });
+
   function uploadFile(file) {
     resetForNewSource(file.name);
     setDlProgress(0, 'Uploading…');
@@ -359,8 +390,12 @@ import { deleteSheet, getSheet, hasStorage, listSheets, newId, requestPersistenc
   });
   const isVideoFile = (f) => f && (f.type.startsWith('video/') || /\.(mp4|mkv|webm|mov|avi|m4v)$/i.test(f.name));
   let dragDepth = 0;
+  // A dragged link counts too: dropping a YouTube tab onto the window is the
+  // fastest way in, and it used to do nothing at all.
+  const dragHasLink = (dt) => [...(dt?.types || [])].some((t) => t === 'text/uri-list' || t === 'text/plain');
   document.addEventListener('dragenter', (e) => {
-    if (![...(e.dataTransfer?.types || [])].includes('Files')) return;
+    const types = [...(e.dataTransfer?.types || [])];
+    if (!types.includes('Files') && !dragHasLink(e.dataTransfer)) return;
     dragDepth++;
     $('dropVeil').hidden = false;
   });
@@ -374,7 +409,17 @@ import { deleteSheet, getSheet, hasStorage, listSheets, newId, requestPersistenc
     dragDepth = 0;
     $('dropVeil').hidden = true;
     const f = e.dataTransfer?.files?.[0];
-    if (isVideoFile(f)) uploadFile(f);
+    if (isVideoFile(f)) { uploadFile(f); return; }
+    // Dropped a link rather than a file. uri-list first: dragging a browser tab
+    // gives both, and the plain-text copy is sometimes the page title.
+    const dropped = e.dataTransfer?.getData('text/uri-list') || e.dataTransfer?.getData('text/plain');
+    if (!looksLikeLink(dropped)) return;
+    if (busyWithWork()) {
+      showToast('Still working on the current video — cancel it first', false);
+      return;
+    }
+    showStep(1);
+    loadLink(dropped);
   });
 
   $('dlCancel').addEventListener('click', () => api('/api/cancel').catch(() => {}));
@@ -1554,6 +1599,17 @@ import { deleteSheet, getSheet, hasStorage, listSheets, newId, requestPersistenc
   $('paperSelect').value = state.paper;
   buildLookSeg();
   renderLibrary();
+
+  // ?url=… lets a bookmark button, a shared link or (later) a vidtotab:// deep
+  // link hand a video straight over. Routed through the same form as every
+  // other entry, and the query is cleared so a reload does not start it again.
+  (() => {
+    let incoming = null;
+    try { incoming = new URLSearchParams(location.search).get('url'); } catch { /* no search */ }
+    if (!looksLikeLink(incoming)) return;
+    try { history.replaceState(null, '', location.pathname); } catch { /* not allowed */ }
+    loadLink(incoming);
+  })();
   updateSensSeg();
   checkPreflight();
   connectSSE();

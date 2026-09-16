@@ -171,6 +171,47 @@ try {
     log(`yt-dlp current (${pref.ytdlpVersion || '?'}) — no staleness banner expected`);
   }
 
+  // The one-click entry points are pure wiring, which is the kind of thing that
+  // looks right and silently does nothing: a too-eager guard swallows every
+  // paste, and ?url= can fire before the form exists. Checked without network
+  // by watching where the link lands rather than whether it downloads.
+  // Submission is blocked for the duration: these entry points end in a real
+  // POST, and letting a probe start a download of example.test would reset the
+  // app and wreck every later step. Capturing the submit event also proves the
+  // link reached the form, which is stronger than reading the input afterwards
+  // — that would race requestSubmit().
+  const probeEntry = async (label, script) => {
+    const got = await evalJs(`new Promise((resolve) => {
+      const form = document.getElementById('urlForm');
+      const input = document.getElementById('urlInput');
+      const before = input.value;
+      const onSubmit = (e) => { e.preventDefault(); e.stopImmediatePropagation(); finish(input.value); };
+      const timer = setTimeout(() => finish(input.value || '(no submit)'), 1200);
+      function finish(v) {
+        clearTimeout(timer);
+        form.removeEventListener('submit', onSubmit, true);
+        input.value = before;
+        resolve(String(v));
+      }
+      form.addEventListener('submit', onSubmit, true);
+      ${script}
+    })`);
+    log(`${label} ->`, got || '(nothing)');
+    return String(got);
+  };
+
+  const pasted = await probeEntry('paste a link anywhere', `
+      const dt = new DataTransfer();
+      dt.setData('text/plain', 'https://example.test/watch?v=paste-probe');
+      document.body.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));`);
+  if (!pasted.includes('paste-probe')) problems.push(`pasting a link anywhere did not reach the URL form (got "${pasted}")`);
+
+  const dropped = await probeEntry('drop a link', `
+      const dt = new DataTransfer();
+      dt.setData('text/uri-list', 'https://example.test/watch?v=drop-probe');
+      document.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));`);
+  if (!dropped.includes('drop-probe')) problems.push(`dropping a link did not reach the URL form (got "${dropped}")`);
+
   if (YT_URL) {
     log('source: youtube link', YT_URL);
     await evalJs(`(() => {
