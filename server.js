@@ -226,6 +226,15 @@ function runProc(my, cmd, args, onLine) {
 
 const run = (cmd, args) => runProc({}, cmd, args); // untracked (not cancellable)
 
+// yt-dlp merges video and audio with ffmpeg, which it goes looking for on PATH.
+// A packaged app has no Homebrew on its PATH, so it would find nothing and fail
+// at the merge — with the bundled ffmpeg sitting right there unused. Point it at
+// ours whenever we know where ours is.
+function ytFfmpegArgs() {
+  const p = toolPath('ffmpeg');
+  return path.isAbsolute(p) ? ['--ffmpeg-location', path.dirname(p)] : [];
+}
+
 function lineSplit(stream, fn) {
   let buf = '';
   stream.on('data', d => {
@@ -332,7 +341,7 @@ async function urlFlow(my, url) {
 function download(my, url, extraArgs) {
   let stage = 0, last = -1;
   return runProc(my, 'yt-dlp',
-    ['--newline', ...YT_DOWNLOAD_ARGS, ...extraArgs, '-o', path.join(WORK, 'video.%(ext)s'), '--', url],
+    ['--newline', ...ytFfmpegArgs(), ...YT_DOWNLOAD_ARGS, ...extraArgs, '-o', path.join(WORK, 'video.%(ext)s'), '--', url],
     line => {
       if (line.startsWith('[download] Destination:')) stage++;
       if (line.startsWith('[Merger]') || line.startsWith('[VideoRemuxer]')) {
@@ -407,6 +416,34 @@ async function fileFlow(my) {
 const PLAY_V = new Set(['h264', 'hevc', 'av1', 'vp9']);
 const PLAY_A = new Set(['', 'aac', 'mp3', 'opus']);
 
+// Which encoder this particular ffmpeg can actually use.
+//
+// Asking for libx264 unconditionally was fine against a Homebrew build and
+// broken in the packaged app: the builds shipped with it are LGPL and have no
+// libx264 at all, so converting anything a browser would not already play
+// failed with "Unknown encoder" and the video simply never became ready.
+//
+// h264 is preferred wherever it exists because everything plays it; vp9 is the
+// fallback and is already in PLAY_V, so its output needs no second conversion.
+const ENCODERS = [
+  ['libx264', ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p']],
+  ['h264_videotoolbox', ['-c:v', 'h264_videotoolbox', '-b:v', '5M', '-pix_fmt', 'yuv420p']],
+  ['h264_nvenc', ['-c:v', 'h264_nvenc', '-b:v', '5M', '-pix_fmt', 'yuv420p']],
+  ['h264_qsv', ['-c:v', 'h264_qsv', '-b:v', '5M', '-pix_fmt', 'yuv420p']],
+  ['h264_amf', ['-c:v', 'h264_amf', '-b:v', '5M', '-pix_fmt', 'yuv420p']],
+  ['libvpx-vp9', ['-c:v', 'libvpx-vp9', '-b:v', '0', '-crf', '32', '-row-mt', '1', '-pix_fmt', 'yuv420p']],
+];
+let encoderArgs = null;
+async function videoEncoderArgs() {
+  if (encoderArgs) return encoderArgs;
+  const r = await run('ffmpeg', ['-hide_banner', '-encoders']);
+  const found = ENCODERS.find(([name]) => new RegExp(`^\\s*\\S+\\s+${name}\\s`, 'm').test(r.out));
+  if (found) console.log(`transcoding with ${found[0]}`);
+  else console.error('no usable video encoder in this ffmpeg build — conversion will fail');
+  encoderArgs = found ? found[1] : ENCODERS[0][1];
+  return encoderArgs;
+}
+
 // Leave a browser-playable mp4 at VIDEO: rename when already fine, else copy
 // the video stream into mp4 (re-encoding only audio if needed), else fully
 // transcode. Returns null on success or {msg, detail}.
@@ -429,9 +466,7 @@ async function toPlayableMp4(my, src) {
     r = await convert(my, tmp, ['-c:v', 'copy', ...(PLAY_A.has(p.acodec) ? ['-c:a', 'copy'] : ['-c:a', 'aac'])], p.duration, 'Converting to mp4');
   }
   if (r.code !== 0 && !my.cancelled && my === job) {
-    r = await convert(my, tmp,
-      ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p', '-c:a', 'aac'],
-      p.duration, 'Transcoding');
+    r = await convert(my, tmp, [...(await videoEncoderArgs()), '-c:a', 'aac'], p.duration, 'Transcoding');
   }
   fs.rmSync(tmp, { force: true });
   return r.code === 0 ? null : { msg: 'Could not convert the video to a playable mp4.', detail: r.err };

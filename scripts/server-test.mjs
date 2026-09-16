@@ -10,8 +10,9 @@ import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
-import { spawn, execSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { toolPath } from '../pipeline/tools.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const WORK = path.join(ROOT, 'work');
@@ -27,9 +28,29 @@ const freePort = () => new Promise((resolve, reject) => {
 // and a fixture written next to the source tree survives a failed run and shows
 // up as an untracked file waiting to be committed by accident.
 const SMALL = path.join(os.tmpdir(), 'vidtotab-server-test-small.mp4');
+export const CLIP = { w: 320, h: 240, frames: 20, fps: 10 };
+
+// Frames are piped in as rawvideo rather than generated with `-f lavfi`: the
+// ffmpeg this app ships is built --disable-avdevice, so lavfi cannot be opened
+// there at all, and a fixture that only builds on a developer's Homebrew copy
+// tests the wrong ffmpeg.
+function makeClip(dest, codecArgs) {
+  const { w, h, frames: n, fps } = CLIP;
+  const frame = w * h * 3;
+  const buf = Buffer.alloc(frame * n);
+  for (let i = 0; i < n; i++) buf.fill((20 + i * 10) & 0xff, i * frame, (i + 1) * frame);
+  const r = spawnSync(toolPath('ffmpeg'), ['-y', '-v', 'error',
+    '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-s', `${w}x${h}`, '-r', String(fps), '-i', 'pipe:0',
+    ...codecArgs, dest], { input: buf, stdio: ['pipe', 'ignore', 'pipe'] });
+  if (r.status !== 0) throw new Error(`could not build the test clip: ${String(r.stderr).trim().slice(-300)}`);
+  return dest;
+}
+
+// VP9 because the shipped builds are LGPL and have no libx264 — and because
+// vp9 is already in the server's playable set, so this fixture needs no
+// conversion and the upload tests measure only what they mean to.
 function tinyVideo() {
-  execSync(`ffmpeg -y -v error -f lavfi -i testsrc=size=320x240:rate=10:duration=2 -pix_fmt yuv420p ${JSON.stringify(SMALL)}`);
-  return SMALL;
+  return makeClip(SMALL, ['-c:v', 'libvpx-vp9', '-b:v', '0', '-crf', '40', '-pix_fmt', 'yuv420p']);
 }
 
 async function startServer(port) {
@@ -173,9 +194,37 @@ async function supersedeSilence() {
   }
 }
 
+// A video the browser will not play has to be converted, not quietly
+// abandoned. The transcode target used to be a hardcoded libx264, which is
+// absent from the LGPL builds the app ships: conversion failed with "Unknown
+// encoder", the video never became ready, and nothing in the interface said
+// why. Nothing covered this path until it broke in CI.
+async function transcodesUnplayable() {
+  const port = await freePort();
+  const { srv } = await startServer(port);
+  const odd = path.join(os.tmpdir(), 'vidtotab-server-test-mpeg4.mp4');
+  try {
+    makeClip(odd, ['-c:v', 'mpeg4', '-pix_fmt', 'yuv420p']); // mpeg4 is not in PLAY_V
+    await put(port, 'odd-codec.mp4', (req) => fs.createReadStream(odd).pipe(req));
+    let meta = null;
+    for (let i = 0; i < 250; i++) {
+      const r = await fetch(`http://127.0.0.1:${port}/api/meta`).catch(() => null);
+      if (r?.ok) { meta = await r.json(); if (meta.ready) break; }
+      await sleep(200);
+    }
+    check('transcode: an unplayable codec is converted', !!meta?.ready, JSON.stringify(meta));
+    check('transcode: the result keeps its dimensions',
+      meta?.width === CLIP.w && meta?.height === CLIP.h, `${meta?.width}x${meta?.height}`);
+  } finally {
+    srv.kill('SIGKILL');
+    fs.rmSync(odd, { force: true });
+  }
+}
+
 await uploadRace();
 await supersedeSilence();
 await crossSiteGuard();
+await transcodesUnplayable();
 
 const failed = results.filter((r) => !r.ok);
 console.log(`\n${results.length - failed.length}/${results.length} server checks passed`);

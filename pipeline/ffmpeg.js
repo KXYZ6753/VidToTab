@@ -208,12 +208,21 @@ async function selfCheck() {
     assert.deepEqual(Buffer.from(g[0]), gray);
 
     // keyframe grabs from a tiny lossless video: 3 grabs, in order, right size
+    //
+    // Frames are piped in as rawvideo rather than conjured with `-f lavfi`. The
+    // LGPL ffmpeg this app ships is built --disable-avdevice, so the lavfi
+    // input device is not in it at all — testsrc is a filter, but reaching it
+    // needs that device. Piping works on every build.
     const vid = path.join(dir, 'v.mkv');
     await new Promise((resolve, reject) => {
-      const c = spawn(toolPath('ffmpeg'), ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi',
-        '-i', 'testsrc=size=64x48:rate=10:duration=3', '-c:v', 'ffv1', '-g', '5', vid], { stdio: 'ignore' });
+      const c = spawn(toolPath('ffmpeg'), ['-hide_banner', '-loglevel', 'error', '-y',
+        '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-s', '64x48', '-r', '10', '-i', 'pipe:0',
+        '-c:v', 'ffv1', '-g', '5', vid], { stdio: ['pipe', 'ignore', 'inherit'] });
       c.once('error', reject);
-      c.once('close', (code) => (code === 0 ? resolve() : reject(new Error('lavfi encode failed'))));
+      c.once('close', (code) => (code === 0 ? resolve() : reject(new Error('test clip encode failed'))));
+      // 30 frames at 10 fps = 3 s, each a different shade so the grabs differ.
+      for (let i = 0; i < 30; i++) c.stdin.write(Buffer.alloc(64 * 48 * 3, (i * 8) & 0xff));
+      c.stdin.end();
     });
     const grabs = await grabFramesAt(vid, [0.2, 1.4, 2.6], { vf: 'format=gray', frameBytes: 64 * 48 });
     assert.equal(grabs.length, 3);
@@ -235,7 +244,9 @@ async function selfCheck() {
       c.once('error', () => resolve(false));
       c.once('close', (code) => resolve(code === 0));
     });
-    const madeFlat = await ff(['-f', 'lavfi', '-i', 'testsrc=size=64x48:rate=10:duration=1', '-c:v', 'mpeg4', flat]);
+    // Re-encodes the clip made above rather than generating one, for the same
+    // reason: no lavfi in the shipped build.
+    const madeFlat = await ff(['-i', vid, '-t', '1', '-c:v', 'mpeg4', flat]);
     const madeRot = madeFlat && await ff(['-display_rotation', '90', '-i', flat, '-c', 'copy', rot]);
     if (madeRot) {
       const r = await probeVideo(rot);

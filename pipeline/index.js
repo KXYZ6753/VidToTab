@@ -446,12 +446,18 @@ async function selfCheck() {
     // timer regardless turned a video with no tab on screen into one "page"
     // every 4 s — about 150 of them for a 10-minute cover — which reads as a
     // successful scan. The timed capture now happens only when asked for.
+    // Black frames are piped in rather than made with `-f lavfi`: the LGPL
+    // build this app ships has no avdevice, so lavfi cannot be opened there.
     const blank = path.join(dir, 'blank.mkv');
     await new Promise((resolve, reject) => {
-      const c = spawn(toolPath('ffmpeg'), ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi',
-        '-i', 'color=c=black:s=320x120:d=6:r=10', '-c:v', 'ffv1', blank], { stdio: 'ignore' });
+      const c = spawn(toolPath('ffmpeg'), ['-hide_banner', '-loglevel', 'error', '-y',
+        '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-s', '320x120', '-r', '10', '-i', 'pipe:0',
+        '-c:v', 'ffv1', blank], { stdio: ['pipe', 'ignore', 'inherit'] });
       c.once('error', reject);
       c.once('close', (code) => (code === 0 ? resolve() : reject(new Error('blank encode failed'))));
+      const black = Buffer.alloc(320 * 120 * 3, 0);
+      for (let i = 0; i < 60; i++) c.stdin.write(black); // 6 s at 10 fps
+      c.stdin.end();
     });
     const blankOpts = { crop: { x: 0, y: 0, w: 320, h: 120 }, startTime: 0, sensitivity: 0.5 };
     const blankWarnings = [];
