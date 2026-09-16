@@ -359,6 +359,11 @@ import { deleteSheet, getSheet, hasStorage, listSheets, newId, requestPersistenc
 
   // ---------- 1. video ----------
 
+  // The save in flight, if any. A new video wipes the work folder server-side,
+  // so anything still being read out of it has to finish first.
+  let sheetSave = null;
+  const settleSave = () => (sheetSave ? sheetSave.catch(() => {}) : Promise.resolve());
+
   function resetForNewSource(label) {
     Object.assign(state, {
       captures: [], items: [], undoStack: [], deletedStamps: [], lastAnalyze: null, suggestion: null,
@@ -400,6 +405,7 @@ import { deleteSheet, getSheet, hasStorage, listSheets, newId, requestPersistenc
     e.preventDefault();
     const url = $('urlInput').value.trim();
     if (!url) return;
+    await settleSave(); // the previous songsheet is still being read off disk
     resetForNewSource('Reading video info…');
     try {
       await api('/api/video/url', { url });
@@ -447,7 +453,8 @@ import { deleteSheet, getSheet, hasStorage, listSheets, newId, requestPersistenc
     loadLink(text);
   });
 
-  function uploadFile(file) {
+  async function uploadFile(file) {
+    await settleSave(); // as above: do not wipe the folder out from under it
     resetForNewSource(file.name);
     setDlProgress(0, 'Uploading…');
     const xhr = new XMLHttpRequest();
@@ -1460,7 +1467,12 @@ import { deleteSheet, getSheet, hasStorage, listSheets, newId, requestPersistenc
     showStep(4);
     // Save straight away: the next video wipes the work folder, and until now
     // that is exactly when a finished songsheet disappeared.
-    saveCurrentSheet().catch(() => { /* reported inside */ });
+    // Kept so that starting another video can wait for it: the save reads each
+    // page back from /captures/, and the server deletes that folder the moment a
+    // new video arrives.
+    sheetSave = saveCurrentSheet()
+      .catch(() => { /* reported inside */ })
+      .finally(() => { sheetSave = null; });
   }
 
   function backToSource() {
@@ -1725,6 +1737,15 @@ import { deleteSheet, getSheet, hasStorage, listSheets, newId, requestPersistenc
         : null;
       if (!clean) continue;
       pages.push({ tStart: it.tStart, tEnd: it.tEnd, alsoAt: it.alsoAt, w: it.w, h: it.h, clean, color });
+    }
+    // A page that could not be read back is not a page to quietly leave out.
+    // These live in the server's work folder, which a new video deletes, so a
+    // save racing one dropped whatever had already gone and stored a songsheet
+    // with fewer pages than the scan found — silently, looking like success.
+    const wanted = items.filter((it) => !it.deleted).length;
+    if (pages.length !== wanted) {
+      addWarning(`This songsheet was not saved: ${wanted - pages.length} of ${wanted} pages could not be read back. It is still on screen — export it, or scan again.`);
+      return;
     }
     if (!pages.length) return;
     const thumb = target.thumbUrl
