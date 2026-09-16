@@ -14,6 +14,7 @@ import { assemblePages } from './assemble.js';
 import { pickSampleFrames, renderClean, renderColor } from './composite.js';
 import { calibrateCrop } from './detect.js';
 import { inkHalf, localGain, suppressTintedBars, topHat } from './ink.js';
+import { toolPath } from './tools.js';
 
 const CACHE_VERSION = 3;
 const K_SAMPLES = 11;
@@ -379,7 +380,7 @@ async function selfCheck() {
     };
     const videoPath = path.join(dir, 'test.mkv');
     await new Promise((resolve, reject) => {
-      const child = spawn('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y',
+      const child = spawn(toolPath('ffmpeg'), ['-hide_banner', '-loglevel', 'error', '-y',
         '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-s', `${W}x${H}`, '-r', String(FPS), '-i', 'pipe:0',
         '-c:v', 'ffv1', videoPath], { stdio: ['pipe', 'ignore', 'inherit'] }); // ffv1: lossless, intra-only
       child.once('error', reject);
@@ -447,7 +448,7 @@ async function selfCheck() {
     // successful scan. The timed capture now happens only when asked for.
     const blank = path.join(dir, 'blank.mkv');
     await new Promise((resolve, reject) => {
-      const c = spawn('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi',
+      const c = spawn(toolPath('ffmpeg'), ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi',
         '-i', 'color=c=black:s=320x120:d=6:r=10', '-c:v', 'ffv1', blank], { stdio: 'ignore' });
       c.once('error', reject);
       c.once('close', (code) => (code === 0 ? resolve() : reject(new Error('blank encode failed'))));

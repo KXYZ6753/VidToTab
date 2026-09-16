@@ -8,13 +8,23 @@ import { PDFDocument, PDFString, StandardFonts, rgb } from 'pdf-lib';
 import { runPipeline, cancelPipeline } from './pipeline/index.js';
 import { detectRegion } from './pipeline/detect.js';
 import { YT_BASE_ARGS, YT_DOWNLOAD_ARGS, noteClientSuccess, orderedClients } from './pipeline/config.js';
+import { toolPath } from './pipeline/tools.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(ROOT, 'public');
-const WORK = path.join(ROOT, 'work');
+// A packaged app runs from a read-only bundle and a container wants its state
+// on a mounted volume, so the working folder is configurable. The default keeps
+// a plain checkout self-contained, exactly as before.
+const WORK = process.env.VIDTOTAB_WORK_DIR
+  || (process.env.VIDTOTAB_DATA_DIR ? path.join(process.env.VIDTOTAB_DATA_DIR, 'work') : path.join(ROOT, 'work'));
 const VIDEO = path.join(WORK, 'video.mp4');
 const THUMB = path.join(WORK, 'thumb.jpg');
-const PORT = Number(process.env.PORT) || 3000;
+// An explicit PORT=0 asks the OS for any free port, which is how the desktop
+// shell keeps two launches from fighting over a fixed one. `|| 3000` threw that
+// away silently, because 0 is falsy.
+const envPort = process.env.PORT?.trim();
+const parsedPort = envPort ? Number(envPort) : NaN;
+const PORT = Number.isInteger(parsedPort) && parsedPort >= 0 && parsedPort <= 65535 ? parsedPort : 3000;
 const HOST = process.env.HOST || '127.0.0.1'; // loopback unless deliberately opened up
 const UPLOAD_CAP = 4 * 2 ** 30; // 4 GB
 
@@ -36,7 +46,7 @@ fs.mkdirSync(WORK, { recursive: true });
 
 // Async tool checks: a spawnSync here stalls SSE and video range requests.
 const have = (cmd, arg) => new Promise(resolve => {
-  const p = spawn(cmd, [arg], { stdio: ['ignore', 'pipe', 'ignore'] });
+  const p = spawn(toolPath(cmd), [arg], { stdio: ['ignore', 'pipe', 'ignore'] });
   let out = '';
   p.stdout.on('data', (d) => { out += d; });
   p.on('error', () => resolve({ ok: false, out: '' }));
@@ -175,7 +185,7 @@ function runProc(my, cmd, args, onLine) {
     try {
       // detached: own process group, so killProc can take out grandchildren
       // too (yt-dlp spawns ffmpeg for merges/HLS; SIGKILL can't be relayed)
-      p = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'], detached: true });
+      p = spawn(toolPath(cmd), args, { stdio: ['ignore', 'pipe', 'pipe'], detached: true });
     } catch (e) {
       return resolve({ code: -1, out, err: String(e) });
     }
@@ -951,7 +961,12 @@ function readJson(req, limit = 1e6) {
 // When HOST is deliberately set to a non-loopback address (the hosted build),
 // the operator has opted in, so the Host and Origin checks step aside.
 const LOOPBACK = HOST === '127.0.0.1' || HOST === 'localhost' || HOST === '::1';
-const ALLOWED_HOSTS = new Set([`127.0.0.1:${PORT}`, `localhost:${PORT}`, `[::1]:${PORT}`]);
+const hostsFor = (p) => new Set([`127.0.0.1:${p}`, `localhost:${p}`, `[::1]:${p}`]);
+// Rebuilt once the OS assigns a port. PORT=0 asks for any free port — which is
+// how the desktop shell avoids two launches fighting over a fixed one — and
+// without rebuilding this, every request would arrive with the real port in its
+// Host header, not match "…:0", and be refused.
+let ALLOWED_HOSTS = hostsFor(PORT);
 
 function crossSiteReject(req) {
   if (LOOPBACK && !ALLOWED_HOSTS.has(String(req.headers.host || '').toLowerCase())) {
@@ -1042,8 +1057,12 @@ server.on('error', (e) => {
 // folder on whatever network this machine joins. LAN sharing is a separate,
 // explicit listener (see the phone-viewing feature), never the default.
 server.listen(PORT, HOST, () => {
-  console.log(`VidToTab running at http://${HOST}:${PORT}`);
-  console.log(`VIDTOTAB_LISTENING ${PORT}`); // the desktop shell parses this
+  // The port actually bound, not the one requested: with PORT=0 the request is
+  // 0 and the shell would be told to connect to port 0.
+  const bound = server.address()?.port ?? PORT;
+  ALLOWED_HOSTS = hostsFor(bound);
+  console.log(`VidToTab running at http://${HOST}:${bound}`);
+  console.log(`VIDTOTAB_LISTENING ${bound}`); // the desktop shell parses this
   if (!preflight.ytdlp || !preflight.ffmpeg) {
     const missing = [!preflight.ytdlp && 'yt-dlp', !preflight.ffmpeg && 'ffmpeg'].filter(Boolean).join(' ');
     console.error(`missing tools: ${missing} — brew install ${missing}`);

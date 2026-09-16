@@ -2,6 +2,7 @@
 // stdin, probing. All children are tracked so cancelPipeline() can kill them.
 import { spawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+import { toolPath } from './tools.js';
 
 const children = new Set();
 
@@ -12,7 +13,7 @@ export function killAllChildren() {
 }
 
 function track(bin, args, stdio) {
-  const child = spawn(bin, args, { stdio });
+  const child = spawn(toolPath(bin), args, { stdio });
   children.add(child);
   child.once('close', () => children.delete(child));
   child.once('error', () => children.delete(child));
@@ -209,7 +210,7 @@ async function selfCheck() {
     // keyframe grabs from a tiny lossless video: 3 grabs, in order, right size
     const vid = path.join(dir, 'v.mkv');
     await new Promise((resolve, reject) => {
-      const c = spawn('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi',
+      const c = spawn(toolPath('ffmpeg'), ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi',
         '-i', 'testsrc=size=64x48:rate=10:duration=3', '-c:v', 'ffv1', '-g', '5', vid], { stdio: 'ignore' });
       c.once('error', reject);
       c.once('close', (code) => (code === 0 ? resolve() : reject(new Error('lavfi encode failed'))));
@@ -230,7 +231,7 @@ async function selfCheck() {
     const flat = path.join(dir, 'flat.mp4');
     const rot = path.join(dir, 'rot.mp4');
     const ff = (args) => new Promise((resolve) => {
-      const c = spawn('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', ...args], { stdio: 'ignore' });
+      const c = spawn(toolPath('ffmpeg'), ['-hide_banner', '-loglevel', 'error', '-y', ...args], { stdio: 'ignore' });
       c.once('error', () => resolve(false));
       c.once('close', (code) => resolve(code === 0));
     });

@@ -24,6 +24,7 @@ import { YT_DOWNLOAD_ARGS, noteClientSuccess, orderedClients } from '../pipeline
 import { probeVideo, rawFrames } from '../pipeline/ffmpeg.js';
 import { detectRegion } from '../pipeline/detect.js';
 import { runPipeline } from '../pipeline/index.js';
+import { toolPath } from '../pipeline/tools.js';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CACHE = path.join(ROOT, '.cache', 'eval');
@@ -53,7 +54,7 @@ function sh(cmd, args) {
   });
 }
 
-const ffmpeg = (args) => sh('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', ...args]);
+const ffmpeg = (args) => sh(toolPath('ffmpeg'), ['-hide_banner', '-loglevel', 'error', '-y', ...args]);
 
 // ------------------------------------------------------------ video cache
 
@@ -67,7 +68,7 @@ async function ensureVideo(v, dir) {
   for (const client of orderedClients()) {
     for (const f of fs.readdirSync(dir)) if (f.startsWith('video.')) fs.rmSync(path.join(dir, f), { force: true });
     log(`  downloading via ${client.label}…`);
-    const r = await sh('yt-dlp', ['-q', '--no-warnings', ...YT_DOWNLOAD_ARGS, ...client.args,
+    const r = await sh(toolPath('yt-dlp'), ['-q', '--no-warnings', ...YT_DOWNLOAD_ARGS, ...client.args,
       '-o', path.join(dir, 'video.%(ext)s'), '--', v.url]);
     if (r.code === 0 && fs.existsSync(file)) { noteClientSuccess(client.label); return file; }
     log(`  failed: ${r.err.trim().split('\n').pop()}`);
