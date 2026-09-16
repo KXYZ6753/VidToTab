@@ -490,13 +490,22 @@ async function toPlayableMp4(my, src) {
   const tmp = path.join(WORK, 'source.bin');
   fs.renameSync(src, tmp);
   let r = { code: -1, err: '' };
+  let stale = false;
   if (PLAY_V.has(p.vcodec)) {
     r = await convert(my, tmp, ['-c:v', 'copy', ...(PLAY_A.has(p.acodec) ? ['-c:a', 'copy'] : ['-c:a', 'aac'])], p.duration, 'Converting to mp4');
   }
   if (r.code !== 0 && !my.cancelled && my === job) {
-    r = await convert(my, tmp, [...(await videoEncoderArgs()), '-c:a', 'aac'], p.duration, 'Transcoding');
+    // Choosing an encoder runs real trial encodes, so it is slow in exactly the
+    // way probe() above is, and the job can change while it happens. Without
+    // re-checking, a cancelled video still starts a full transcode and a
+    // superseded one writes VIDEO over whatever the new job just put there —
+    // the very thing the comment at the top of this function is about.
+    const enc = await videoEncoderArgs();
+    if (my !== job || my.cancelled) stale = true;
+    else r = await convert(my, tmp, [...enc, '-c:a', 'aac'], p.duration, 'Transcoding');
   }
   fs.rmSync(tmp, { force: true });
+  if (stale) return { superseded: true, msg: 'The video changed.' };
   return r.code === 0 ? null : { msg: 'Could not convert the video to a playable mp4.', detail: r.err };
 }
 
