@@ -30,6 +30,8 @@ const parsedPort = envPort ? Number(envPort) : NaN;
 const PORT = Number.isInteger(parsedPort) && parsedPort >= 0 && parsedPort <= 65535 ? parsedPort : 3000;
 const HOST = process.env.HOST || '127.0.0.1'; // loopback unless deliberately opened up
 const UPLOAD_CAP = 4 * 2 ** 30; // 4 GB
+const UPLOAD_STALL_MS = (Number(process.env.VIDTOTAB_UPLOAD_STALL_SEC) > 0
+  ? Number(process.env.VIDTOTAB_UPLOAD_STALL_SEC) : 120) * 1000; // no bytes for this long and the upload is abandoned
 
 // VIDTOTAB_MODE is a label and nothing more. What the server binds to is HOST,
 // and what it enforces is VIDTOTAB_PUBLIC; keeping the three apart means a
@@ -709,6 +711,10 @@ async function putFile(req, res, u) {
   const src = path.join(WORK, `upload-${my.id}.bin`);
   my.uploadPath = src;
   my.upload = req; // so stopCurrent can cut a superseded upload off
+  // The same hold, by the other route: an upload that simply stops sending
+  // would keep its heavy slot for as long as the socket stayed open. Inactivity
+  // rather than total time, so a slow but progressing upload is left alone.
+  req.setTimeout(UPLOAD_STALL_MS, () => req.destroy(new Error('upload stalled')));
   try {
     await new Promise((resolve, reject) => {
       const ws = fs.createWriteStream(src);
@@ -1138,20 +1144,37 @@ function sendJson(res, code, obj) {
   res.end(body);
 }
 
-function readJson(req, limit = 1e6) {
+// A JSON body is tiny and should arrive at once. Waiting forever for one is not
+// patience, it is a hole: heavy() takes its slot when the request is admitted
+// and releases it only when the handler settles, so a connection that sent
+// headers and never sent a body parked postUrl inside this function and held
+// the slot. With one job at a time — the default — that single connection
+// denied a public instance to everyone, needing no valid link and no repetition.
+// requestTimeout is 0 so multi-GB uploads survive, which is exactly why nothing
+// else reclaimed it.
+const BODY_TIMEOUT_MS = (Number(process.env.VIDTOTAB_BODY_TIMEOUT_SEC) > 0
+  ? Number(process.env.VIDTOTAB_BODY_TIMEOUT_SEC) : 20) * 1000;
+
+function readJson(req, limit = 1e6, timeoutMs = BODY_TIMEOUT_MS) {
   return new Promise((resolve, reject) => {
     let n = 0;
     const chunks = [];
+    const timer = setTimeout(() => {
+      req.destroy();
+      reject(new Error('timed out waiting for the request body'));
+    }, timeoutMs);
+    const ok = (v) => { clearTimeout(timer); resolve(v); };
+    const no = (e) => { clearTimeout(timer); reject(e); };
     req.on('data', d => {
       n += d.length;
-      if (n > limit) { reject(new Error('body too large')); req.destroy(); }
+      if (n > limit) { no(new Error('body too large')); req.destroy(); }
       else chunks.push(d);
     });
     req.on('end', () => {
-      try { resolve(JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}')); }
-      catch { reject(new Error('invalid JSON')); }
+      try { ok(JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}')); }
+      catch { no(new Error('invalid JSON')); }
     });
-    req.on('error', reject);
+    req.on('error', no);
   });
 }
 

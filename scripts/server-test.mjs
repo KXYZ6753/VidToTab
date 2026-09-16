@@ -631,6 +631,74 @@ async function failedStartReleasesTheInstance() {
   }
 }
 
+// heavy() takes its slot when a request is admitted and releases it when the
+// handler settles, so a request that never delivers a body never releases it.
+// With one job at a time — the default — a single held-open connection denied
+// the whole instance, needing no valid link and no repetition.
+async function heldOpenStartDoesNotLockTheInstance() {
+  const port = await freePort();
+  const { srv } = await startServer(port, {
+    VIDTOTAB_PUBLIC: '1', VIDTOTAB_RATE_LIMIT: '200', VIDTOTAB_BODY_TIMEOUT_SEC: '2',
+  });
+  try {
+    const a = ((await get(port, '/')).setCookie || '').split(';')[0];
+    const b = 'vtt_owner=' + 'd'.repeat(32);
+    const clip = tinyVideo();
+
+    // Headers sent, body started and never finished: parked inside readJson.
+    const held = http.request({
+      host: '127.0.0.1', port, method: 'POST', path: '/api/video/url',
+      headers: { 'content-type': 'application/json', cookie: a },
+    }, (res) => res.resume());
+    held.on('error', () => {});
+    held.write('{"url":"https://exa');
+
+    await sleep(600);
+    const blocked = await put(port, 'blocked.mp4', (req) => fs.createReadStream(clip).pipe(req), { cookie: b });
+    check('held-open: it really does hold the instance while it lasts', blocked.status === 503, String(blocked.status));
+
+    await sleep(2600); // past the body timeout
+    const after = await put(port, 'after.mp4', (req) => fs.createReadStream(clip).pipe(req), { cookie: b });
+    check('held-open: the slot is reclaimed rather than held forever', after.status === 202, `${after.status} ${after.body}`);
+    held.destroy();
+  } finally {
+    srv.kill('SIGKILL');
+    fs.rmSync(SMALL, { force: true });
+  }
+}
+
+// The same hold by the other route: an upload that simply stops sending keeps
+// its heavy slot for as long as the socket stays open.
+async function stalledUploadDoesNotLockTheInstance() {
+  const port = await freePort();
+  const { srv } = await startServer(port, {
+    VIDTOTAB_PUBLIC: '1', VIDTOTAB_RATE_LIMIT: '200', VIDTOTAB_UPLOAD_STALL_SEC: '2',
+  });
+  try {
+    const a = ((await get(port, '/')).setCookie || '').split(';')[0];
+    // The probe is the SAME visitor: putFile records the owner before it reads
+    // the body, so a stalled upload already owns the instance and a different
+    // visitor would be refused by ownership rather than by the slot — which is
+    // what the first version of this check actually measured.
+    const clip = tinyVideo();
+
+    // A few bytes, then silence — never ended.
+    const stalled = put(port, 'stalled.mp4', (req) => { req.write(Buffer.alloc(2048, 3)); }, { cookie: a });
+    await sleep(600);
+    await sleep(2800); // past the stall timeout
+    const after = await put(port, 'after-stall.mp4', (req) => fs.createReadStream(clip).pipe(req), { cookie: a });
+    check('stalled upload: the slot is reclaimed rather than held forever', after.status === 202, `${after.status} ${after.body}`);
+    // Bounded: with the guard removed this request never settles, and a check
+    // that hangs is not a check that fails — it just stops the suite.
+    await Promise.race([stalled.catch(() => {}), sleep(3000)]);
+  } finally {
+    srv.kill('SIGKILL');
+    fs.rmSync(SMALL, { force: true });
+  }
+}
+
+await stalledUploadDoesNotLockTheInstance();
+await heldOpenStartDoesNotLockTheInstance();
 await failedStartReleasesTheInstance();
 await slowStartCannotBeGazumped();
 await concurrentStartsDoNotBothWin();
