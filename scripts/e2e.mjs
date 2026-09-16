@@ -245,6 +245,36 @@ try {
   await shot('2b-adjust-light');
   await evalJs(`document.getElementById('adjustBtn').click()`);
 
+  // Accessibility wiring, which is the kind that looks finished while doing
+  // nothing: focus can fail to move (a hidden section cannot take focus, so the
+  // order of hiding and focusing matters), a progressbar can carry no value,
+  // and a "draw a box" key can be bound but never create one.
+  const focusAfterStep = await evalJs(`(() => {
+    document.querySelector('#stepper [data-step="1"]').click();
+    const a = document.activeElement;
+    return a ? (a.id || a.tagName) : 'none';
+  })()`);
+  log('focus after changing step ->', focusAfterStep);
+  if (focusAfterStep !== 'step1') problems.push(`focus did not follow the step change (landed on ${focusAfterStep})`);
+  await evalJs(`document.querySelector('#stepper [data-step="2"]').click()`);
+  await sleep(400);
+
+  // Detection already found a box here, so asking "is there a box afterwards"
+  // would pass whether or not b did anything — it did, in an earlier run, and
+  // proved nothing. Check the observable effect instead: b enters box editing.
+  // Escape first so the starting state is known rather than assumed.
+  await evalJs(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))`);
+  await sleep(250);
+  const beforeB = await evalJs(`document.getElementById('adjustBtn').textContent.trim()`);
+  await evalJs(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'b', bubbles: true, cancelable: true }))`);
+  await sleep(350);
+  const afterB = await evalJs(`document.getElementById('adjustBtn').textContent.trim()`);
+  log(`b key: adjust button "${beforeB}" -> "${afterB}"`);
+  if (beforeB === 'Done') problems.push('could not reach a known state before testing the b key');
+  if (afterB !== 'Done') problems.push(`the b key did not enter box editing (button reads "${afterB}")`);
+  await evalJs(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))`);
+  await sleep(250);
+
   await evalJs(`document.getElementById('analyzeBtn').click()`);
   await waitFor(`!document.getElementById('step3').hidden`, 20000, 'step 3');
   await sleep(2500);
@@ -253,6 +283,16 @@ try {
   await sleep(1500);
   const pages = await evalJs(`document.getElementById('rvCount').textContent`);
   log('review:', pages, '| title:', await evalJs(`document.getElementById('titleInput').value`));
+
+  // Checked here, where rows actually exist. An earlier attempt ran this before
+  // any scan had finished, found nothing, and asserted nothing.
+  const rowA11y = await evalJs(`(() => {
+    const r = document.querySelector('.sheet-item');
+    if (!r) return 'none';
+    return r.tabIndex + ':' + r.getAttribute('role') + ':' + ((r.getAttribute('aria-label') || '').slice(0, 6));
+  })()`);
+  log('review row keyboard reachability ->', rowA11y);
+  if (!/^0:button:Page/.test(String(rowA11y))) problems.push(`review rows are not keyboard reachable (${rowA11y})`);
   if (!/[1-9]/.test(pages)) throw new Error(`no pages captured: ${pages}`);
   await shot('4-review-light');
   await shot('4-review-light-full', true);

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>VidToTab</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23d9480f'/%3E%3Cg stroke='%23fff' stroke-width='1.6' stroke-linecap='round'%3E%3Cpath d='M7 9h18M7 13h18M7 17h18M7 21h18'/%3E%3C/g%3E%3Ccircle cx='13' cy='13' r='2.6' fill='%23fff'/%3E%3Ccircle cx='20' cy='19' r='2.6' fill='%23fff'/%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23c93f0c'/%3E%3Cg stroke='%23fff' stroke-width='1.6' stroke-linecap='round'%3E%3Cpath d='M7 9h18M7 13h18M7 17h18M7 21h18'/%3E%3C/g%3E%3Ccircle cx='13' cy='13' r='2.6' fill='%23fff'/%3E%3Ccircle cx='20' cy='19' r='2.6' fill='%23fff'/%3E%3C/svg%3E">
 <style>
 *, *::before, *::after { box-sizing: border-box; }
 * { margin: 0; padding: 0; }
@@ -15,11 +15,18 @@
   --surface-2: #faf8f4;
   --ink: #1d1b18;
   --muted: #6e685f;
-  --faint: #9b958c;
+  /* 4.70 on --bg and 5.20 on --surface. The old #9b958c measured 2.68 and 2.97,
+     unreadable for the labels, key hints and stage names that use it. */
+  --faint: #726c62;
   --line: #e7e1d7;
   --line-strong: #d6cfc3;
-  --accent: #d9480f;
-  --accent-hover: #c23f0c;
+  /* White on #d9480f measured 4.30 — under AA for the button labels and step
+     numbers that sit on it. Darkened until it clears 4.5 while staying the same
+     colour. Dark theme needs no change: it puts near-black ink on accent (7.85). */
+  --accent: #c93f0c;
+  /* Darkening --accent left this only 5.9% away from it, so hover was barely
+     visible. An 18.5% step reads as feedback, and contrast rises to 5.82. */
+  --accent-hover: #b8380a;
   --accent-ink: #ffffff;
   --accent-soft: #fcebe0;
   --ok: #2f7d45;
@@ -43,7 +50,8 @@
     --surface-2: #222328;
     --ink: #eeebe6;
     --muted: #a7a198;
-    --faint: #7b766f;
+    /* 6.09 on --bg, 5.58 on --surface; the old #7b766f was 4.13 and 3.78. */
+    --faint: #98938b;
     --line: #2d2e34;
     --line-strong: #3b3c43;
     --accent: #ff8a3d;
@@ -392,7 +400,7 @@ button.chip { cursor: pointer; }
   </div>
 
   <!-- ============ 1. video ============ -->
-  <section id="step1" class="step">
+  <section id="step1" class="step" tabindex="-1">
     <div id="preflight" class="banner warn" hidden>
       <svg class="icon" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path d="M10 2 1 18h18L10 2Zm-.9 5h1.8v5.5H9.1V7Zm0 7h1.8v1.8H9.1V14Z"/></svg>
       <div class="body">
@@ -448,7 +456,7 @@ button.chip { cursor: pointer; }
   </section>
 
   <!-- ============ 2. tab area ============ -->
-  <section id="step2" class="step" hidden>
+  <section id="step2" class="step" tabindex="-1" hidden>
     <div class="step-head">
       <h2>Confirm the tab area</h2>
       <p class="quiet" id="regionSub">Only what’s inside the box is scanned — fret numbers, chord names and rhythm marks, not the guitarist.</p>
@@ -466,7 +474,7 @@ button.chip { cursor: pointer; }
             </div>
           </div>
         </div>
-        <p class="keyhint" id="keyhint2"><kbd>←</kbd> <kbd>→</kbd> skip 5 s · <kbd>,</kbd> <kbd>.</kbd> step one frame · while adjusting: arrows move the box, <kbd>Shift</kbd>+arrows resize</p>
+        <p class="keyhint" id="keyhint2"><kbd>←</kbd> <kbd>→</kbd> skip 5 s · <kbd>,</kbd> <kbd>.</kbd> step one frame · <kbd>b</kbd> draw a box · while adjusting: arrows move the box, <kbd>Shift</kbd>+arrows resize</p>
       </div>
 
       <aside class="panel card">
@@ -503,7 +511,7 @@ button.chip { cursor: pointer; }
   </section>
 
   <!-- ============ 3. scan ============ -->
-  <section id="step3" class="step" hidden>
+  <section id="step3" class="step" tabindex="-1" hidden>
     <div class="scan-card card">
       <h2 id="stageLabel">Scanning the video…</h2>
       <ol class="stages" id="stages">
@@ -511,8 +519,10 @@ button.chip { cursor: pointer; }
         <li data-stage="find"><span class="dot"></span>Finding pages</li>
         <li data-stage="render"><span class="dot"></span>Cleaning up pages</li>
       </ol>
-      <div class="bar big"><div id="procBarFill"></div></div>
-      <div class="row spread"><span id="procPct" class="quiet"></span><button type="button" class="btn ghost small" id="procCancel">Cancel</button></div>
+      <div class="bar big" id="procBar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-labelledby="stageLabel"><div id="procBarFill"></div></div>
+      <!-- Polite, so a screen reader announces progress without interrupting,
+           and the percentage is text rather than only a bar width. -->
+      <div class="row spread"><span id="procPct" class="quiet" role="status" aria-live="polite"></span><button type="button" class="btn ghost small" id="procCancel">Cancel</button></div>
       <div id="warnings"></div>
     </div>
     <p id="foundCount" class="found" hidden></p>
@@ -520,7 +530,7 @@ button.chip { cursor: pointer; }
   </section>
 
   <!-- ============ 4. songsheet ============ -->
-  <section id="step4" class="step" hidden>
+  <section id="step4" class="step" tabindex="-1" hidden>
     <div class="review-bar">
       <div class="review-title">
         <input id="titleInput" class="title-input" type="text" aria-label="Songsheet title" placeholder="Song title" autocomplete="off">
@@ -573,7 +583,7 @@ button.chip { cursor: pointer; }
         <button type="button" class="linklike" id="backToRegion">Change the tab area</button>
       </div>
     </details>
-    <p class="keyhint center"><kbd>j</kbd>/<kbd>k</kbd> select · <kbd>x</kbd> remove · <kbd>u</kbd> undo · <kbd>Enter</kbd> jump to the video</p>
+    <p class="keyhint center"><kbd>j</kbd>/<kbd>k</kbd> select · <kbd>x</kbd> remove · <kbd>u</kbd> undo · <kbd>Enter</kbd> jump to the video · <kbd>p</kbd> practice</p>
   </section>
 </main>
 

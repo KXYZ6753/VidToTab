@@ -197,7 +197,13 @@ import { deleteSheet, getSheet, hasStorage, listSheets, newId, requestPersistenc
       updateStartSeg();
       redrawPreview();
     }
-    if (changed) window.scrollTo({ top: 0 });
+    if (changed) {
+      window.scrollTo({ top: 0 });
+      // Focus follows the step. Hiding the section that held the focused
+      // control otherwise drops focus onto <body>, leaving a keyboard user to
+      // tab from the top of the page again on every step change.
+      sections[n]?.focus?.({ preventScroll: true });
+    }
   }
 
   for (const btn of stepBtns) {
@@ -780,6 +786,9 @@ import { deleteSheet, getSheet, hasStorage, listSheets, newId, requestPersistenc
     $('stageLabel').textContent = STAGE_LABEL[stage];
     const p = clamp(overall, 0, 100);
     $('procBarFill').style.width = p + '%';
+    // The bar carries role="progressbar"; without a value it announces a
+    // position-less bar, which is worse than no bar at all.
+    $('procBar').setAttribute('aria-valuenow', String(Math.round(p)));
     const m = msg ? msg.charAt(0).toUpperCase() + msg.slice(1) : '';
     $('procPct').textContent = Math.round(p) + '%' + (m ? ' · ' + m : '');
   }
@@ -928,6 +937,18 @@ import { deleteSheet, getSheet, hasStorage, listSheets, newId, requestPersistenc
       pageNo++;
       const row = el('article', 'sheet-item' + (idx === state.selected ? ' selected' : ''));
       row.dataset.idx = idx;
+      // Reachable by keyboard: these are selectable rows, and selection drives
+      // the delete and jump-to-moment shortcuts. Without a tab stop they could
+      // only ever be reached with a mouse.
+      row.tabIndex = 0;
+      row.setAttribute('role', 'button');
+      row.setAttribute('aria-label', `Page ${pageNo}, ${fmtTime(it.tStart)} to ${fmtTime(it.tEnd)}`);
+      row.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        e.preventDefault();
+        selectItem(idx);
+      });
+      row.addEventListener('focus', () => selectItem(idx));
 
       const bar = el('div', 'sheet-meta');
       bar.appendChild(el('span', 'page-no', String(pageNo)));
@@ -1275,6 +1296,19 @@ import { deleteSheet, getSheet, hasStorage, listSheets, newId, requestPersistenc
   function step2Keys(e) {
     if (!state.videoSet) return;
     const k = e.key;
+    // With no box there is nothing to drag, and dragging was the only way to
+    // make one — so detection failing left the keyboard with no route at all.
+    // B makes a centred default that the arrow keys below then move and resize.
+    if (k === 'b' || k === 'B') {
+      e.preventDefault();
+      if (!state.rect && vw() && vh()) {
+        const w = Math.round(vw() * 0.8);
+        const h = Math.round(vh() * 0.25);
+        setRect({ x: Math.round((vw() - w) / 2), y: Math.round((vh() - h) / 2), w, h }, 'user');
+      }
+      setSelectMode(true);
+      return;
+    }
     const arrow = k.startsWith('Arrow');
     if (state.selectMode && state.rect && arrow) {
       e.preventDefault();

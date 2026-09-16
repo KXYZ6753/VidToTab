@@ -26,6 +26,8 @@ The server listens on loopback only, so nothing on your network can reach it. `H
 3. **Scan** — pages appear as they're found; cancel any time.
 4. **Songsheet** — edit the title, remove pages you don't want (undo supported), click a timestamp to check it against the video, choose a **look** (Print, Dark, Sepia, or the original video colours), pick Letter or A4, and export a PDF or PNG. *Not quite right?* re-scans with fewer or more pages in seconds — frames are cached.
 
+**Practice** opens one page at a time, full screen, for playing along. Arrow keys, space or PageUp/PageDown turn the page — the last pair is what most Bluetooth page-turner pedals send, so a pedal works without any setup. On a phone or tablet, tap the left or right edge. The screen is kept awake while you read, and Esc leaves.
+
 Every finished scan is saved to **your songsheets** on the home screen, because loading another video wipes the working folder. Pages are stored in the browser as images, so a saved songsheet still opens after the video is long gone. Export a PDF to keep a copy anywhere else.
 
 ## How it works
