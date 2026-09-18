@@ -1,0 +1,409 @@
+/* The opening animation — section 02 of the brand kit, retimed to play once.
+ *
+ * The kit's tile loops forever, which is right for a spec sheet and wrong for a
+ * product: a loop can restart because nothing is waiting behind it. Here there
+ * is an app behind it, so the sequence has to arrive somewhere and stop. Two
+ * consequences run through the whole of this file.
+ *
+ * First: every rule below is written as the SETTLED pose, and every keyframe
+ * runs *towards* it from a hidden start. That inversion is the whole trick. It
+ * means the end of the animation and the plain, un-animated stylesheet are the
+ * same picture, so there is no frame where a finished element snaps back to a
+ * start state — the failure that makes a splash "pop". It also means the file
+ * degrades well: kill every animation (reduced motion, an old engine) and you
+ * still get the finished lockup rather than a heap of parts. That is not
+ * hypothetical. The first version of this file left the settled transform off
+ * one rule, and the reduced-motion path duly rendered every string stacked on
+ * the top edge of the tile.
+ *
+ * Second: the kit's `vtt-out` and `vtt-recenter` are gone. `vtt-out` faded the
+ * lockup so the tile could loop back to empty, and `vtt-recenter` walked it back
+ * to its starting position for the next pass. A play-once version has no next
+ * pass, so recentring is meaningless and was dropped outright. The fade still
+ * has to happen, but it can no longer be a keyframe: a keyframe fires on a fixed
+ * schedule, and the exit here can also be triggered by a click, Escape, an
+ * AbortSignal or a watchdog, at any moment, from any pose. So the exit is a
+ * plain `transition` on the overlay root, driven by splash.js writing the
+ * opacity inline, which starts from whatever is on screen at that instant. That is what makes the hand-off
+ * continuous: the last thing you see is the pose it was in, dissolving.
+ *
+ * Everything animated here is transform, opacity or clip-path, with one
+ * deliberate exception argued for at `vtt-splash-dash` below.
+ */
+
+/* ---------- the curtain ---------- */
+
+.vtt-splash {
+  /* The mark is drawn on the same 32-unit grid as `.brand-mark` in
+     index.html, so the settled pose is the real logo and not a lookalike.
+     One unit = --u. 3.4px a unit gives a 109px mark on a desktop window; the
+     clamp keeps the expanded staff — which is 58 units wide, far past the
+     mark's own box — inside a 360px phone. */
+  --u: clamp(2.6px, .85vw, 3.4px);
+
+  /* Read back by splash.js to schedule the exit. The number is the moment the
+     last keyframe below finishes — change a delay or duration and change this
+     too, or the settle beat at the end grows or vanishes. */
+  --vtt-splash-run: 3120ms;
+
+  /* Overwritten inline by splash.js so the CSS transition and the JS timer that
+     waits for it can never disagree about how long the fade is. */
+  --vtt-splash-fade: 400ms;
+
+  --vtt-splash-ink: #f2efe9;
+  --vtt-splash-dim: rgba(242, 239, 233, .56);
+
+  position: fixed;
+  inset: 0;
+  z-index: 2147483000;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  isolation: isolate;
+  contain: layout paint style;
+
+  /* background-image, not the `background` shorthand: splash.js sets an opaque
+     background-color inline before this file is guaranteed to have arrived, and
+     an inline shorthand here would be overridden by it. Keeping the two on
+     separate longhands lets the inline colour act as the floor and this
+     gradient as the finish. */
+  background-image: radial-gradient(118% 88% at 50% 42%, #191a1e 0%, #0d0e10 58%, #0a0b0c 100%);
+  color: var(--vtt-splash-ink);
+  font-family: var(--font, -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif);
+
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  cursor: default;
+
+  opacity: 1;
+  /* Promoted up front, not when the exit begins: a will-change added at the
+     same moment the transition starts is too late to buy the layer it asks for,
+     and a full-bleed opacity fade on the compositor is the difference between a
+     dissolve and a stutter. The layer leaves with the node. */
+  will-change: opacity;
+  transition: opacity var(--vtt-splash-fade) cubic-bezier(.4, 0, .5, 1);
+}
+
+/* The exit is the `transition` declared just above, and the value it animates is
+   set inline by splash.js — deliberately, and not for the reason it looks like.
+   This started out as a `.vtt-splash.is-leaving { opacity: 0 }` rule, and it
+   never once fired: splash.js writes an inline opacity:1 on the overlay at mount
+   so the curtain is guaranteed opaque before this file is known to have
+   arrived, and an inline declaration beats any rule in here. The overlay went
+   from fully opaque to removed in a single frame. Screenshots could not show it
+   — a cut has no frames — and it only turned up when the computed opacity was
+   sampled through the hand-off and came back 1.000 all the way to the end.
+   So the level to change is the inline one, and the transition below is what
+   makes changing it a dissolve. */
+
+.vtt-splash-stage {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  justify-items: center;
+  text-align: center;
+  padding: 0 16px;
+}
+
+/* ---------- the glow ---------- */
+
+.vtt-splash-glow {
+  position: absolute;
+  left: 50%;
+  top: 46%;
+  width: min(72vw, 580px);
+  height: min(72vw, 580px);
+  border-radius: 50%;
+  pointer-events: none;
+  /* The accent has to come from the token, not from the kit's #FF8A3D. The
+     light theme deliberately ships a darker #c93f0c so ink on accent clears AA,
+     and hardcoding the dark-theme orange here would quietly undo that. Measured
+     on this backdrop: the accent "Tab" in the wordmark reads 3.78:1, which
+     clears AA-large at the size it is set — and the whole overlay is
+     aria-hidden decoration in any case.
+     color-mix is already the baseline this app builds on; the topbar in
+     index.html uses it for its translucent backdrop. */
+  background-image: radial-gradient(closest-side,
+    color-mix(in srgb, var(--accent, #ff8a3d) 38%, transparent) 0%,
+    color-mix(in srgb, var(--accent, #ff8a3d) 12%, transparent) 46%,
+    transparent 74%);
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1);
+  animation: vtt-splash-glow 780ms cubic-bezier(.22, .61, .36, 1) 0ms both;
+}
+
+@keyframes vtt-splash-glow {
+  from { opacity: 0; transform: translate(-50%, -50%) scale(.72); }
+}
+
+/* ---------- the art ---------- */
+
+/* SVG rather than divs, because of the caps. The mark's six strings are round
+   -capped strokes of six different lengths, and the sequence has to draw them
+   long and then pull them back to those lengths. A div scaled on X turns its
+   round ends into long ellipses; a stroked path with stroke-linecap: round
+   keeps a true semicircular cap at every length there is. */
+.vtt-splash-art {
+  display: block;
+  width: calc(32 * var(--u));
+  height: calc(32 * var(--u));
+  /* The staff spends the middle of the sequence far wider and taller than the
+     mark's own box. Nothing clips it here; the curtain clips it at the window
+     edge, which is where a full-bleed moment should be clipped. */
+  overflow: visible;
+}
+
+/* The accent tile. The last thing to arrive: the line art is drawn in ink on
+   black and only becomes the logo at the moment this lands under it, which
+   means the brand colour is the payoff of the sequence rather than its
+   wallpaper. No colour is animated anywhere — the strings are the same ink
+   throughout, white on black and then white on accent. */
+.vtt-splash-tile {
+  fill: var(--accent, #ff8a3d);
+  transform-box: view-box;
+  transform-origin: 16px 16px;
+  opacity: 1;
+  transform: scale(1);
+  animation: vtt-splash-mark 520ms cubic-bezier(.18, .92, .32, 1.04) 1980ms both;
+}
+
+@keyframes vtt-splash-mark {
+  from { opacity: 0; transform: scale(.68); }
+}
+
+/* The centre line: one stroke, drawn top to bottom, before anything else. It is
+   a barline — it states the height the staff is about to fill, and the six
+   strings then fan out into it. It is scaffolding, not part of the mark, so its
+   settled pose is invisible and it fades out as the contraction begins. */
+.vtt-splash-bar {
+  stroke: var(--vtt-splash-ink);
+  stroke-width: 1.2;
+  stroke-linecap: round;
+  transform-box: view-box;
+  transform-origin: 16px -1px;
+  opacity: 0;
+  transform: scaleY(1);
+  animation: vtt-splash-bar 1580ms linear 80ms both;
+}
+
+@keyframes vtt-splash-bar {
+  0%   { opacity: 0;  transform: scaleY(0); animation-timing-function: cubic-bezier(.3, .72, .22, 1); }
+  10%  { opacity: .85; }
+  34%  { opacity: .85; transform: scaleY(1); animation-timing-function: linear; }
+  90%  { opacity: .85; transform: scaleY(1); animation-timing-function: ease-in; }
+  100% { opacity: 0;  transform: scaleY(1); }
+}
+
+/* ---------- the staff ---------- */
+
+/* The staff is drawn far to the right of where the mark sits, because every
+   string starts at the mark's own x and runs 58 units instead of its final 6.66
+   to 14.16. This walks the whole group back to centre as the strings retract,
+   so the contraction reads as one object closing up rather than as six strokes
+   independently shrinking. */
+.vtt-splash-staff {
+  transform-box: view-box;
+  transform: translateX(0);
+  animation: vtt-splash-staff 2100ms linear 300ms both;
+}
+
+@keyframes vtt-splash-staff {
+  0%   { transform: translateX(var(--gx)); }
+  60%  { transform: translateX(var(--gx)); animation-timing-function: cubic-bezier(.62, 0, .22, 1); }
+  100% { transform: translateX(0); }
+}
+
+/* Stroke geometry copied from `.brand-mark` in index.html, which is the
+   authority: six strings, 1.75 wide, round caps, all starting at x=8.92 and
+   ending short of each other so the right-hand ends trace a play triangle.
+   Everything per-string — where it waits, where it fans out to, and how much of
+   its 58-unit path survives the taper — arrives as a custom property from the
+   table in splash.js, where the arithmetic can be read next to those numbers. */
+.vtt-splash-string,
+.vtt-splash-fret {
+  transform-box: view-box;
+  /* The settled pose, and the only one that survives `animation: none`.
+     Leaving this out is not a missing flourish: every piece falls back to
+     translateY(0) at the mark's own y, which is right here only because the
+     paths are authored at their mark positions — the earlier div version
+     stacked all six on the tile's top edge when this was forgotten. */
+  transform: translateY(0);
+  animation: vtt-splash-string 2100ms linear 300ms both;
+}
+
+@keyframes vtt-splash-string {
+  0%   { transform: translateY(var(--ty0)); animation-timing-function: cubic-bezier(.16, .84, .3, 1); }
+  36%  { transform: translateY(var(--ty1)); animation-timing-function: linear; }
+  60%  { transform: translateY(var(--ty1)); animation-timing-function: cubic-bezier(.62, 0, .22, 1); }
+  100% { transform: translateY(0); }
+}
+
+.vtt-splash-string {
+  stroke: var(--vtt-splash-ink);
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  fill: none;
+  /* A dash as long as the path and a gap far longer than it, so there is only
+     ever one dash to place and no second one creeping in from the right. */
+  stroke-dasharray: 58 999;
+  /* Settled: only the mark's own length of this path is painted. */
+  stroke-dashoffset: var(--off);
+  animation:
+    vtt-splash-string 2100ms linear 300ms both,
+    vtt-splash-dash 560ms cubic-bezier(.32, .7, .25, 1) var(--draw) both,
+    vtt-splash-taper 840ms cubic-bezier(.62, 0, .22, 1) 1560ms forwards;
+}
+
+/* The one property here that is not transform, opacity or clip-path, and the
+   reason is the caps again: stroke-dashoffset is the only way to paint a
+   round-capped stroke to an arbitrary length without distorting the cap. It
+   costs a repaint of a 109px box on a composited layer and never a relayout,
+   which is the thing that budget was protecting. This is also what the kit's
+   own `vtt-dash` does. */
+@keyframes vtt-splash-dash {
+  /* 59, not 58: at exactly 58 the dash ends on the path's first point and a
+     round cap paints half a dot there, which put six ink pips on screen before
+     the draw had started. */
+  from { stroke-dashoffset: 59; }
+  to   { stroke-dashoffset: 0; }
+}
+
+/* The taper: the drawn staff pulls its right-hand ends back to the mark's six
+   lengths. This is the "staff contracts into the mark" beat, and it is why the
+   play triangle appears to be cut out of the staff rather than drawn on top of
+   it. `forwards` rather than `both` on purpose — with `both` its backwards fill
+   would hold stroke-dashoffset at 0 from time zero and paint the whole staff
+   before vtt-splash-dash ever got to draw it. */
+@keyframes vtt-splash-taper {
+  from { stroke-dashoffset: 0; }
+  to   { stroke-dashoffset: var(--off); }
+}
+
+/* ---------- the fret numbers ---------- */
+
+/* The kit puts fret numbers on the staff while it is open, in dark ink on
+   accent dots, and none of them are in the mark. So they are shed rather than
+   contracted: they ride their own string's timeline, and fade as it starts to
+   close. The shed is a second animation on the same element because the first
+   one owns `transform` and this one owns `opacity` — two animations on one
+   element are only a problem when they want the same property. */
+.vtt-splash-fret {
+  opacity: 0;
+  animation:
+    vtt-splash-string 2100ms linear 300ms both,
+    /* Gone before the taper starts pulling the strings out from under them,
+       not during it. Shedding at 1660ms looked right on paper and wrong on
+       screen: by 1900ms the right-hand dots were still at 0.6 opacity with no
+       string left beneath them, floating off the staff into open space. They
+       now clear out in the gap between the last one landing (1494ms) and the
+       contraction becoming visible. */
+    vtt-splash-shed 320ms cubic-bezier(.4, 0, .5, 1) 1420ms both;
+}
+
+@keyframes vtt-splash-shed {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
+
+.vtt-splash-fret circle { fill: var(--accent, #ff8a3d); }
+
+.vtt-splash-fret text {
+  /* --accent-ink is the token for ink on an accent fill, and it already flips
+     the right way in both themes: near-black on the dark theme's orange, white
+     on the light theme's darker one. */
+  fill: var(--accent-ink, #1d1206);
+  font-family: var(--mono, ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace);
+  font-size: 2.9px;
+  font-weight: 700;
+  text-anchor: middle;
+  dominant-baseline: central;
+}
+
+/* The landing. On its own element so the dot can pop while the staff it sits on
+   is still fanning out underneath it. fill-box keeps the overshoot centred on
+   the dot rather than on the far-away origin of the view box. */
+.vtt-splash-fret-pop {
+  transform-box: fill-box;
+  transform-origin: center;
+  opacity: 1;
+  transform: scale(1);
+  animation: vtt-splash-notes 340ms linear var(--land) both;
+}
+
+/* The overshoot is the "land" — a dot that eases to rest reads as fading in, a
+   dot that goes slightly past and settles reads as put down on the fret. */
+@keyframes vtt-splash-notes {
+  0%   { opacity: 0; transform: scale(.2);   animation-timing-function: cubic-bezier(.2, .9, .3, 1); }
+  62%  { opacity: 1; transform: scale(1.2);  animation-timing-function: cubic-bezier(.4, 0, .3, 1); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+/* ---------- the wordmark and the tagline ---------- */
+
+.vtt-splash-word {
+  margin: calc(7 * var(--u)) 0 0;
+  /* Padding, not a bigger clip rect: the reveal below ends at inset(0), which
+     clips to the border box, and without room around the glyphs that would
+     shave the f-height and the descender of the settled wordmark. */
+  padding: .18em .16em;
+  font-size: clamp(27px, 5.4vw, 38px);
+  font-weight: 650;
+  letter-spacing: -.02em;
+  line-height: 1.15;
+  color: var(--vtt-splash-ink);
+  opacity: 1;
+  animation: vtt-splash-word 620ms cubic-bezier(.28, .74, .3, 1) 2300ms both;
+}
+
+/* Same split as the topbar's `.brand b`, same token. */
+.vtt-splash-word b { color: var(--accent, #ff8a3d); font-weight: 750; }
+
+/* Opens out from the centre, both ways at once, so the word arrives around its
+   own middle rather than sliding in from one side. */
+@keyframes vtt-splash-word {
+  0%   { opacity: 0; clip-path: inset(0 50% 0 50%); }
+  26%  { opacity: 1; }
+  100% { opacity: 1; clip-path: inset(0 0 0 0); }
+}
+
+.vtt-splash-tag {
+  margin: calc(2.6 * var(--u)) 0 0;
+  font-family: var(--mono, ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace);
+  font-size: clamp(11.5px, 2.4vw, 13.5px);
+  letter-spacing: .1em;
+  color: var(--vtt-splash-dim);
+  opacity: 1;
+  transform: translateY(0);
+  animation: vtt-splash-tag 540ms cubic-bezier(.22, .68, .3, 1) 2580ms both;
+}
+
+@keyframes vtt-splash-tag {
+  from { opacity: 0; transform: translateY(calc(2.4 * var(--u))); }
+}
+
+/* ---------- no motion ---------- */
+
+/* Two gates on purpose. splash.js adds .vtt-splash--still via motion.js's
+   reducedMotion(), which is the shared helper the rest of the brand work
+   already answers to; the media query is the backstop for the case where this
+   file is on the page but that JS path never ran. Either way the rules below
+   only have to turn the animations off — because every base rule above is
+   already the settled pose, switching them off *is* the finished lockup.
+   The overlay still fades rather than vanishing: a hard cut to the app is
+   itself a visual jolt, and a cross-fade is not the kind of motion the
+   preference is asking us to stop. splash.js holds the still lockup for about
+   half a second first, so the fade has something to fade from. */
+.vtt-splash--still .vtt-splash-glow,
+.vtt-splash--still .vtt-splash-stage *,
+.vtt-splash--still .vtt-splash-art * {
+  animation: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vtt-splash .vtt-splash-glow,
+  .vtt-splash .vtt-splash-stage *,
+  .vtt-splash .vtt-splash-art * {
+    animation: none !important;
+  }
+}

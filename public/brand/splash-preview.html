@@ -1,0 +1,325 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Splash preview — VidToTab</title>
+<!--
+  A development tool. This page is not part of the app and is not shipped to
+  anyone; it exists so the opening animation can be watched over and over, with
+  something behind it, which is the only way to judge the part that matters —
+  the hand-off at the end, where the overlay has to dissolve into a working page
+  rather than pop out of existence.
+
+  The fake app behind it is deliberately busy: a flat colour would hide a
+  half-transparent overlay or a stray leftover node, and cards with edges do not.
+
+  The design tokens below are a COPY of the :root and dark-theme blocks in
+  public/index.html, not an import. The point of the copy is that this page
+  proves the splash reads correctly against the app's real colours in both
+  themes — including the light theme's deliberately darker --accent — without
+  this dev tool becoming something index.html has to keep working for.
+
+  Scenarios, as ?scenario=… :
+    play    (default)  watch it through
+    skip               a pointer press part way in
+    esc                the Escape key part way in
+    abort              an AbortSignal part way in
+    timers              every short timer swallowed, so only the watchdog is
+                        left to tear the overlay down
+-->
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #f6f3ee;
+  --surface: #ffffff;
+  --surface-2: #faf8f4;
+  --ink: #1d1b18;
+  --muted: #6e685f;
+  /* 4.70 on --bg and 5.20 on --surface. The old #9b958c measured 2.68 and 2.97,
+     unreadable for the labels, key hints and stage names that use it. */
+  --faint: #726c62;
+  --line: #e7e1d7;
+  --line-strong: #d6cfc3;
+  /* White on #d9480f measured 4.30 — under AA for the button labels and step
+     numbers that sit on it. Darkened until it clears 4.5 while staying the same
+     colour. Dark theme needs no change: it puts near-black ink on accent (7.85). */
+  --accent: #c93f0c;
+  /* Darkening --accent left this only 5.9% away from it, so hover was barely
+     visible. An 18.5% step reads as feedback, and contrast rises to 5.82. */
+  --accent-hover: #b8380a;
+  --accent-ink: #ffffff;
+  --accent-soft: #fcebe0;
+  --ok: #2f7d45;
+  --ok-soft: #e4f3e8;
+  --warn: #8a5a00;
+  --warn-soft: #fdf3d8;
+  --danger: #b42318;
+  --danger-soft: #fde8e5;
+  --paper: #ffffff;
+  --shadow-sm: 0 1px 2px rgba(40, 30, 20, .06);
+  --shadow: 0 1px 2px rgba(40, 30, 20, .05), 0 10px 30px -12px rgba(40, 30, 20, .22);
+  --radius: 14px;
+  --radius-sm: 9px;
+  /* Sora for the interface, JetBrains Mono for anything that is really data —
+     times, fret numbers, the tab itself. Both are bundled under /fonts and
+     carry only latin and latin-ext, so the system stack behind them still draws
+     the Korean and Japanese video titles this app sees constantly. */
+  --font: 'Sora', -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Apple SD Gothic Neo", "Noto Sans", system-ui, sans-serif;
+  --mono: 'JetBrains Mono', ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #121315;
+    --surface: #1b1c20;
+    --surface-2: #222328;
+    --ink: #eeebe6;
+    --muted: #a7a198;
+    /* 6.09 on --bg, 5.58 on --surface; the old #7b766f was 4.13 and 3.78. */
+    --faint: #98938b;
+    --line: #2d2e34;
+    --line-strong: #3b3c43;
+    --accent: #ff8a3d;
+    --accent-hover: #ff9d5c;
+    --accent-ink: #1d1206;
+    --accent-soft: #3a2517;
+    --ok: #7fd197;
+    --ok-soft: #173222;
+    --warn: #f2c66d;
+    --warn-soft: #362a12;
+    --danger: #ff9b91;
+    --danger-soft: #3c1a17;
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, .35);
+    --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 14px 34px -14px rgba(0, 0, 0, .7);
+  }
+}
+
+/* ---------- the fake app underneath ---------- */
+
+*, *::before, *::after { box-sizing: border-box; }
+* { margin: 0; padding: 0; }
+body {
+  font-family: var(--font);
+  background: var(--bg);
+  color: var(--ink);
+  line-height: 1.5;
+  font-size: 15px;
+  -webkit-font-smoothing: antialiased;
+}
+.topbar {
+  position: sticky; top: 0;
+  background: color-mix(in srgb, var(--bg) 86%, transparent);
+  backdrop-filter: saturate(1.4) blur(10px);
+  border-bottom: 1px solid var(--line);
+}
+.topbar-inner {
+  max-width: 1120px; margin: 0 auto; padding: 10px 20px;
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+}
+.brand { display: flex; align-items: center; gap: 9px; font-weight: 650; font-size: 17px; letter-spacing: -.01em; }
+.brand b { color: var(--accent); font-weight: 750; }
+.brand-mark { width: 28px; height: 28px; flex: none; }
+.shell { max-width: 1120px; margin: 0 auto; padding: 24px 20px 64px; }
+h1 { font-size: 26px; letter-spacing: -.02em; margin-bottom: 6px; }
+.grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); margin-top: 20px; }
+.card {
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 16px; box-shadow: var(--shadow-sm);
+}
+.card h2 { font-size: 14px; margin-bottom: 8px; }
+.card p { color: var(--muted); font-size: 13.5px; }
+.bar { height: 8px; border-radius: 999px; background: var(--surface-2); margin-top: 12px; overflow: hidden; }
+.bar i { display: block; height: 100%; background: var(--accent); border-radius: 999px; }
+
+/* ---------- the harness ---------- */
+
+.tools { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
+.tools button {
+  font: inherit; font-size: 13.5px; cursor: pointer;
+  background: var(--accent); color: var(--accent-ink); border: none;
+  padding: 8px 14px; border-radius: var(--radius-sm); font-weight: 600;
+}
+.tools button.ghost { background: var(--surface); color: var(--ink); border: 1px solid var(--line-strong); }
+#log {
+  margin-top: 16px; font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 12px 14px; white-space: pre-wrap; color: var(--ink); min-height: 96px;
+}
+#log .ok { color: var(--ok); font-weight: 600; }
+#log .bad { color: var(--danger); font-weight: 700; }
+#log .dim { color: var(--faint); }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <span class="brand">
+      <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="currentColor" style="color: var(--accent)"/><g stroke="#fff" stroke-width="1.6" stroke-linecap="round"><path d="M7 9h18M7 13h18M7 17h18M7 21h18"/></g><circle cx="13" cy="13" r="2.6" fill="#fff"/><circle cx="20" cy="19" r="2.6" fill="#fff"/></svg>
+      <span>VidTo<b>Tab</b></span>
+    </span>
+    <span class="quiet" style="color: var(--muted); font-size: 13.5px;">splash preview — development tool</span>
+  </div>
+</header>
+
+<div class="shell">
+  <h1>Something is already here</h1>
+  <p style="color: var(--muted)">This page stands in for the app. The splash has to dissolve into it cleanly — no flash, no leftover overlay, and no node left behind in the DOM.</p>
+
+  <div class="tools">
+    <button type="button" data-run="play">Replay</button>
+    <button type="button" class="ghost" data-run="skip">Skip with a click</button>
+    <button type="button" class="ghost" data-run="esc">Skip with Escape</button>
+    <button type="button" class="ghost" data-run="abort">Abort at 1.2s</button>
+    <button type="button" class="ghost" data-run="timers">Starve the timers</button>
+  </div>
+
+  <div id="log" aria-live="polite"></div>
+
+  <div class="grid">
+    <div class="card"><h2>Video</h2><p>A link, or a file off the disk.</p><div class="bar"><i style="width:100%"></i></div></div>
+    <div class="card"><h2>Tab area</h2><p>Where the tablature sits in frame.</p><div class="bar"><i style="width:72%"></i></div></div>
+    <div class="card"><h2>Scan</h2><p>Every distinct bar, once.</p><div class="bar"><i style="width:38%"></i></div></div>
+    <div class="card"><h2>Songsheet</h2><p>Print, dark, sepia or original.</p><div class="bar"><i style="width:8%"></i></div></div>
+  </div>
+</div>
+
+<script type="module">
+import { playSplash } from './splash.js';
+window.playSplash = playSplash;   // for the idle scenario, driven from outside
+
+const log = document.getElementById('log');
+const t0 = performance.now();
+const line = (text, cls = 'dim') => {
+  const at = String(Math.round(performance.now() - t0)).padStart(5, ' ');
+  log.insertAdjacentHTML('beforeend', `<span class="${cls}">${at}ms  ${text}</span>\n`);
+};
+
+// The assertion the whole page exists for. "Gone" has to mean removed from the
+// document, not merely transparent: an overlay left at opacity 0 still sits over
+// the app swallowing every click, which looks exactly like a frozen UI.
+function assertClean(label) {
+  const overlay = document.querySelector('.vtt-splash');
+  const sheet = document.querySelector('link[href*="splash.css"]');
+  const ok = !overlay && !sheet;
+  line(`${label}: overlay in DOM = ${!!overlay}, stylesheet link = ${!!sheet} — ${ok ? 'CLEAN' : 'RESIDUE'}`,
+    ok ? 'ok' : 'bad');
+  return ok;
+}
+
+async function run(scenario) {
+  log.textContent = '';
+  // "idle" mounts nothing and waits to be driven from outside — it is how the
+  // real-elapsed-time capture in scripts of your own gets a page to play the
+  // splash on, without this page's own autoplay racing it.
+  if (scenario === 'idle') { line('idle — waiting to be driven', 'dim'); return; }
+  line(`scenario "${scenario}" — starting`, 'dim');
+
+  const controller = new AbortController();
+  const realSetTimeout = window.setTimeout;
+
+  if (scenario === 'timers') {
+    // What a stalled scheduler looks like from inside the splash: every timer it
+    // sets to end the sequence, and to end the fade, is swallowed. Only the
+    // long one survives, which is the watchdog armed before any other work. If
+    // the overlay still leaves, the last line of defence holds.
+    window.setTimeout = (fn, ms) => (ms >= 8000 ? realSetTimeout(fn, ms) : realSetTimeout(() => {}, ms));
+    line('every timer under 8s swallowed — only the watchdog is left', 'dim');
+  }
+
+  const done = playSplash({ tagline: 'video → songsheet', signal: controller.signal })
+    .finally(() => { window.setTimeout = realSetTimeout; });
+
+  if (scenario === 'skip') {
+    realSetTimeout(() => {
+      const overlay = document.querySelector('.vtt-splash');
+      line(`dispatching a pointer press on the overlay (found: ${!!overlay})`, 'dim');
+      overlay?.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    }, 900);
+  }
+  if (scenario === 'esc') {
+    realSetTimeout(() => {
+      line('dispatching Escape', 'dim');
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    }, 900);
+  }
+  if (scenario === 'abort') {
+    realSetTimeout(() => { line('aborting the signal', 'dim'); controller.abort(); }, 1200);
+  }
+
+  await done;
+  line('playSplash() resolved', 'ok');
+  assertClean('after resolve');
+}
+
+for (const button of document.querySelectorAll('[data-run]')) {
+  button.addEventListener('click', (e) => {
+    e.stopPropagation();           // otherwise the click that starts it also skips it
+    run(button.dataset.run);
+  });
+}
+
+// Scrubbing, as ?at=MS. --virtual-time-budget advances timers but does not tick
+// CSS animations, so a screenshot of a live run lands on whatever frame the
+// compositor happened to be showing — 200ms and 600ms came out identical the
+// first time this was checked, which is a measurement artefact and not a stall.
+// Pausing every animation and setting its currentTime by hand makes a given
+// moment exact and the screenshot repeatable.
+const raf = () => new Promise((r) => requestAnimationFrame(r));
+
+async function scrub(ms) {
+  log.textContent = '';
+  line(`scrubbing to ${ms}ms`, 'dim');
+
+  // Swallow every timer so the splash cannot tear itself down while it is being
+  // looked at. Dev tool only — and note that this is exactly the stall the
+  // watchdog exists for, which is why "Starve the timers" is a scenario above.
+  window.setTimeout = () => 0;
+
+  playSplash({ tagline: 'video → songsheet' });
+
+  let overlay = null;
+  for (let i = 0; i < 240 && !overlay; i += 1) {
+    await raf();
+    overlay = document.querySelector('.vtt-splash');
+  }
+  if (!overlay) { line('overlay never mounted', 'bad'); return; }
+
+  const animations = overlay.getAnimations({ subtree: true });
+  for (const a of animations) {
+    a.pause();
+    // currentTime on a CSS animation counts from the start of its delay, so it
+    // is already wall-clock from the moment the overlay mounted. Clamped to the
+    // end so a late scrub holds the settled pose instead of going inactive.
+    const timing = a.effect?.getComputedTiming?.() || {};
+    const total = (Number(timing.delay) || 0) + (Number(timing.activeDuration) || 0);
+    a.currentTime = Math.min(ms, total);
+  }
+  await raf(); await raf();
+  line(`${animations.length} animations paused at ${ms}ms`, 'ok');
+
+  // Centring is the one thing a screenshot cannot be trusted on, because a
+  // headless window and a real one disagree about scrollbars. Measured instead.
+  const rect = overlay.getBoundingClientRect();
+  const stage = overlay.querySelector('.vtt-splash-stage').getBoundingClientRect();
+  const off = Math.round((stage.left + stage.right) / 2 - innerWidth / 2);
+  line(`viewport ${innerWidth}x${innerHeight}  overlay ${Math.round(rect.width)}x${Math.round(rect.height)} @${Math.round(rect.left)}  stage centre off by ${off}px`,
+    Math.abs(off) <= 1 ? 'ok' : 'bad');
+}
+
+const params = new URLSearchParams(location.search);
+
+// ?accent=#rrggbb overrides the token the page hands the splash. The splash must
+// take the accent from --accent and never from a literal, because the light
+// theme deliberately ships a darker #c93f0c to clear AA and the kit's own
+// #FF8A3D would quietly undo that. Setting the token here shows, rather than
+// asserts, that the overlay follows it.
+const accent = params.get('accent');
+if (accent) document.documentElement.style.setProperty('--accent', accent);
+
+const scrubAt = params.get('at');
+if (scrubAt !== null) scrub(Number(scrubAt) || 0);
+else run(params.get('scenario') || 'play');
+</script>
+</body>
+</html>
