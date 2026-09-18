@@ -4,7 +4,15 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>VidToTab</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23c93f0c'/%3E%3Cg stroke='%23fff' stroke-width='1.6' stroke-linecap='round'%3E%3Cpath d='M7 9h18M7 13h18M7 17h18M7 21h18'/%3E%3C/g%3E%3Ccircle cx='13' cy='13' r='2.6' fill='%23fff'/%3E%3Ccircle cx='20' cy='19' r='2.6' fill='%23fff'/%3E%3C/svg%3E">
+<!-- Three strings, not six. A favicon is read at 16px, where the mark's own
+     3.5-unit pitch against a 2.1 stroke leaves gaps of about a pixel and the six
+     lines average into a flat orange square. Dropping to three keeps the short-
+     long-short taper — the play triangle the mark is built on — at the only size
+     this file is ever seen at. The tile is flat rather than the brand gradient
+     for the same reason: sixteen pixels cannot show a gradient. -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='10' fill='%23ef6a14'/%3E%3Cpath d='M9.6 10.5h6.4M9.6 16h12.8M9.6 21.5h6.4' stroke='%23fff' stroke-width='3.1' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/fonts/fonts.css">
+<link rel="stylesheet" href="/brand/loaders.css">
 <style>
 *, *::before, *::after { box-sizing: border-box; }
 * { margin: 0; padding: 0; }
@@ -40,8 +48,12 @@
   --shadow: 0 1px 2px rgba(40, 30, 20, .05), 0 10px 30px -12px rgba(40, 30, 20, .22);
   --radius: 14px;
   --radius-sm: 9px;
-  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Apple SD Gothic Neo", "Noto Sans", system-ui, sans-serif;
-  --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
+  /* Sora for the interface, JetBrains Mono for anything that is really data —
+     times, fret numbers, the tab itself. Both are bundled under /fonts and
+     carry only latin and latin-ext, so the system stack behind them still draws
+     the Korean and Japanese video titles this app sees constantly. */
+  --font: 'Sora', -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Apple SD Gothic Neo", "Noto Sans", system-ui, sans-serif;
+  --mono: 'JetBrains Mono', ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -69,6 +81,11 @@
   }
 }
 [hidden] { display: none !important; }
+/* While the opening animation plays, the app waits behind it rather than
+   painting under it. visibility rather than display, so the layout underneath
+   is already settled at the instant the splash lifts off it. */
+html[data-splash="1"] { background: #0a0b0c; }
+html[data-splash="1"] body { visibility: hidden; }
 html { -webkit-text-size-adjust: 100%; }
 body {
   font-family: var(--font);
@@ -105,6 +122,9 @@ img { display: block; }
 .brand-mark { width: 28px; height: 28px; flex: none; }
 .stepper { display: flex; list-style: none; gap: 2px; background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 3px; box-shadow: var(--shadow-sm); }
 .stepper button {
+  /* A step pill that wraps is wrong at every width, whatever the font metrics
+     happen to be. */
+  white-space: nowrap;
   display: flex; align-items: center; gap: 7px; border: none; background: none;
   padding: 5px 12px 5px 6px; border-radius: 999px; cursor: pointer; font-size: 13.5px; color: var(--muted);
   transition: background .15s, color .15s;
@@ -314,8 +334,21 @@ body[data-view="app"] .source-card { margin: 14px 0 0; }
 .detect-status.is-low .icon, .detect-status.is-none .icon { background: var(--warn-soft); color: var(--warn); }
 .detect-status b { display: block; font-size: 15px; }
 .detect-status p { font-size: 13.5px; color: var(--muted); margin-top: 1px; }
-.spinner { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--line-strong); border-top-color: var(--accent); animation: spin .8s linear infinite; flex: none; margin: 2px; }
-@keyframes spin { to { transform: rotate(360deg); } }
+/* Slots the brand loaders mount into. Each one only positions its loader; the
+   loader owns its own size, and loaders.css owns everything it does. */
+.thumb-loader { position: absolute; inset: 0; display: grid; place-items: center; }
+.detect-loader { display: flex; justify-content: center; padding: 2px 0 6px; }
+/* Bigger than the loader's inline default: at 24px the sweep crossing a 43px
+   frame is a flicker rather than a pass over the picture, and this one has a
+   whole panel to sit in. */
+.detect-loader .vtt-loader--beam { --vtt-size: 44px; }
+.scan-loader { display: flex; justify-content: center; margin: 2px 0 20px; }
+/* A loader standing in for a button's label takes the button's own ink. Its
+   default is --muted, which is measured against a surface and vanishes on the
+   accent fill of a primary button — "Building PDF…" was grey on orange. */
+.btn .vtt-loader, .btn .vtt-loader-text { color: currentColor; }
+.scan-loader .vtt-loader--scan { --vtt-size: 250px; }
+@media (max-width: 640px) { .scan-loader .vtt-loader--scan { --vtt-size: 170px; } }
 .label { font-size: 12px; font-weight: 650; text-transform: uppercase; letter-spacing: .05em; color: var(--faint); margin-bottom: 7px; }
 #cropPreview { display: block; width: 100%; height: auto; border-radius: 7px; background: #000; border: 1px solid var(--line); }
 .panel .seg { display: flex; }
@@ -416,6 +449,15 @@ button.chip { cursor: pointer; }
     border-right: none; border-top: 1px solid var(--line);
   }
 }
+/* The brand, four labelled step pills and a labelled button need about 730px
+   of row between them, and Sora asks for a little more of it than the system
+   sans did. Under that the row wrapped a pill onto a second line and the header
+   grew by 20px, so the step labels go first — the same trade the 640px rules
+   below make, started earlier. */
+@media (max-width: 760px) {
+  .stepper .lbl { display: none; }
+  .stepper button { padding: 5px; }
+}
 @media (max-width: 640px) {
   main { padding: 14px 16px 100px; }
   .topbar-inner { padding: 8px 16px; }
@@ -450,13 +492,37 @@ button.chip { cursor: pointer; }
     let desktop = false;
     try { desktop = window.vidtotab?.shell === 'desktop'; } catch { /* web build */ }
     document.body.dataset.view = (saved === 'app' || saved === 'home') ? saved : (desktop ? 'app' : 'home');
+
+    // The opening animation is decided here for the same reason the view is: by
+    // the time app.js runs — a module, therefore deferred — the page has
+    // painted, and an animation dropped over a page the eye has already begun
+    // reading is worse than no animation at all.
+    //
+    // Desktop only. A launch is the moment a splash is for; the web version is
+    // not launched, it is visited, usually from a link, and four seconds between
+    // arriving and being able to paste a URL is a cost with nothing on the other
+    // side of it.
+    if (desktop) {
+      document.documentElement.dataset.splash = '1';
+      // Belt and braces. Whatever becomes of the module that is supposed to
+      // clear this — a parse error, a request that never lands, a browser that
+      // never runs it at all — the app must not sit invisible behind an
+      // animation that is not there. Five seconds is past the sequence's four.
+      setTimeout(() => { delete document.documentElement.dataset.splash; }, 5000);
+    }
   })();
 </script>
 
 <header class="topbar">
   <div class="topbar-inner">
     <a class="brand" href="/" aria-label="VidToTab">
-      <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="currentColor" style="color: var(--accent)"/><g stroke="#fff" stroke-width="1.6" stroke-linecap="round"><path d="M7 9h18M7 13h18M7 17h18M7 21h18"/></g><circle cx="13" cy="13" r="2.6" fill="#fff"/><circle cx="20" cy="19" r="2.6" fill="#fff"/></svg>
+      <!-- Six strings whose right-hand ends step out and back in, so the ragged edge
+           they leave reads as a right-pointing play triangle: the staff and "press
+           play" in one shape. The grid the brand kit draws it on spans 0.62 of the
+           tile, which is what puts the ink at roughly half and leaves the corners
+           their margin. The tile takes currentColor so it follows the theme's
+           accent rather than pinning the light theme to the dark one's orange. -->
+      <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="9" fill="currentColor" style="color: var(--accent)"/><g stroke="#fff" stroke-width="1.75" stroke-linecap="round"><path d="M8.92 8.71h6.66M8.92 11.63h10.83M8.92 14.54h14.16M8.92 17.46h14.16M8.92 20.37h10.83M8.92 23.29h6.66"/></g></svg>
       <span>VidTo<b>Tab</b></span>
     </a>
     <ol id="stepper" class="stepper">
@@ -534,7 +600,7 @@ button.chip { cursor: pointer; }
     </div>
 
     <div id="sourceCard" class="card source-card" hidden>
-      <div class="source-thumb"><img id="metaThumb" alt="" hidden><span id="thumbShimmer" class="shimmer fill"></span></div>
+      <div class="source-thumb"><img id="metaThumb" alt="" hidden><span id="thumbShimmer" class="shimmer fill"></span><span id="metaLoaderSlot" class="thumb-loader"></span></div>
       <div class="source-body">
         <p id="metaTitle" class="source-title"></p>
         <p id="metaSub" class="quiet"></p>
@@ -588,10 +654,10 @@ button.chip { cursor: pointer; }
 
       <aside class="panel card">
         <div id="detectStatus" class="detect-status">
-          <span class="spinner" id="detectSpinner"></span>
           <span class="icon" id="detectIcon" hidden></span>
           <div><b id="detectTitle">Looking for the tab…</b><p id="detectText">This takes a second or two.</p></div>
         </div>
+        <div id="detectLoaderSlot" class="detect-loader"></div>
 
         <div id="cropPreviewWrap" hidden>
           <p class="label">Inside the box</p>
@@ -623,6 +689,7 @@ button.chip { cursor: pointer; }
   <section id="step3" class="step" tabindex="-1" hidden>
     <div class="scan-card card">
       <h2 id="stageLabel">Scanning the video…</h2>
+      <div id="scanLoaderSlot" class="scan-loader"></div>
       <ol class="stages" id="stages">
         <li data-stage="scan"><span class="dot"></span>Reading frames</li>
         <li data-stage="find"><span class="dot"></span>Finding pages</li>

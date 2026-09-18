@@ -7,7 +7,7 @@
 // machine and in CI. electron-builder derives the .icns and .ico from this one
 // file, which is why it is drawn at 1024.
 //
-// There is no image library here on purpose: adding a dependency to draw eleven
+// There is no image library here on purpose: adding a dependency to draw seven
 // rectangles is a poor trade. Shapes are rounded rectangles evaluated as signed
 // distance fields, which gives real anti-aliased edges for a few lines of
 // arithmetic — a hard-edged icon looks cheap at 32px, and a supersampled one
@@ -23,9 +23,9 @@ const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = path.join(ROOT, 'build', 'icon.png');
 const SIZE = 1024;
 
-// The app's own colours, straight out of the stylesheet.
-const PAPER = '#faf7f2';
-const ACCENT = '#c93f0c';
+// The brand mark's own colours, straight out of the brand kit.
+const GRAD_A = '#FFAF66';
+const GRAD_B = '#EF6A14';
 const INK = '#ffffff';
 
 const rgb = (hex) => [
@@ -47,9 +47,13 @@ const px = new Float64Array(SIZE * SIZE * 4);
  * `0.5 - d` clamped to 0..1: a pixel whose centre sits half a pixel inside the
  * edge is fully covered, one half a pixel outside is empty, and the ones in
  * between get the fraction. Only the shape's own bounding box is visited.
+ *
+ * `paint` is a hex colour, or a function of the pixel centre returning one, so
+ * that a gradient is a different argument rather than a second copy of this
+ * loop. It is only consulted for pixels the shape actually covers.
  */
-function roundRect(x, y, w, h, radius, hex) {
-  const [cr, cg, cb] = rgb(hex);
+function roundRect(x, y, w, h, radius, paint) {
+  const flat = typeof paint === 'string' ? rgb(paint) : null;
   const cx = x + w / 2;
   const cy = y + h / 2;
   const hw = w / 2;
@@ -68,6 +72,7 @@ function roundRect(x, y, w, h, radius, hex) {
       const d = Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) + Math.min(Math.max(qx, qy), 0) - r;
       const a = Math.min(1, Math.max(0, 0.5 - d));
       if (a <= 0) continue;
+      const [cr, cg, cb] = flat || paint(ix + 0.5, iy + 0.5);
       const i = (iy * SIZE + ix) * 4;
       const keep = 1 - a;
       px[i] = cr * a + px[i] * keep;
@@ -78,73 +83,86 @@ function roundRect(x, y, w, h, radius, hex) {
   }
 }
 
-// --------------------------------------------------------------- the drawing
-
-// A seven-segment digit. Fret numbers have to be drawn, not typeset — there is
-// no font here — and segments stay legible when the whole icon is 32px wide in
-// a taskbar, where anything with real letterforms turns to mush.
-const SEGMENTS = {
-  0: 'abcdef',
-  1: 'bc',
-  2: 'abged',
-  3: 'abgcd',
-  4: 'fgbc',
-  5: 'afgcd',
-  6: 'afgedc',
-  7: 'abc',
-  8: 'abcdefg',
-  9: 'abcdfg',
-};
-
-function digit(value, cx, cy, w, h, t, hex) {
-  const left = cx - w / 2;
-  const right = cx + w / 2;
-  const top = cy - h / 2;
-  const bottom = cy + h / 2;
-  const mid = cy - t / 2;
-  const half = h / 2 + t / 2; // verticals run edge to middle, overlapping by t/2
-  const r = t * 0.25;
-  const box = {
-    a: [left, top, w, t],
-    b: [right - t, top, t, half],
-    c: [right - t, mid, t, half],
-    d: [left, bottom - t, w, t],
-    e: [left, mid, t, half],
-    f: [left, top, t, half],
-    g: [left, mid, w, t],
-  };
-  for (const s of SEGMENTS[value]) roundRect(...box[s], r, hex);
+/**
+ * Fill a rounded rectangle with the brand's linear gradient.
+ *
+ * The axis is CSS's `150deg`: measured clockwise from "up", so it points right
+ * and down, which is why hexA lands in the top-left corner and hexB in the
+ * bottom-right. CSS also scales the axis so the two corners it points at sit
+ * exactly on the end colours — that length is |w·sin a| + |h·cos a| — and
+ * reproducing it is what keeps the icon the same orange as the tile in the web
+ * app rather than a washed-out approximation of it.
+ */
+function roundRectGradient(x, y, w, h, radius, hexA, hexB) {
+  const a = (150 * Math.PI) / 180;
+  const dx = Math.sin(a);
+  const dy = -Math.cos(a); // CSS measures the angle up the page; y grows down here
+  const len = Math.abs(w * dx) + Math.abs(h * dy);
+  const cx = x + w / 2;
+  const cy = y + h / 2;
+  const [ar, ag, ab] = rgb(hexA);
+  const [br, bg, bb] = rgb(hexB);
+  roundRect(x, y, w, h, radius, (sx, sy) => {
+    const t = Math.min(1, Math.max(0, ((sx - cx) * dx + (sy - cy) * dy) / len + 0.5));
+    return [ar + (br - ar) * t, ag + (bg - ag) * t, ab + (bb - ab) * t];
+  });
 }
 
-// Plate: the whole icon is one rounded square of paper. Inset by 16 so the
+// --------------------------------------------------------------- the drawing
+
+// The tile is the whole icon — no plate behind it. Inset by 16 so the
 // anti-aliased edge has somewhere to land instead of being clipped.
-roundRect(16, 16, SIZE - 32, SIZE - 32, 200, PAPER);
+const INSET = 16;
+const TILE = SIZE - INSET * 2;
+roundRectGradient(INSET, INSET, TILE, TILE, TILE * 0.268, GRAD_A, GRAD_B);
 
-// The accent tile the eye actually reads at small sizes.
-const TILE = 112;
-roundRect(TILE, TILE, SIZE - TILE * 2, SIZE - TILE * 2, 150, ACCENT);
+// The mark, in the brand kit's 24x24 grid: six strings, all starting flush at
+// the left, whose right-hand ends step out and back in again so that the ragged
+// edge they leave reads as a play triangle. Six strings and a play button in one
+// shape is the whole idea, so the tapered lengths are the part to preserve if
+// anything here is ever retuned.
+const STROKE = 2.1;
+const STRINGS = [
+  [4, 12, 4.2],
+  [4, 17, 7.7],
+  [4, 21, 11.2],
+  [4, 21, 14.7],
+  [4, 17, 18.2],
+  [4, 12, 21.7],
+];
 
-// Six strings. Thick relative to their spacing on purpose: at 32px the pitch is
-// under 4px, and thin lines would average away into a flat orange square.
-const PAD = 88;
-const LINE_X = TILE + PAD;
-const LINE_W = SIZE - (TILE + PAD) * 2;
-const STROKE = 32;
-const PITCH = 116;
-const lineY = (i) => SIZE / 2 + (i - 2.5) * PITCH;
-for (let i = 0; i < 6; i++) roundRect(LINE_X, lineY(i) - STROKE / 2, LINE_W, STROKE, STROKE / 2, INK);
+// Those coordinates are cap centres, so the ink reaches half a stroke beyond
+// them on every side. Measuring the real extent — rather than trusting the
+// 24-unit grid, whose midline the strings hang below — is what lets the mark be
+// centred on the tile; an icon off-centre by a percent of its width is obvious
+// in a dock, and at 1024 a percent is ten pixels.
+const CAP = STROKE / 2;
+const inkLeft = Math.min(...STRINGS.map(([from]) => from)) - CAP;
+const inkRight = Math.max(...STRINGS.map(([, to]) => to)) + CAP;
+const inkTop = Math.min(...STRINGS.map(([, , y]) => y)) - CAP;
+const inkBottom = Math.max(...STRINGS.map(([, , y]) => y)) + CAP;
 
-// Two fret numbers, each sitting in a break in its string — which is how tab is
-// actually set, and the cheapest way to keep a light digit legible on top of a
-// light line.
-const D_W = 84;
-const D_H = 132;
-const D_T = 24;
-const GAP = 22;
-for (const [value, cx, line] of [[3, 392, 1], [5, 624, 3]]) {
-  const cy = lineY(line);
-  roundRect(cx - D_W / 2 - GAP, cy - D_H / 2 - GAP, D_W + GAP * 2, D_H + GAP * 2, 18, ACCENT);
-  digit(value, cx, cy, D_W, D_H, D_T, PAPER);
+// The brand kit sets the mark's whole 24-unit grid at 0.62 of the tile, not its
+// ink: the strings only occupy x 4-21 of that grid, so the ink itself lands at
+// about half the tile and the corners keep their margin. Scaling the ink to 0.62
+// instead makes the mark a quarter larger than the kit draws it and crowds the
+// squircle, which is what it looked like before this line said GRID.
+const GRID = 24;
+const SCALE = (0.62 * TILE) / GRID;
+const ox = INSET + TILE / 2 - ((inkLeft + inkRight) / 2) * SCALE;
+const oy = INSET + TILE / 2 - ((inkTop + inkBottom) / 2) * SCALE;
+
+// A rounded rect of height = stroke width with radius = half of it is exactly a
+// round-capped line, so the six strings need no new primitive.
+for (const [from, to, y] of STRINGS) {
+  roundRect(
+    ox + (from - CAP) * SCALE,
+    oy + (y - CAP) * SCALE,
+    (to - from + STROKE) * SCALE,
+    STROKE * SCALE,
+    (STROKE * SCALE) / 2,
+    INK,
+  );
 }
 
 // ------------------------------------------------------------- the PNG encoder

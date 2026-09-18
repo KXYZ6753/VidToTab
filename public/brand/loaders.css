@@ -1,0 +1,451 @@
+/* The four brand loaders, as CSS. loaders.js builds the markup; this file owns
+   every pose, every loop and the arrival and departure that motion.js drives.
+ *
+ * Three rules shaped most of what follows.
+ *
+ * Colour comes from the app's tokens, never from a hex code. The brand orange
+ * is only the brand orange in dark mode: the light theme deliberately darkens
+ * it to #c93f0c so white-on-accent clears AA, and index.html says so. Writing
+ * #FF8A3D here would quietly undo that, so everything below reads --accent and
+ * friends and lets the theme decide.
+ *
+ * Every loop returns to its opening pose. A loader runs for as long as the work
+ * does, so the seam between the last frame and the first is seen far more often
+ * than the beginning is; a loop that jumps there reads as a stutter in the app,
+ * not in the animation. Where a keyframe set ends somewhere other than it
+ * started, the comment above it says what hides the difference.
+ *
+ * Every loop reads --vtt-phase. motion.js sets it to minus the time since load,
+ * so a loader mounted at the third stage of a job picks up the tempo the first
+ * two were keeping instead of starting the beat again. Only the scan opts out —
+ * its playhead means "this is how far we have got", so it has to set off from
+ * the left.
+ */
+
+/* ---------- shared ---------- */
+
+.vtt-loader {
+  /* Must equal FADE_MS in motion.js. exit() adds .is-leaving, waits exactly
+     that long and then sets hidden: a longer fade here is cut off part way, a
+     shorter one leaves the element sitting invisible for the remainder. */
+  --vtt-fade: 200ms;
+
+  /* The lit end of every two-stop orange in this file. Mixing up from --accent
+     rather than naming a second hex keeps the highlight a highlight in both
+     themes — in light mode it lifts off the darkened #c93f0c, in dark mode off
+     #ff8a3d — and there is no second colour to forget to update. */
+  --vtt-lit: color-mix(in srgb, var(--accent) 70%, #fff);
+
+  display: inline-flex;
+  align-items: center;
+  gap: .55em;
+  transition: opacity var(--vtt-fade) ease, transform var(--vtt-fade) ease;
+}
+
+/* createLoader() hands the element back hidden, and the display above would
+   otherwise beat the user agent's [hidden] rule — same specificity, and an
+   author sheet outranks the UA sheet — leaving every loader on screen from the
+   moment it is built. */
+.vtt-loader[hidden] { display: none !important; }
+
+/* The pre-reveal pose. A transition rather than an animation, so it cannot end
+   up competing with the loop underneath it for the same transform. */
+.vtt-loader.is-entering { opacity: 0; transform: translateY(2px) scale(.985); }
+.vtt-loader.is-leaving { opacity: 0; }
+
+.vtt-loader-text {
+  font-family: var(--font);
+  font-size: .9em;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+/* ---------- strings: reading the video ---------- */
+
+.vtt-loader--strings { --vtt-size: 22px; }
+
+.vtt-strings {
+  display: flex;
+  align-items: center;
+  height: var(--vtt-size);
+  gap: calc(var(--vtt-size) / 8);
+}
+
+.vtt-strings i {
+  display: block;
+  width: calc(var(--vtt-size) / 10);
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+  animation: vtt-pluck 1.2s ease-in-out infinite backwards;
+  animation-delay: var(--vtt-phase, 0ms);
+}
+
+/* Six strings, struck in turn. Half a second of stagger inside a 1.2s loop
+   leaves the sixth still ringing as the first is struck again, which is what
+   makes it read as one hand moving rather than six lights blinking.
+
+   The `backwards` fill above is what makes a stagger safe. A delayed animation
+   applies no keyframe at all until it starts, so without it the later strings
+   would stand at their unanimated full height for up to half a second after
+   the loader appeared and then drop into the loop — most visible on the first
+   loader of a session, when --vtt-phase is still close to zero and the delays
+   have not already been absorbed. `backwards` holds them at the 0% pose
+   instead, which is the rest pose, so they simply wait their turn. */
+.vtt-strings i:nth-child(2) { animation-delay: calc(var(--vtt-phase, 0ms) + .1s); }
+.vtt-strings i:nth-child(3) { animation-delay: calc(var(--vtt-phase, 0ms) + .2s); }
+.vtt-strings i:nth-child(4) { animation-delay: calc(var(--vtt-phase, 0ms) + .3s); }
+.vtt-strings i:nth-child(5) { animation-delay: calc(var(--vtt-phase, 0ms) + .4s); }
+.vtt-strings i:nth-child(6) { animation-delay: calc(var(--vtt-phase, 0ms) + .5s); }
+
+/* Struck, then left to decay back to rest. 0% and 100% are the same pose, so
+   the string is at rest at the seam whichever side of it you look from. */
+@keyframes vtt-pluck {
+  0%, 100% { transform: scaleY(.34); opacity: .45; }
+  16%      { transform: scaleY(1);   opacity: 1; }
+  52%      { transform: scaleY(.52); opacity: .72; }
+}
+
+/* ---------- beam: finding the tab in the frame ---------- */
+
+.vtt-loader--beam { --vtt-size: 24px; }
+
+.vtt-beam {
+  position: relative;
+  height: var(--vtt-size);
+  aspect-ratio: 16 / 9;
+  border-radius: calc(var(--vtt-size) / 6);
+  /* Keeps the sweep inside the box it is searching. It is also half of why the
+     loop is seamless: the bar is parked outside the frame at both ends. */
+  overflow: hidden;
+}
+
+.vtt-beam svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+
+.vtt-beam-frame {
+  fill: none;
+  stroke: var(--line-strong);
+  stroke-width: 2;
+  stroke-linecap: round;
+  /* pathLength declares the perimeter as 176 = 16 x 11, so a 6-on-5-off dash
+     repeats a whole number of times around a rounded rectangle whose real
+     perimeter is nothing so convenient. Without it the pattern meets itself
+     mid-dash at the start point and the march has a visible stutter there. */
+  stroke-dasharray: 6 5;
+  animation: vtt-detect 2.2s linear infinite;
+  animation-delay: var(--vtt-phase, 0ms);
+}
+
+.vtt-beam-bar {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  /* 25% is chosen so the arithmetic in vtt-sweepx stays round: translateX is a
+     percentage of the bar, not of the frame, so clearing a quarter-width bar
+     takes exactly 400%. Change one and the other has to change with it. */
+  width: 25%;
+  background: linear-gradient(90deg, transparent, var(--vtt-lit) 55%, var(--accent) 78%, transparent);
+  animation: vtt-sweepx 2.2s linear infinite;
+  animation-delay: var(--vtt-phase, 0ms);
+}
+
+/* -110% holds the bar clear of the frame's left edge and 410% holds it clear
+   of the right — 400% is the bar's own width four times over, which is the
+   width of the frame, plus a little either side so no antialiased fringe
+   survives the clip. At both ends it is entirely outside the box, so the two
+   ends draw the same picture: nothing. The opacity is belt and braces, and
+   means the seam would survive someone later dropping the overflow. */
+@keyframes vtt-sweepx {
+  0%        { transform: translateX(-110%); opacity: 0; }
+  12%, 88%  { opacity: .9; }
+  100%      { transform: translateX(410%);  opacity: 0; }
+}
+
+/* The frame brightens as the beam crosses it and marches one full dash period.
+   -11 is exactly one 6-on-5-off repeat, so the offset at 100% draws the same
+   picture as the offset at 0% while still moving continuously. */
+@keyframes vtt-detect {
+  0%   { stroke-dashoffset: 0;   stroke: var(--line-strong); }
+  18%  { stroke: var(--line-strong); }
+  50%  { stroke: var(--accent); }
+  82%  { stroke: var(--line-strong); }
+  100% { stroke-dashoffset: -11; stroke: var(--line-strong); }
+}
+
+/* ---------- pages: rendering the sheets ---------- */
+
+.vtt-loader--pages { --vtt-size: 24px; }
+
+.vtt-book {
+  position: relative;
+  height: var(--vtt-size);
+  aspect-ratio: 3 / 2;
+  perspective: calc(var(--vtt-size) * 5);
+}
+
+.vtt-sheet {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 50%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: calc(var(--vtt-size) / 10);
+  padding: 0 calc(var(--vtt-size) / 9);
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+}
+
+.vtt-sheet--l { left: 0;   border-radius: calc(var(--vtt-size) / 9) 0 0 calc(var(--vtt-size) / 9); }
+.vtt-sheet--r { left: 50%; border-radius: 0 calc(var(--vtt-size) / 9) calc(var(--vtt-size) / 9) 0; }
+
+.vtt-sheet b {
+  display: block;
+  height: 1px;
+  border-radius: 999px;
+  background: var(--line-strong);
+}
+
+/* A leaf is a right-hand sheet hinged on the spine. That is what makes the loop
+   seamless without any fading: at 0deg it covers the right page exactly, and at
+   -180deg it lands on the left page — also exactly, because a sheet's rules run
+   the full width and its rounded corners swap sides under the mirror, so the
+   flipped leaf and the left page are the same picture. The leaf is therefore
+   invisible at both ends of its travel and the seam has nothing to show. */
+.vtt-leaf {
+  transform-origin: left center;
+  animation: vtt-flipturn 2.2s ease-in-out infinite backwards;
+  animation-delay: var(--vtt-phase, 0ms);
+}
+
+/* Half a period apart, so one leaf is always in the air. */
+.vtt-leaf--b { animation-delay: calc(var(--vtt-phase, 0ms) + 1.1s); }
+
+@keyframes vtt-flipturn {
+  0%   { transform: rotateY(0deg); background: var(--surface); border-color: var(--line-strong); }
+  /* Shaded and edge-lit through the turn, back to the sheet's own colours by
+     the time it lands — anything left over here would break the match with the
+     page underneath. The peaks sit at the quarters because at half way the leaf
+     is edge on and there is nothing to shade. Tinting the background rather
+     than applying a filter is deliberate: a filter flattens the element out of
+     the book's 3D context and the leaf stops sorting against the pages. */
+  25%  { background: color-mix(in srgb, var(--surface) 86%, var(--ink)); border-color: var(--accent); }
+  75%  { background: color-mix(in srgb, var(--surface) 86%, var(--ink)); border-color: var(--accent); }
+  100% { transform: rotateY(-180deg); background: var(--surface); border-color: var(--line-strong); }
+}
+
+/* ---------- scan: the playhead writes the tab ---------- */
+
+.vtt-loader--scan {
+  --vtt-size: 132px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: calc(var(--vtt-size) / 14);
+}
+
+.vtt-scan-stage {
+  position: relative;
+  inline-size: calc(var(--vtt-size) * 1.85);
+  max-inline-size: 100%;
+  aspect-ratio: 200 / 100;
+  /* The whole picture is drawn in cqw so it holds together at any width; the
+     inline size above is definite, which is what makes the containment safe. */
+  container-type: inline-size;
+}
+
+.vtt-scan-stage svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+
+.vtt-wave-base { fill: var(--line-strong); }
+/* Fret wire and inlays, fainter than the strings that cross them: they place
+   the notes without competing with them. Both live only in the base layer. */
+.vtt-fretwire { stroke: var(--ink); stroke-opacity: .07; stroke-width: .6; }
+.vtt-inlay { fill: var(--ink); fill-opacity: .06; }
+/* Per-line gauges come from the markup, so no stroke-width here. */
+.vtt-staff { stroke: var(--line-strong); }
+.vtt-wave-ink { fill: var(--accent); }
+/* The staff behind the playhead, tinted rather than fully accent: it has to
+   read as written without competing with the fret dots sitting on it. */
+.vtt-staff-ink { stroke: color-mix(in srgb, var(--accent) 45%, transparent); }
+.vtt-fret circle { fill: var(--accent); }
+.vtt-fret text {
+  fill: var(--accent-ink);
+  font-family: var(--mono);
+  font-size: 6.4px;
+  font-weight: 600;
+  text-anchor: middle;
+  dominant-baseline: central;
+}
+
+/* Everything already transcribed. The reveal is a clip rather than a fade so
+   the edge is hard and lands exactly under the playhead. */
+.vtt-scan-ink {
+  animation: vtt-write 4.6s linear infinite;
+  animation-delay: var(--vtt-phase, 0ms);
+}
+
+.vtt-scan-head {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 1.2cqw;
+  border-radius: 999px;
+  background: linear-gradient(180deg, var(--vtt-lit), var(--accent));
+  box-shadow: 0 0 2.4cqw color-mix(in srgb, var(--accent) 55%, transparent);
+  animation: vtt-scan 4.6s linear infinite;
+  animation-delay: var(--vtt-phase, 0ms);
+}
+
+/* The head travels 100cqw minus its own width while the clip opens across the
+   full 100cqw, both linearly and over the same 0-88%. That one-bar-width
+   difference is what keeps the writing under the pen: at any point in the
+   sweep the clip edge sits between the head's left and right edges, never
+   ahead of it. Linear on both, because easing one and not the other would let
+   the ink run out in front of the head half way across.
+
+   The fade finishes at 98% rather than at 100%, and the next one does not
+   begin until 2%: that leaves about 90ms of genuinely empty stage either side
+   of the seam. Landing the fade exactly on 100% left the old frame at a few
+   percent opacity as the new one began, which measured as a 9% cross-dissolve
+   at the moment the eye is most likely to catch it.
+
+   0% and 100% are different places — the left edge and the right — and that is
+   fine because the head is invisible at both ends: it is transparent until 2%
+   and again from 98%. */
+@keyframes vtt-scan {
+  0%   { transform: translateX(0); opacity: 0; }
+  2%   { opacity: 0; }
+  5%   { opacity: 1; }
+  88%  { transform: translateX(calc(100cqw - 1.2cqw)); opacity: 1; }
+  94%  { transform: translateX(calc(100cqw - 1.2cqw)); opacity: 1; }
+  98%  { opacity: 0; }
+  100% { transform: translateX(calc(100cqw - 1.2cqw)); opacity: 0; }
+}
+
+/* Closed at 0%, so nothing shows; faded out at 100%, so nothing shows. Two
+   different ways of drawing the same empty picture, which is all the seam
+   asks for. The hold between 88% and 94% is the moment the tab is complete —
+   without it the last note is written and erased in the same breath. */
+@keyframes vtt-write {
+  0%        { clip-path: inset(0 100% 0 0); opacity: 1; }
+  88%, 94%  { clip-path: inset(0 0 0 0);    opacity: 1; }
+  98%, 100% { clip-path: inset(0 0 0 0);    opacity: 0; }
+}
+
+/* Each dot drops onto its string as the playhead reaches it — loaders.js works
+   the delay out from the dot's own x, so the two cannot drift apart. It also
+   lifts back off just before, during the 0.37s in which the clip still has it
+   covered, which is what lets 0% and 100% be the same pose: the pose is "not
+   yet written", and the only time it is on screen is the instant after the
+   playhead has passed. */
+.vtt-fret {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: vtt-land 4.6s ease-out infinite backwards;
+  animation-delay: calc(var(--vtt-phase, 0ms) + var(--vtt-at, 0ms));
+}
+
+@keyframes vtt-land {
+  0%        { transform: translateY(-3px) scale(.55); opacity: 0; }
+  4%, 92%   { transform: none; opacity: 1; }
+  100%      { transform: translateY(-3px) scale(.55); opacity: 0; }
+}
+
+.vtt-scan-foot {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--vtt-size) / 18);
+}
+
+.vtt-mark {
+  width: calc(var(--vtt-size) / 7);
+  height: calc(var(--vtt-size) / 7);
+  flex: none;
+  animation: vtt-breathe 4.6s ease-in-out infinite;
+  animation-delay: var(--vtt-phase, 0ms);
+}
+
+.vtt-mark-bg { fill: var(--accent); }
+.vtt-mark-line { stroke: var(--accent-ink); stroke-width: 1.6; stroke-linecap: round; fill: none; }
+.vtt-mark-dot { fill: var(--accent-ink); }
+
+.vtt-loader--scan .vtt-loader-text {
+  font-size: max(11px, calc(var(--vtt-size) / 11));
+  letter-spacing: .02em;
+  animation: vtt-pulse 2.3s ease-in-out infinite;
+  animation-delay: var(--vtt-phase, 0ms);
+}
+
+/* 4.6s and 2.3s divide the scan's own period, so the mark, the label and the
+   playhead all come back together at the seam and exit() finds one coherent
+   frame rather than three animations caught mid-stride. */
+@keyframes vtt-breathe {
+  0%, 100% { transform: scale(1);    opacity: .78; }
+  50%      { transform: scale(1.07); opacity: 1; }
+}
+
+@keyframes vtt-pulse {
+  0%, 100% { opacity: .55; }
+  50%      { opacity: 1; }
+}
+
+/* ---------- reduced motion ---------- */
+
+/* index.html already kills transitions for everyone who asks for less motion,
+   but a transition is not an animation and none of the loops above would stop.
+   Each one is parked at the pose that still says the work is happening: strings
+   at full height, the frame drawn as though it had found its box, the stack of
+   pages whole, and — the one that matters most — the scan showing a tab that
+   has been written rather than an empty staff. A still frame of a loader is
+   somebody's whole experience of this screen; it may not be a blank box. */
+@media (prefers-reduced-motion: reduce) {
+  .vtt-strings i {
+    animation: none;
+    transform: none;
+    opacity: 1;
+  }
+
+  .vtt-beam-frame {
+    animation: none;
+    stroke: var(--accent);
+    stroke-dashoffset: 0;
+  }
+
+  .vtt-beam-bar { display: none; }
+
+  .vtt-leaf { animation: none; }
+
+  .vtt-scan-ink {
+    animation: none;
+    clip-path: none;
+    opacity: 1;
+  }
+
+  .vtt-fret {
+    animation: none;
+    transform: none;
+    opacity: 1;
+  }
+
+  /* Parked where it finished, which is the only place it can be once the tab
+     below it is complete. */
+  .vtt-scan-head {
+    animation: none;
+    transform: translateX(calc(100cqw - 1.2cqw));
+    opacity: 1;
+  }
+
+  .vtt-mark {
+    animation: none;
+    transform: none;
+    opacity: 1;
+  }
+
+  .vtt-loader--scan .vtt-loader-text {
+    animation: none;
+    opacity: 1;
+  }
+}
