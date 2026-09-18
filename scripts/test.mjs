@@ -17,6 +17,10 @@ const mods = [
   // Only its pure parts run here — IndexedDB does not exist in Node, and the
   // storage paths are covered by the browser end-to-end test instead.
   { name: 'library', file: path.join(here, '..', 'public', 'lib', 'library.js') },
+  // Decides when a looping brand animation may be cut off. Only the pure half
+  // runs here; the DOM helpers beside it need a document, and the browser
+  // end-to-end test drives those.
+  { name: 'motion', file: path.join(here, '..', 'public', 'brand', 'motion.js') },
 ]
   .filter((m) => only.length === 0 || only.includes(m.name))
   .sort((a, b) => a.name.localeCompare(b.name));

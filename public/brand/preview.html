@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VidToTab loaders — preview</title>
+
+<!--
+  A development tool, committed on purpose: it is the only place all four
+  loaders can be watched side by side, at several sizes, in both themes, and
+  started and stopped by hand. The app itself only ever shows one at a time, so
+  without this page a seam in a 4.6s loop is something you find by staring at a
+  running job.
+
+  It is also how the loops are checked deterministically. Headless Chrome's
+  --virtual-time-budget advances animation time without waiting for it, so a
+  shot at N and a shot at N plus one period must be the same picture:
+
+    ...--virtual-time-budget=400  '.../brand/preview.html?only=pages&pin'
+    ...--virtual-time-budget=2600 '.../brand/preview.html?only=pages&pin'
+
+  ?only=<kind> strips the page to one loader so the comparison is about that
+  loop and nothing else; ?pin fixes --vtt-phase at 0 so the two runs share a
+  time origin; ?theme=dark picks the pane colours; ?size=N overrides --vtt-size
+  when something needs looking at closely.
+
+  The tokens below are copied from the :root blocks in public/index.html rather
+  than imported, because index.html switches themes on prefers-color-scheme and
+  this page has to show both at once. They are colours only — if they drift from
+  the app it costs a wrong-looking preview, not a wrong-looking app.
+-->
+
+<link rel="stylesheet" href="./loaders.css">
+<style>
+*, *::before, *::after { box-sizing: border-box; }
+* { margin: 0; padding: 0; }
+
+:root {
+  color-scheme: light;
+  --bg: #f6f3ee;
+  --surface: #ffffff;
+  --surface-2: #faf8f4;
+  --ink: #1d1b18;
+  --muted: #6e685f;
+  --faint: #726c62;
+  --line: #e7e1d7;
+  --line-strong: #d6cfc3;
+  --accent: #c93f0c;
+  --accent-hover: #b8380a;
+  --accent-ink: #ffffff;
+  --accent-soft: #fcebe0;
+  --paper: #ffffff;
+  --shadow-sm: 0 1px 2px rgba(40, 30, 20, .06);
+  --radius: 14px;
+  --radius-sm: 9px;
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Apple SD Gothic Neo", "Noto Sans", system-ui, sans-serif;
+  --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
+}
+
+.pane--dark {
+  color-scheme: dark;
+  --bg: #121315;
+  --surface: #1b1c20;
+  --surface-2: #222328;
+  --ink: #eeebe6;
+  --muted: #a7a198;
+  --faint: #98938b;
+  --line: #2d2e34;
+  --line-strong: #3b3c43;
+  --accent: #ff8a3d;
+  --accent-hover: #ff9d5c;
+  --accent-ink: #1d1206;
+  --accent-soft: #3a2517;
+  --paper: #ffffff;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, .35);
+}
+
+[hidden] { display: none !important; }
+
+/* index.html kills every transition under reduced motion; the loaders are
+   written against that, so the preview has to do it too or the enter and exit
+   behave differently here than in the app. */
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+
+body { font-family: var(--font); background: var(--bg); color: var(--ink); font-size: 15px; line-height: 1.5; }
+
+.panes { display: grid; grid-template-columns: 1fr 1fr; min-height: 100vh; }
+@media (max-width: 860px) { .panes { grid-template-columns: 1fr; } }
+
+.pane { background: var(--bg); color: var(--ink); padding: 20px; display: flex; flex-direction: column; gap: 14px; }
+.pane h2 { font-size: 12px; font-weight: 650; letter-spacing: .08em; text-transform: uppercase; color: var(--faint); }
+
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px 16px; box-shadow: var(--shadow-sm); }
+.card header { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+.card h3 { font-size: 14px; font-weight: 650; }
+.card h3 code { font: 12px var(--mono); color: var(--accent); }
+.card .use { font-size: 12.5px; color: var(--muted); }
+
+.strip { display: flex; align-items: center; gap: 22px; flex-wrap: wrap; min-height: 52px; }
+.strip--scan { gap: 26px; align-items: flex-end; }
+
+.controls { display: flex; gap: 6px; }
+button {
+  font: inherit; font-size: 12.5px; font-weight: 550; color: var(--ink);
+  background: var(--surface-2); border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm); padding: 3px 10px; cursor: pointer;
+}
+button:hover { border-color: var(--faint); }
+.top { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 20px; border-bottom: 1px solid var(--line); background: var(--surface); }
+.top strong { font-size: 14px; }
+.top span { font-size: 12.5px; color: var(--muted); }
+
+.inline-demo { font-size: 14px; color: var(--muted); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+/* ?only= — one loader, nothing else, for a pixel comparison across the seam. */
+body.only .top { display: none; }
+body.only .panes { grid-template-columns: 1fr; }
+body.only .pane { min-height: 100vh; align-items: center; justify-content: center; padding: 40px; }
+</style>
+</head>
+
+<body>
+<div class="top">
+  <div><strong>VidToTab loaders</strong> <span>— development preview</span></div>
+  <div class="controls">
+    <button id="all-show">Show all</button>
+    <button id="all-hide">Hide all</button>
+  </div>
+</div>
+
+<div class="panes" id="panes"></div>
+
+<script type="module">
+import { KINDS, createLoader } from './loaders.js';
+
+const params = new URLSearchParams(location.search);
+const only = params.get('only');
+const pinPhase = params.has('pin');
+
+if (only && !KINDS.includes(only)) throw new Error(`?only=${only} is not one of ${KINDS.join(', ')}`);
+
+// Small, default, and large — the two ends of the claim that one component
+// works inline beside a line of text and again in the middle of a card.
+const SIZES = {
+  strings: [16, 22, 40],
+  beam: [18, 24, 44],
+  pages: [18, 24, 44],
+  scan: [72, 132, 200],
+};
+
+const USED_FOR = {
+  strings: 'reading video info',
+  beam: 'detecting the tab area',
+  pages: 'rendering pages',
+  scan: 'the whole scan step',
+};
+
+const PERIOD = { strings: '1.2s', beam: '2.2s', pages: '2.2s', scan: '4.6s' };
+
+const live = [];
+
+function mount(parent, kind, size, label) {
+  const loader = createLoader(kind, label === undefined ? {} : { label });
+  loader.el.style.setProperty('--vtt-size', `${size}px`);
+  parent.append(loader.el);
+  live.push(loader);
+  return loader;
+}
+
+function card(kind) {
+  const el = document.createElement('section');
+  el.className = 'card';
+
+  const head = document.createElement('header');
+  head.innerHTML = `<h3><code>${kind}</code> — ${PERIOD[kind]}</h3>`
+    + `<span class="use">${USED_FOR[kind]}</span>`;
+
+  const controls = document.createElement('div');
+  controls.className = 'controls';
+  const show = document.createElement('button');
+  show.textContent = 'Show';
+  const hide = document.createElement('button');
+  hide.textContent = 'Hide';
+  controls.append(show, hide);
+  head.append(controls);
+
+  const strip = document.createElement('div');
+  strip.className = `strip${kind === 'scan' ? ' strip--scan' : ''}`;
+
+  const mine = SIZES[kind].map((size) => mount(strip, kind, size));
+
+  // One labelled instance per kind: it is a different element (role="status"
+  // with real text) rather than a styling variant, so it is worth seeing.
+  if (kind === 'scan') mine.push(mount(strip, kind, SIZES[kind][1], 'reading the fretboard'));
+  else mine.push(mount(strip, kind, SIZES[kind][1], 'working'));
+
+  show.addEventListener('click', () => mine.forEach((l) => l.show()));
+  hide.addEventListener('click', () => mine.forEach((l) => l.hide()));
+
+  el.append(head, strip);
+  return el;
+}
+
+function pane(theme) {
+  const el = document.createElement('div');
+  el.className = `pane pane--${theme}`;
+  const title = document.createElement('h2');
+  title.textContent = `${theme} theme`;
+  el.append(title);
+
+  for (const kind of KINDS) el.append(card(kind));
+
+  // The claim that these sit inline beside text, checked with actual text.
+  const row = document.createElement('section');
+  row.className = 'card inline-demo';
+  row.append(document.createTextNode('Inline at 20px:'));
+  mount(row, 'strings', 20);
+  row.append(document.createTextNode('reading video info…'));
+  el.append(row);
+
+  return el;
+}
+
+const panes = document.getElementById('panes');
+if (only) {
+  document.body.classList.add('only');
+  const theme = params.get('theme') === 'dark' ? 'dark' : 'light';
+  const el = document.createElement('div');
+  el.className = `pane pane--${theme}`;
+  mount(el, only, Number(params.get('size')) || SIZES[only][1]);
+  panes.append(el);
+} else {
+  panes.append(pane('light'), pane('dark'));
+}
+
+document.getElementById('all-show').addEventListener('click', () => live.forEach((l) => l.show()));
+document.getElementById('all-hide').addEventListener('click', () => live.forEach((l) => l.hide()));
+
+// Shown on load so a headless screenshot catches them running; the buttons are
+// there to watch the enter and the exit, which a screenshot cannot show.
+live.forEach((l) => l.show());
+
+// enter() phases each loader against the moment the page loaded, which is what
+// keeps successive stages in step in the app but makes two screenshot runs
+// differ by however long the page took to start. Pinning it to zero gives the
+// two runs one time origin so the seam comparison is about the keyframes.
+if (pinPhase) live.forEach((l) => l.el.style.setProperty('--vtt-phase', '0ms'));
+
+// ?t=<ms> scrubs every loop to an exact moment and holds it there.
+//
+// --virtual-time-budget alone is not enough to check a seam. It advances the
+// clock, but not one millisecond of budget to one millisecond of animation:
+// a 3800ms budget on this page lands the scan playhead about 630ms into its
+// sweep, because virtual time only moves while the page has nothing else to
+// do. Driving currentTime instead puts the loop exactly where the comparison
+// needs it, so "the frame at t and the frame at t plus one period are the same
+// picture" becomes a claim two PNGs can settle.
+const scrubTo = params.get('t');
+if (scrubTo !== null) {
+  const ms = Number(scrubTo);
+  // Two frames, so the animations exist and the entering pose has been taken
+  // before anything is pinned.
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    for (const a of document.getAnimations()) {
+      // Transitions are left alone: the enter is not part of the loop under
+      // test, and pausing it mid-fade would dim every comparison.
+      if (a.animationName === undefined) continue;
+      a.currentTime = ms;
+      a.pause();
+    }
+    document.documentElement.dataset.scrubbed = String(ms);
+  }));
+}
+</script>
+</body>
+</html>

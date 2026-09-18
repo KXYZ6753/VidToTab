@@ -103,6 +103,12 @@ const MIME = {
   '.ico': 'image/x-icon',
   '.pdf': 'application/pdf',
   '.mp4': 'video/mp4',
+  // The bundled brand fonts and the OFL texts the licence asks to ship with
+  // them. Without the woff2 entry these fall out as application/octet-stream,
+  // which most browsers still accept for @font-face and none of them should
+  // have to.
+  '.woff2': 'font/woff2',
+  '.txt': 'text/plain; charset=utf-8',
 };
 
 fs.mkdirSync(WORK, { recursive: true });

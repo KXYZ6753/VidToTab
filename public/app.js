@@ -5,6 +5,7 @@
    look maths with the PNG and PDF exports instead of reimplementing it. */
 import { LOOKS, applyLook, inkRgb, isIdentity, isOriginal, lookById, mixRgb, paperRgb, rgbCss } from '/shared/look.js';
 import { deleteSheet, getSheet, hasStorage, listSheets, newId, requestPersistence, saveSheet } from '/lib/library.js';
+import { createLoader } from '/brand/loaders.js';
 
 (() => {
 
@@ -22,6 +23,17 @@ import { deleteSheet, getSheet, hasStorage, listSheets, newId, requestPersistenc
     const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), s = String(t % 60).padStart(2, '0');
     return h ? `${h}:${String(m).padStart(2, '0')}:${s}` : `${m}:${s}`;
   }
+
+  // One loader per wait the app actually has: reading the video, finding the
+  // tab, scanning. Built once, because each carries a running loop and
+  // rebuilding it on a state change would restart the beat the others are
+  // keeping. The export loader is built per click instead — it lives inside a
+  // button whose label it replaces.
+  const loaders = {
+    meta: createLoader('strings'),
+    detect: createLoader('beam'),
+    scan: createLoader('scan'),
+  };
 
   function el(tag, cls, text) {
     const n = document.createElement(tag);
@@ -181,11 +193,25 @@ import { deleteSheet, getSheet, hasStorage, listSheets, newId, requestPersistenc
     syncSidebar();
   }
 
+  document.getElementById('metaLoaderSlot').append(loaders.meta.el);
+  document.getElementById('detectLoaderSlot').append(loaders.detect.el);
+  document.getElementById('scanLoaderSlot').append(loaders.scan.el);
+
+  // The shimmer is the shape of a thumbnail that has not arrived; the strings
+  // say the app is still reading the video. They were being set in one place
+  // and cleared in another, which is how they drift, so they move together
+  // through here.
+  function setThumbLoading(on) {
+    $('thumbShimmer').hidden = !on;
+    if (on) loaders.meta.show(); else loaders.meta.hide();
+  }
+
   function showStep(n) {
     const changed = n !== state.step;
     state.step = n;
     state.maxStep = Math.max(state.maxStep, n);
     for (let i = 1; i <= 4; i++) sections[i].hidden = i !== n;
+    if (n !== 3) loaders.scan.hide();
     renderStepper();
     // Every route home funnels through here — the stepper, backToSource, and
     // the internal calls — so the saved songsheets are refreshed in one place.
@@ -383,7 +409,7 @@ import { deleteSheet, getSheet, hasStorage, listSheets, newId, requestPersistenc
     hideError();
     $('sourceCard').hidden = false;
     $('metaThumb').hidden = true;
-    $('thumbShimmer').hidden = false;
+    setThumbLoading(true);
     $('metaTitle').textContent = label;
     $('metaSub').textContent = '';
     $('how').hidden = true;
@@ -539,7 +565,7 @@ import { deleteSheet, getSheet, hasStorage, listSheets, newId, requestPersistenc
     if (newThumb || (meta.thumb && $('metaThumb').hidden)) {
       state.thumbVersion = Date.now();
       const img = $('metaThumb');
-      img.onload = () => { img.hidden = false; $('thumbShimmer').hidden = true; };
+      img.onload = () => { img.hidden = false; setThumbLoading(false); };
       img.src = '/thumb.jpg?v=' + state.thumbVersion;
     }
     if (!state.title) state.title = suggestTitle(meta.title);
@@ -652,7 +678,7 @@ import { deleteSheet, getSheet, hasStorage, listSheets, newId, requestPersistenc
       mode = 'pending'; title = 'Waiting for the video…'; text = '';
     }
     $('detectStatus').className = 'detect-status is-' + mode; // prefixed: .found is the scan-step counter
-    $('detectSpinner').hidden = mode !== 'pending';
+    if (mode === 'pending') loaders.detect.show(); else loaders.detect.hide();
     const ic = $('detectIcon');
     ic.hidden = mode === 'pending';
     ic.innerHTML = mode === 'found' ? ICON.check : ICON.warn;
@@ -855,6 +881,7 @@ import { deleteSheet, getSheet, hasStorage, listSheets, newId, requestPersistenc
     renderWarnings();
     $('foundCount').hidden = true;
     setProc('scan', 0, '');
+    loaders.scan.show();
     renderStepper();
   }
 
@@ -883,6 +910,9 @@ import { deleteSheet, getSheet, hasStorage, listSheets, newId, requestPersistenc
 
   function addLiveCapture(cap) {
     if (state.captures.some((c) => c.png === cap.png)) return;
+    // First real page in: the stand-in has nothing left to say, so it leaves at
+    // the next seam in its own loop rather than being cut off here.
+    if (!state.captures.length) loaders.scan.hide();
     state.captures.push(cap);
     const img = el('img');
     img.src = capSrc(cap.png);
@@ -1277,8 +1307,16 @@ import { deleteSheet, getSheet, hasStorage, listSheets, newId, requestPersistenc
   async function busy(btn, label, fn) {
     const html = btn.innerHTML;
     btn.disabled = true;
-    btn.textContent = label;
-    try { await fn(); } finally { btn.innerHTML = html; btn.disabled = false; }
+    // Page-turn rather than a frozen label. Exporting recolours and re-encodes
+    // every page, which on a twenty-page songsheet is long enough that a button
+    // that only changed its text reads as one that stopped working. hide()
+    // resolves at the loop's own seam, so the button comes back after a
+    // completed turn instead of half way through one.
+    const loader = createLoader('pages', { label });
+    btn.textContent = '';
+    btn.append(loader.el);
+    loader.show();
+    try { await fn(); } finally { await loader.hide(); btn.innerHTML = html; btn.disabled = false; }
   }
 
   $('exportPdf').addEventListener('click', () => busy($('exportPdf'), 'Building PDF…', async () => {
