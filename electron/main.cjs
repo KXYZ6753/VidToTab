@@ -42,7 +42,14 @@ function createWindow() {
     height: 860,
     minWidth: 640,
     minHeight: 560,
-    backgroundColor: '#faf7f2',
+    // The dark field the opening animation paints on, not the app's paper.
+    // This colour is only ever seen before the renderer's first paint, and on a
+    // desktop launch what paints first is always the splash — unconditionally
+    // dark, in either theme. Leaving it light put a white flash in front of it
+    // every single launch. The trade is a brief dark edge if a light-theme
+    // window is resized faster than it can repaint, which is rarer and quieter
+    // than a flash on every start.
+    backgroundColor: '#0a0b0c',
     show: false,
     title: 'VidToTab',
     webPreferences: {

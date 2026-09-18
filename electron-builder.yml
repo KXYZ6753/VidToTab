@@ -4,8 +4,11 @@ directories:
   output: dist
 
 # Drawn by scripts/make-icon.mjs (npm run icon) rather than committed, because
-# build/ is not in git. One 1024px png is enough for all three: electron-builder
-# derives the .icns and .ico from it.
+# build/ is not in git. Each platform takes a real multi-resolution container
+# rather than one 1024px png, because the small sizes are not the big one shrunk:
+# below 48px the mark drops to the brand kit's three-string variant, which is the
+# only way its taper survives a 16px slot. The png stays as a fallback for
+# anything that asks for the generic key.
 icon: build/icon.png
 
 # Only the shell goes in the asar. The server stays outside it: it spawns child
@@ -46,6 +49,7 @@ extraResources:
 
 mac:
   category: public.app-category.music
+  icon: build/icon.icns
   # Ad-hoc signing, explicitly. Not decoration: every Mach-O binary on Apple
   # Silicon has to carry a signature to run at all, and an app that ships
   # without one is reported as "damaged and can't be opened" — an error with no
@@ -62,11 +66,14 @@ mac:
       arch: [arm64]
 
 win:
+  icon: build/icon.ico
   target:
     - target: nsis
       arch: [x64]
 
 linux:
+  # A directory of <n>x<n>.png, which is the shape electron-builder globs for.
+  icon: build/icons
   category: AudioVideo
   # .deb is the primary download: AppImage needs chmod +x and trips Ubuntu's
   # AppArmor sandbox, which is a poor first experience for a non-developer.
