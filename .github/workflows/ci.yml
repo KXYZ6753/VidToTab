@@ -320,7 +320,7 @@ jobs:
             echo
             echo '**macOS** (Apple Silicon) — the `.dmg`. Open it and drag VidToTab to Applications.'
             echo
-            echo 'It is not signed with an Apple Developer certificate, so macOS refuses the first launch and calls the app damaged. It is not: right-click it and choose **Open**, or run'
+            echo 'It is signed, but only ad-hoc, and it is not notarised — so Gatekeeper stops the first launch and says Apple cannot check it for malicious software. Right-click the app and choose **Open**, which offers a way through that double-clicking does not, or run'
             echo
             echo '```sh'
             echo 'xattr -dr com.apple.quarantine /Applications/VidToTab.app'

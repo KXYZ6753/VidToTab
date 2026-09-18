@@ -154,7 +154,11 @@ The tag has to match `package.json`, and the workflow stops if it does not — i
 
 A tag with a suffix, `v0.2.0-beta.1`, is published as a pre-release, so "Latest release" on the repo page goes on pointing at the last stable one. Re-running a release that failed part way through is safe: it replaces the files on the existing release rather than refusing because it already exists.
 
-Nothing is signed. There is no Apple Developer certificate and no Windows code-signing certificate here, so macOS calls the first launch damaged and SmartScreen warns; the release notes are generated with the way past both. Signing for real means putting certificates in repository secrets and turning `CSC_IDENTITY_AUTO_DISCOVERY` back on in the build step.
+The macOS app is ad-hoc signed (`mac.identity: '-'`), and that is not cosmetic. Every Mach-O binary on Apple Silicon must carry a signature to run at all, and an unsigned one is reported as *"VidToTab is damaged and can't be opened"* — an error with no right-click-Open escape. What arrives from electron-builder without an explicit identity is the linker's own signature on the Electron binary, which `codesign --verify` rejects; the ad-hoc pass re-seals the bundle under `com.vidtotab.app`. The hardened runtime stays on with `electron/entitlements.mac.plist`, so notarising later is a credential change rather than a packaging one.
+
+It is still not notarised, so Gatekeeper stops the first launch of a downloaded copy and says Apple cannot check it for malicious software; right-click → **Open** goes through, and the generated release notes say so. Apple's own `syspolicy_check` calls ad-hoc signing a warning and the missing notary ticket fatal, which is the honest summary: this is fine for people who trust the source and wrong for strangers.
+
+Removing that warning needs a **Developer ID Application** certificate — not the Apple Development or Apple Distribution certificates, which are for Xcode and the App Store — exported as a .p12 into `CSC_LINK` / `CSC_KEY_PASSWORD` repository secrets, App Store Connect API credentials for the notary service, `CSC_IDENTITY_AUTO_DISCOVERY` turned back on and `mac.identity` removed so the real certificate is found. Windows has the same shape of problem and the same shape of answer: SmartScreen warns until the installer is signed.
 
 ## Results
 

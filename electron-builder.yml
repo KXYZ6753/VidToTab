@@ -46,6 +46,15 @@ extraResources:
 
 mac:
   category: public.app-category.music
+  # Ad-hoc signing, explicitly. Not decoration: every Mach-O binary on Apple
+  # Silicon has to carry a signature to run at all, and an app that ships
+  # without one is reported as "damaged and can't be opened" — an error with no
+  # right-click-Open escape, unlike the unidentified-developer warning. What
+  # arrives unsigned is the linker's own signature on the Electron binary
+  # (Identifier=Electron, no sealed resources), which codesign --verify rejects.
+  identity: '-'
+  entitlements: electron/entitlements.mac.plist
+  entitlementsInherit: electron/entitlements.mac.plist
   target:
     - target: dmg
       arch: [arm64]

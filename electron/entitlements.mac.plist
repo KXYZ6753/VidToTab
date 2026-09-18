@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Entitlements for the hardened runtime.
+
+  disable-library-validation is the one electron-builder asks for by name when
+  an app is ad-hoc signed: library validation wants every loaded binary to carry
+  the same team identifier, and an ad-hoc signature has none, so the bundled
+  ffmpeg and its five dylibs are exactly the shape it refuses. It has not
+  actually bitten yet — ffmpeg is spawned as a child process rather than loaded
+  into this one — but it would the moment anything here links against something
+  it ships.
+
+  The other three are what Electron itself needs: V8 compiles JavaScript at
+  runtime, which means writing memory and then executing it.
+
+  This file is also what a notarised build would need, so keeping the hardened
+  runtime on now means turning notarisation on later is a credential change
+  rather than a packaging change.
+-->
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <true/>
+  <key>com.apple.security.cs.allow-dyld-environment-variables</key>
+  <true/>
+</dict>
+</plist>

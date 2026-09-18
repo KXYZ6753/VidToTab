@@ -1277,6 +1277,39 @@ import { createLoader } from '/brand/loaders.js';
   // The songsheet header (thumbnail, title, channel, link), drawn in the brand
   // face over a system stack deep enough that any script still renders; the PDF
   // embeds it as an image.
+  // The brand mark, as paths. The header is a canvas and cannot take the SVG
+  // that index.html uses, so the six lengths are written out again here — same
+  // 24-unit grid, same 2.1 stroke, same taper into a play triangle. If the mark
+  // ever changes, this is the second of the two places that has to know.
+  const MARK_LINES = [[12, 4.2], [17, 7.7], [21, 11.2], [21, 14.7], [17, 18.2], [12, 21.7]];
+  const MARK_STROKE = 2.1;
+  // Round caps put half a stroke of ink beyond every endpoint, so the box the
+  // mark actually occupies is not the box its coordinates describe. Laying it
+  // out by the ink rather than by the grid is what stops it sitting visibly
+  // high and left of whatever it is aligned with.
+  const MARK_INK = {
+    x0: 4 - MARK_STROKE / 2,
+    y0: 4.2 - MARK_STROKE / 2,
+    w: 21 - 4 + MARK_STROKE,
+    h: 21.7 - 4.2 + MARK_STROKE,
+  };
+  const markInkWidth = (inkH) => (inkH * MARK_INK.w) / MARK_INK.h;
+
+  function drawMark(ctx, x, y, inkH, colour) {
+    const u = inkH / MARK_INK.h;
+    ctx.save();
+    ctx.strokeStyle = colour;
+    ctx.lineWidth = MARK_STROKE * u;
+    ctx.lineCap = 'round';
+    for (const [to, ly] of MARK_LINES) {
+      ctx.beginPath();
+      ctx.moveTo(x + (4 - MARK_INK.x0) * u, y + (ly - MARK_INK.y0) * u);
+      ctx.lineTo(x + (to - MARK_INK.x0) * u, y + (ly - MARK_INK.y0) * u);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
   async function headerCanvas(W, pages, look = null) {
     // Canvas silently falls back to the next family in the stack for a face it
     // does not yet have, and an export triggered before the webfont arrived
@@ -1293,9 +1326,20 @@ import { createLoader } from '/brand/loaders.js';
     const th = Math.round(W * 0.1);
     const tw = thumb ? Math.round((th * thumb.naturalWidth) / thumb.naturalHeight) : 0;
     const tx = thumb ? tw + Math.round(W * 0.02) : 0;
-    const textW = W - tx;
     const titleSize = Math.round(W * 0.027), subSize = Math.round(W * 0.015);
     const measure = document.createElement('canvas').getContext('2d');
+    // A quiet lockup in the top right. The songsheet leaves the app and ends up
+    // on a music stand or in someone else's hands, and this is the only thing
+    // on it that says what made it. Ink rather than accent, because the look
+    // this is printed in is black on white and an orange mark prints grey.
+    const markH = Math.round(W * 0.03);
+    const markW = Math.round(markInkWidth(markH));
+    const wordSize = Math.round(W * 0.0165);
+    const gap = Math.round(W * 0.008);
+    measure.font = `700 ${wordSize}px ${FONT}`;
+    const lockupW = markW + gap + Math.ceil(measure.measureText('VidToTab').width);
+    // The title wraps before the lockup rather than running underneath it.
+    const textW = W - tx - lockupW - Math.round(W * 0.03);
     measure.font = `700 ${titleSize}px ${FONT}`;
     const lines = wrapLines(measure, title, textW, 2);
     const sub = [meta.channel, meta.duration ? fmtTime(meta.duration) : '', pages ? `${pages} page${pages === 1 ? '' : 's'}` : ''].filter(Boolean).join('  ·  ');
@@ -1327,6 +1371,16 @@ import { createLoader } from '/brand/loaders.js';
     if (sub) { ctx.fillStyle = rgbCss(mixRgb(paperC, inkC, 0.55)); ctx.fillText(ellipsize(ctx, sub, textW), tx, y); y += subH; }
     // The link keeps the accent colour: it reads on cream and on near-black.
     if (meta.url) { ctx.fillStyle = '#c2410c'; ctx.fillText(ellipsize(ctx, meta.url, textW), tx, y); }
+    // Last, so nothing can land on top of it. Sat on the title's own cap line
+    // rather than the top of the canvas, where it would float.
+    const lockupY = Math.round(titleSize * 0.22);
+    drawMark(ctx, W - lockupW, lockupY, markH, rgbCss(inkC));
+    ctx.fillStyle = rgbCss(inkC);
+    ctx.font = `700 ${wordSize}px ${FONT}`;
+    ctx.textBaseline = 'middle';
+    ctx.fillText('VidToTab', W - lockupW + markW + gap, lockupY + markH / 2);
+    ctx.textBaseline = 'top';
+
     ctx.fillStyle = rgbCss(mixRgb(paperC, inkC, 0.12));
     ctx.fillRect(0, H - 3, W, 3);
     return c;
