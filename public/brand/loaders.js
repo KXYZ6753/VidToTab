@@ -125,6 +125,34 @@ function waveform(cls) {
 
 const stringY = (n) => STRING_TOP + (n - 1) * STRING_GAP;
 
+// Six strings drawn at six weights, thin at the top to thick at the bottom,
+// because that is how a guitar is strung and how tab is set. A neck of six
+// identical rules reads as a music staff instead.
+const staffLines = (cls) =>
+  s('g', { class: cls }, repeat(6, (i) =>
+    s('line', {
+      x1: 4,
+      x2: VB_W - 4,
+      y1: stringY(i + 1),
+      y2: stringY(i + 1),
+      'stroke-width': (0.6 + i * 0.16).toFixed(2),
+    })));
+
+// Fret wire and position inlays. Neck furniture: it sits only in the base layer
+// and never lights up, because the playhead is transcribing what was played,
+// not the instrument it was played on. Positions are the brand kit's, scaled
+// from its 640-wide neck to this 200-wide one, and the last wire is dropped
+// because it fell outside the span the strings actually run across.
+const FRET_X = [12.5, 40.6, 65.6, 88.1, 108.8, 127.5, 144.4, 160, 174.4, 187.5];
+const INLAY_X = [76.9, 118.1, 152.2, 181];
+
+const neck = () => [
+  s('g', { class: 'vtt-fretwire' }, FRET_X.map((x) =>
+    s('line', { x1: x, x2: x, y1: STRING_TOP - 3, y2: stringY(6) + 3.5 }))),
+  s('g', { class: 'vtt-inlay' }, INLAY_X.map((x) =>
+    s('circle', { cx: x, cy: (STRING_TOP + stringY(6)) / 2, r: 1.7 }))),
+];
+
 // A plausible phrase rather than a row of the same number: x across the stage,
 // which string it sits on, and the fret played.
 const FRETS = [
@@ -156,13 +184,12 @@ const scanStage = () =>
   h('div', { class: 'vtt-scan-stage', 'aria-hidden': 'true' }, [
     s('svg', { class: 'vtt-scan-base', viewBox: `0 0 ${VB_W} ${VB_H}`, preserveAspectRatio: 'none' }, [
       ...waveform('vtt-wave-base'),
-      s('g', { class: 'vtt-staff' }, repeat(6, (i) =>
-        s('line', { x1: 4, x2: VB_W - 4, y1: stringY(i + 1), y2: stringY(i + 1) }))),
+      ...neck(),
+      staffLines('vtt-staff'),
     ]),
     s('svg', { class: 'vtt-scan-ink', viewBox: `0 0 ${VB_W} ${VB_H}`, preserveAspectRatio: 'none' }, [
       ...waveform('vtt-wave-ink'),
-      s('g', { class: 'vtt-staff-ink' }, repeat(6, (i) =>
-        s('line', { x1: 4, x2: VB_W - 4, y1: stringY(i + 1), y2: stringY(i + 1) }))),
+      staffLines('vtt-staff-ink'),
       ...FRETS.map(fret),
     ]),
     h('i', { class: 'vtt-scan-head' }),

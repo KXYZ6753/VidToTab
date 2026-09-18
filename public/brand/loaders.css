@@ -259,11 +259,16 @@
 .vtt-scan-stage svg { position: absolute; inset: 0; width: 100%; height: 100%; }
 
 .vtt-wave-base { fill: var(--line-strong); }
-.vtt-staff { stroke: var(--line-strong); stroke-width: 1; }
+/* Fret wire and inlays, fainter than the strings that cross them: they place
+   the notes without competing with them. Both live only in the base layer. */
+.vtt-fretwire { stroke: var(--ink); stroke-opacity: .07; stroke-width: .6; }
+.vtt-inlay { fill: var(--ink); fill-opacity: .06; }
+/* Per-line gauges come from the markup, so no stroke-width here. */
+.vtt-staff { stroke: var(--line-strong); }
 .vtt-wave-ink { fill: var(--accent); }
 /* The staff behind the playhead, tinted rather than fully accent: it has to
    read as written without competing with the fret dots sitting on it. */
-.vtt-staff-ink { stroke: color-mix(in srgb, var(--accent) 45%, transparent); stroke-width: 1; }
+.vtt-staff-ink { stroke: color-mix(in srgb, var(--accent) 45%, transparent); }
 .vtt-fret circle { fill: var(--accent); }
 .vtt-fret text {
   fill: var(--accent-ink);
