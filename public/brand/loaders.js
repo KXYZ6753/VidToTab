@@ -201,14 +201,16 @@ const textNode = (label) => h('span', { class: 'vtt-loader-text', text: label })
  * Returns { el, show, hide }; hide() resolves once it is off screen.
  */
 export function createLoader(kind, { label } = {}) {
-  const graphic = GRAPHIC[kind];
-  if (!graphic) {
+  // Checked against KINDS rather than against GRAPHIC, because a plain object
+  // answers to 'constructor' and 'toString' with something truthy and the
+  // guard would wave them through to be called as builders.
+  if (!KINDS.includes(kind)) {
     throw new Error(`createLoader: unknown kind ${JSON.stringify(kind)}. Expected one of ${KINDS.join(', ')}.`);
   }
 
   const text = label ?? DEFAULT_LABEL[kind] ?? '';
   const el = h(kind === 'scan' ? 'div' : 'span', { class: `vtt-loader vtt-loader--${kind}` });
-  el.append(graphic());
+  el.append(GRAPHIC[kind]());
 
   if (text) {
     // A real text node, not a background image or a ::before: it has to be

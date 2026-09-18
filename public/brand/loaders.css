@@ -141,20 +141,25 @@
   top: 0;
   bottom: 0;
   left: 0;
-  width: 26%;
+  /* 25% is chosen so the arithmetic in vtt-sweepx stays round: translateX is a
+     percentage of the bar, not of the frame, so clearing a quarter-width bar
+     takes exactly 400%. Change one and the other has to change with it. */
+  width: 25%;
   background: linear-gradient(90deg, transparent, var(--vtt-lit) 55%, var(--accent) 78%, transparent);
   animation: vtt-sweepx 2.2s linear infinite;
   animation-delay: var(--vtt-phase, 0ms);
 }
 
-/* -100% puts the bar's right edge exactly on the frame's left edge and 300%
-   puts its left edge past the right, so at both ends it is entirely outside
-   the box that clips it. The opacity is belt and braces: it means the seam
-   survives someone later removing the overflow. */
+/* -110% holds the bar clear of the frame's left edge and 410% holds it clear
+   of the right — 400% is the bar's own width four times over, which is the
+   width of the frame, plus a little either side so no antialiased fringe
+   survives the clip. At both ends it is entirely outside the box, so the two
+   ends draw the same picture: nothing. The opacity is belt and braces, and
+   means the seam would survive someone later dropping the overflow. */
 @keyframes vtt-sweepx {
-  0%        { transform: translateX(-100%); opacity: 0; }
+  0%        { transform: translateX(-110%); opacity: 0; }
   12%, 88%  { opacity: .9; }
-  100%      { transform: translateX(300%);  opacity: 0; }
+  100%      { transform: translateX(410%);  opacity: 0; }
 }
 
 /* The frame brightens as the beam crosses it and marches one full dash period.
@@ -296,15 +301,23 @@
    ahead of it. Linear on both, because easing one and not the other would let
    the ink run out in front of the head half way across.
 
-   0% and 100% are different places, and that is fine because the head is
-   invisible at both: it fades in over the first 3% and back out over the last
-   6%, once it has reached the end and the finished tab has been held long
-   enough to read. */
+   The fade finishes at 98% rather than at 100%, and the next one does not
+   begin until 2%: that leaves about 90ms of genuinely empty stage either side
+   of the seam. Landing the fade exactly on 100% left the old frame at a few
+   percent opacity as the new one began, which measured as a 9% cross-dissolve
+   at the moment the eye is most likely to catch it.
+
+   0% and 100% are different places — the left edge and the right — and that is
+   fine because the head is invisible at both ends: it is transparent until 2%
+   and again from 98%. */
 @keyframes vtt-scan {
-  0%        { transform: translateX(0); opacity: 0; }
-  3%        { opacity: 1; }
-  88%, 94%  { transform: translateX(calc(100cqw - 1.2cqw)); opacity: 1; }
-  100%      { transform: translateX(calc(100cqw - 1.2cqw)); opacity: 0; }
+  0%   { transform: translateX(0); opacity: 0; }
+  2%   { opacity: 0; }
+  5%   { opacity: 1; }
+  88%  { transform: translateX(calc(100cqw - 1.2cqw)); opacity: 1; }
+  94%  { transform: translateX(calc(100cqw - 1.2cqw)); opacity: 1; }
+  98%  { opacity: 0; }
+  100% { transform: translateX(calc(100cqw - 1.2cqw)); opacity: 0; }
 }
 
 /* Closed at 0%, so nothing shows; faded out at 100%, so nothing shows. Two
@@ -312,10 +325,9 @@
    asks for. The hold between 88% and 94% is the moment the tab is complete —
    without it the last note is written and erased in the same breath. */
 @keyframes vtt-write {
-  0%   { clip-path: inset(0 100% 0 0); opacity: 1; }
-  88%  { clip-path: inset(0 0 0 0);    opacity: 1; }
-  94%  { clip-path: inset(0 0 0 0);    opacity: 1; }
-  100% { clip-path: inset(0 0 0 0);    opacity: 0; }
+  0%        { clip-path: inset(0 100% 0 0); opacity: 1; }
+  88%, 94%  { clip-path: inset(0 0 0 0);    opacity: 1; }
+  98%, 100% { clip-path: inset(0 0 0 0);    opacity: 0; }
 }
 
 /* Each dot drops onto its string as the playhead reaches it — loaders.js works
