@@ -112,6 +112,30 @@ npm run eval -- --rescore     # re-score saved captures against current labels
 
 Two gates worth knowing about. A fixture may record the score it genuinely reaches as `expect.floor`, with the reason in `expect.notes`; fixtures without a floor must be perfect, and a floor may be raised after a fix but never lowered to make a run green. Fixtures marked `noTab: true` must be *declined* by detection — rejecting videos without tab is half of being accurate, and it is checked rather than assumed.
 
+### Releasing
+
+Two commands. `npm version` bumps `package.json`, commits that, and makes the matching tag; pushing the tag is what starts a release.
+
+```sh
+npm version patch          # or minor, or major
+git push --follow-tags
+```
+
+The tag runs the same matrix as any other push — module self-checks, server checks, a real build, and the packaged app started and shut down again on macOS, Windows and Linux — and then, only if all of that is green, builds the installers and publishes a GitHub release with them attached:
+
+| Platform | What lands on the release |
+|---|---|
+| macOS, Apple Silicon | `.dmg`, plus a `.zip` of the same app |
+| Windows, x64 | `VidToTab Setup <version>.exe` |
+| Linux, x64 and arm64 | `.deb` |
+| Linux, x64 | `.AppImage` |
+
+The tag has to match `package.json`, and the workflow stops if it does not — installers are named from `package.json`, so a tag made by hand that disagrees with it produces downloads whose names are a lie. `npm version` moves both together, which is why it is the way to make the tag.
+
+A tag with a suffix, `v0.2.0-beta.1`, is published as a pre-release, so "Latest release" on the repo page goes on pointing at the last stable one. Re-running a release that failed part way through is safe: it replaces the files on the existing release rather than refusing because it already exists.
+
+Nothing is signed. There is no Apple Developer certificate and no Windows code-signing certificate here, so macOS calls the first launch damaged and SmartScreen warns; the release notes are generated with the way past both. Signing for real means putting certificates in repository secrets and turning `CSC_IDENTITY_AUTO_DISCOVERY` back on in the build step.
+
 ## Results
 
 **Tuned videos** — hand-labelled sequences, scored at the default setting. *Recall* = distinct tab screens captured (a page whose notes are lost counts as missed); *precision* = captures that are a new screen (duplicates and intro/outro frames count against it). "Detected box" is the real flow.

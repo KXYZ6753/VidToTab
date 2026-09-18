@@ -3,6 +3,11 @@ name: CI
 on:
   push:
     branches: [main]
+    # A tag is what turns a run into a release: same matrix, same checks,
+    # installers instead of an unpacked tree, and a job at the end that
+    # publishes them. Nothing else about a tagged run is different, which is
+    # the point — what gets released is what CI already proved.
+    tags: ['v*']
   pull_request:
   workflow_dispatch:
 
@@ -30,6 +35,22 @@ jobs:
           node-version: '26'
           cache: npm
 
+      # A tag and a package.json that disagree produce installers named after
+      # the wrong version, and nobody notices until someone reports a download
+      # whose name does not match what they clicked. `npm version` moves both
+      # together; this catches a tag made by hand that did not.
+      - name: Tag matches package.json
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg=$(node -p "require('./package.json').version")
+          echo "tag $tag, package.json $pkg"
+          if [ "$tag" != "$pkg" ]; then
+            echo "::error::tag v$tag does not match package.json $pkg. Use 'npm version <patch|minor|major>' so the two cannot drift."
+            exit 1
+          fi
+
       # Electron needs these to open a window, and the packaged-app test opens
       # one. Xvfb gives the runner a display to open it on.
       - name: Linux desktop dependencies
@@ -47,6 +68,18 @@ jobs:
       # swapped upload fails here rather than shipping.
       - name: Fetch bundled binaries
         run: npm run binaries
+
+      # The Linux release ships a .deb for arm64 as well as x64, and each one
+      # takes its ffmpeg from build/bin/linux-<arch> — a directory the plain
+      # fetch, which only ever gets the architecture it is running on, does not
+      # create for the other one. An ordinary run never notices, because --dir
+      # only packages the architecture it is running on either. A release is the
+      # first time the second one is asked for, and it would fail there with a
+      # missing extraResources path. The script's own header says --all is what
+      # CI needs; this is the run that needs it.
+      - name: Fetch every architecture's binaries (Linux release)
+        if: runner.os == 'Linux' && startsWith(github.ref, 'refs/tags/v')
+        run: npm run binaries -- --all
 
       - name: Put the bundled binaries on PATH
         shell: bash
@@ -70,8 +103,20 @@ jobs:
       # `npm run pack` draws the icon itself — build/ is not in git, and an
       # explicit icon path makes electron-builder hard-error when it is absent,
       # so a fresh clone has to work without a separate step here.
+      #
+      # --dir on an ordinary run: the packaged checks below only need the
+      # unpacked tree, and building five installers on every push would cost
+      # minutes for something nobody downloads. A tag builds the real thing.
+      #
+      # Signing is switched off explicitly. There is no certificate in this
+      # repo, and left to itself electron-builder goes looking for one in the
+      # runner's empty keychain and fails the release rather than shipping
+      # unsigned. Unsigned is a real cost — see the install notes the release
+      # job writes — but a failed release is worse.
       - name: Build the app
-        run: npm run pack
+        run: npm run ${{ startsWith(github.ref, 'refs/tags/v') && 'dist' || 'pack' }}
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
 
       # Electron refuses to start rather than run unsandboxed, and an *unpacked*
       # Linux build ships chrome-sandbox without its setuid bit. Installing the
@@ -135,6 +180,27 @@ jobs:
             exit 1
           }
           Write-Host 'none'
+
+      # Only the things a person downloads. electron-builder also writes
+      # .blockmap and latest*.yml next to them, which exist for auto-update;
+      # this app has none, so they would be noise on the release page. Add them
+      # here if electron-updater is ever wired in.
+      #
+      # if-no-files-found: error is the important line. A release that publishes
+      # nothing looks exactly like a release that worked.
+      - name: Keep the installers
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@v7
+        with:
+          name: installers-${{ matrix.os }}
+          if-no-files-found: error
+          retention-days: 7
+          path: |
+            dist/*.dmg
+            dist/*.zip
+            dist/*.exe
+            dist/*.deb
+            dist/*.AppImage
 
       - name: Keep the build for inspection
         if: failure()
@@ -208,3 +274,105 @@ jobs:
       - name: Stop the container
         if: always()
         run: docker rm -f vidtotab || true
+
+  # Turning a green matrix into downloads. Gated on both jobs above, because a
+  # tag is the one moment you most want everything green — change `needs` to
+  # just [build] if a broken Dockerfile should not be able to hold up a desktop
+  # release.
+  release:
+    name: Publish the release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build, web-image]
+    runs-on: ubuntu-24.04
+    permissions:
+      # The default token is read-only. Creating a release is a write, and this
+      # is the only job in the file that needs one.
+      contents: write
+
+    steps:
+      # Full history, because the notes below diff this tag against the previous
+      # one and a shallow clone has neither.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Collect the installers
+        uses: actions/download-artifact@v7
+        with:
+          path: artifacts
+          pattern: installers-*
+          merge-multiple: true
+
+      - name: What is about to be published
+        run: ls -lh artifacts
+
+      - name: Write the notes
+        shell: bash
+        run: |
+          # --match 'v*' on purpose: this repo also carries milestone tags
+          # (pre-remaster, remaster-1) that are not releases, and without the
+          # filter the first release would list every commit since one of those.
+          prev=$(git describe --tags --abbrev=0 --match 'v*' "${GITHUB_REF_NAME}^" 2>/dev/null || true)
+          {
+            echo '## Install'
+            echo
+            echo 'Nothing else is needed — ffmpeg, ffprobe and yt-dlp travel inside the app.'
+            echo
+            echo '**macOS** (Apple Silicon) — the `.dmg`. Open it and drag VidToTab to Applications.'
+            echo
+            echo 'It is not signed with an Apple Developer certificate, so macOS refuses the first launch and calls the app damaged. It is not: right-click it and choose **Open**, or run'
+            echo
+            echo '```sh'
+            echo 'xattr -dr com.apple.quarantine /Applications/VidToTab.app'
+            echo '```'
+            echo
+            echo '**Windows** (x64) — `VidToTab Setup *.exe`. Also unsigned, so SmartScreen will warn: **More info** then **Run anyway**.'
+            echo
+            echo '**Linux** — the `.deb` for Debian and Ubuntu, x64 or arm64:'
+            echo
+            echo '```sh'
+            echo 'sudo apt install ./VidToTab_*_amd64.deb'
+            echo '```'
+            echo
+            echo 'or the x64 `.AppImage`, which needs `chmod +x` before it will start.'
+            echo
+            echo '## Changes'
+            echo
+            if [ -n "$prev" ]; then
+              git log --no-merges --pretty='- %s' "$prev..${GITHUB_REF_NAME}"
+              echo
+              echo "[Everything that changed](https://github.com/${GITHUB_REPOSITORY}/compare/${prev}...${GITHUB_REF_NAME})"
+            else
+              echo '- First release.'
+            fi
+          } > notes.md
+          cat notes.md
+
+      - name: Publish
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # A tag with a suffix — v1.2.0-beta.1 — is published as a pre-release,
+          # so "Latest release" on the repo page keeps pointing at the last
+          # stable one.
+          case "$GITHUB_REF_NAME" in
+            *-*) pre=--prerelease ;;
+            *)   pre= ;;
+          esac
+
+          # Re-running a failed release job is normal, and `gh release create`
+          # refuses when the release already exists. Replace its files and notes
+          # instead of failing at the last step with the builds already done.
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "release $GITHUB_REF_NAME exists — replacing its files"
+            gh release upload "$GITHUB_REF_NAME" artifacts/* --clobber
+            gh release edit "$GITHUB_REF_NAME" --notes-file notes.md $pre
+          else
+            gh release create "$GITHUB_REF_NAME" artifacts/* \
+              --title "VidToTab ${GITHUB_REF_NAME}" \
+              --notes-file notes.md \
+              --verify-tag \
+              $pre
+          fi
+          echo "published: https://github.com/${GITHUB_REPOSITORY}/releases/tag/${GITHUB_REF_NAME}"
