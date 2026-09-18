@@ -737,6 +737,19 @@ try {
   for (const c of children) { try { c.kill('SIGKILL'); } catch { /* gone */ } }
   const ok = !failure && problems.length === 0;
   log(ok ? 'E2E PASSED' : 'E2E FAILED', `— output in ${OUT}`);
-  if (ok && !KEEP) fs.rmSync(path.join(OUT, 'profile'), { recursive: true, force: true });
+  // The children were SIGKILLed one line ago, and Chrome's helpers can still be
+  // writing into the profile while this runs — the directory refills between
+  // the scandir and the rmdir, and rmSync throws ENOTEMPTY, which `force` does
+  // not cover: that only forgives ENOENT. Retry, then give up quietly. This is
+  // scratch data in a gitignored folder, and a run that passed every check but
+  // could not tidy up afterwards has still passed; exiting 1 there reports a
+  // failure that did not happen.
+  if (ok && !KEEP) {
+    try {
+      fs.rmSync(path.join(OUT, 'profile'), { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    } catch (e) {
+      log('left the browser profile behind:', e.code);
+    }
+  }
   setTimeout(() => process.exit(ok ? 0 : 1), 500);
 }
