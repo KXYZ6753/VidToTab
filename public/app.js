@@ -193,6 +193,25 @@ import { createLoader } from '/brand/loaders.js';
     syncSidebar();
   }
 
+  // index.html decided before paint whether to play the opening animation, and
+  // hid the app behind it if so. Lift that cover as soon as the overlay is
+  // actually on screen rather than when it finishes: the app is then already
+  // there underneath, so the splash fades into it instead of cutting to a page
+  // that was not there a moment ago. Every failure path reveals — the splash is
+  // decoration, and decoration must never be what stands between someone and
+  // the app.
+  if (document.documentElement.dataset.splash === '1') {
+    const reveal = () => { delete document.documentElement.dataset.splash; };
+    import('/brand/splash.js')
+      .then(({ playSplash }) => {
+        const done = playSplash();
+        requestAnimationFrame(() => requestAnimationFrame(reveal));
+        return done;
+      })
+      .catch(reveal)
+      .finally(reveal);
+  }
+
   document.getElementById('metaLoaderSlot').append(loaders.meta.el);
   document.getElementById('detectLoaderSlot').append(loaders.detect.el);
   document.getElementById('scanLoaderSlot').append(loaders.scan.el);
@@ -566,7 +585,15 @@ import { createLoader } from '/brand/loaders.js';
       state.thumbVersion = Date.now();
       const img = $('metaThumb');
       img.onload = () => { img.hidden = false; setThumbLoading(false); };
+      // A thumbnail that 404s never fires load. Both ends have to clear the
+      // placeholder, or it sits there animating away about reading a video the
+      // app finished reading.
+      img.onerror = () => setThumbLoading(false);
       img.src = '/thumb.jpg?v=' + state.thumbVersion;
+    } else if (!meta.thumb) {
+      // A chosen file usually has no thumbnail at all, so there is nothing here
+      // to wait for and nothing to say.
+      setThumbLoading(false);
     }
     if (!state.title) state.title = suggestTitle(meta.title);
     if (meta.suggestion) onSuggestion(meta.suggestion);
@@ -1218,7 +1245,10 @@ import { createLoader } from '/brand/loaders.js';
 
   // ---------- exports ----------
 
-  const FONT = '-apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Apple SD Gothic Neo", "Malgun Gothic", "Yu Gothic", "Noto Sans CJK JP", sans-serif';
+  // Sora first so the printed header is set in the same face as the interface
+  // that produced it, then the CJK stack that was already here: Sora carries no
+  // Korean or Japanese glyphs and a great many of these song titles do.
+  const FONT = 'Sora, -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Apple SD Gothic Neo", "Malgun Gothic", "Yu Gothic", "Noto Sans CJK JP", sans-serif';
 
   function ellipsize(ctx, s, maxW) {
     if (ctx.measureText(s).width <= maxW) return s;
@@ -1244,9 +1274,14 @@ import { createLoader } from '/brand/loaders.js';
     return lines.map((l) => l.trim()).filter(Boolean);
   }
 
-  // The songsheet header (thumbnail, title, channel, link) drawn with system
-  // fonts so any script renders; the PDF embeds it as an image.
+  // The songsheet header (thumbnail, title, channel, link), drawn in the brand
+  // face over a system stack deep enough that any script still renders; the PDF
+  // embeds it as an image.
   async function headerCanvas(W, pages, look = null) {
+    // Canvas silently falls back to the next family in the stack for a face it
+    // does not yet have, and an export triggered before the webfont arrived
+    // would be set in the system sans with no sign anything was wrong.
+    try { await document.fonts?.ready; } catch { /* no font API */ }
     const meta = state.meta || {};
     // The header shares the sheet with the pages, so it takes the look's
     // colours too — otherwise a dark songsheet gets a white slab across the top.

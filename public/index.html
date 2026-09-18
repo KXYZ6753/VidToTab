@@ -81,6 +81,11 @@
   }
 }
 [hidden] { display: none !important; }
+/* While the opening animation plays, the app waits behind it rather than
+   painting under it. visibility rather than display, so the layout underneath
+   is already settled at the instant the splash lifts off it. */
+html[data-splash="1"] { background: #0a0b0c; }
+html[data-splash="1"] body { visibility: hidden; }
 html { -webkit-text-size-adjust: 100%; }
 body {
   font-family: var(--font);
@@ -117,6 +122,9 @@ img { display: block; }
 .brand-mark { width: 28px; height: 28px; flex: none; }
 .stepper { display: flex; list-style: none; gap: 2px; background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 3px; box-shadow: var(--shadow-sm); }
 .stepper button {
+  /* A step pill that wraps is wrong at every width, whatever the font metrics
+     happen to be. */
+  white-space: nowrap;
   display: flex; align-items: center; gap: 7px; border: none; background: none;
   padding: 5px 12px 5px 6px; border-radius: 999px; cursor: pointer; font-size: 13.5px; color: var(--muted);
   transition: background .15s, color .15s;
@@ -441,6 +449,15 @@ button.chip { cursor: pointer; }
     border-right: none; border-top: 1px solid var(--line);
   }
 }
+/* The brand, four labelled step pills and a labelled button need about 730px
+   of row between them, and Sora asks for a little more of it than the system
+   sans did. Under that the row wrapped a pill onto a second line and the header
+   grew by 20px, so the step labels go first — the same trade the 640px rules
+   below make, started earlier. */
+@media (max-width: 760px) {
+  .stepper .lbl { display: none; }
+  .stepper button { padding: 5px; }
+}
 @media (max-width: 640px) {
   main { padding: 14px 16px 100px; }
   .topbar-inner { padding: 8px 16px; }
@@ -475,6 +492,24 @@ button.chip { cursor: pointer; }
     let desktop = false;
     try { desktop = window.vidtotab?.shell === 'desktop'; } catch { /* web build */ }
     document.body.dataset.view = (saved === 'app' || saved === 'home') ? saved : (desktop ? 'app' : 'home');
+
+    // The opening animation is decided here for the same reason the view is: by
+    // the time app.js runs — a module, therefore deferred — the page has
+    // painted, and an animation dropped over a page the eye has already begun
+    // reading is worse than no animation at all.
+    //
+    // Desktop only. A launch is the moment a splash is for; the web version is
+    // not launched, it is visited, usually from a link, and four seconds between
+    // arriving and being able to paste a URL is a cost with nothing on the other
+    // side of it.
+    if (desktop) {
+      document.documentElement.dataset.splash = '1';
+      // Belt and braces. Whatever becomes of the module that is supposed to
+      // clear this — a parse error, a request that never lands, a browser that
+      // never runs it at all — the app must not sit invisible behind an
+      // animation that is not there. Five seconds is past the sequence's four.
+      setTimeout(() => { delete document.documentElement.dataset.splash; }, 5000);
+    }
   })();
 </script>
 

@@ -112,6 +112,27 @@ npm run eval -- --rescore     # re-score saved captures against current labels
 
 Two gates worth knowing about. A fixture may record the score it genuinely reaches as `expect.floor`, with the reason in `expect.notes`; fixtures without a floor must be perfect, and a floor may be raised after a fix but never lowered to make a run green. Fixtures marked `noTab: true` must be *declined* by detection — rejecting videos without tab is half of being accurate, and it is checked rather than assumed.
 
+### Brand and motion
+
+The mark, the loading animations and the opening sequence live in `public/brand/`; the two typefaces in `public/fonts/`, served from there rather than from a CDN because the desktop build is expected to work with no network.
+
+| File | What it holds |
+|---|---|
+| `brand/motion.js` | The lifecycle every looping animation shares — how it arrives, how it stays in step with the others, and an exit that waits for the loop's own seam before fading. Self-checked by `npm test`. |
+| `brand/loaders.{css,js}` | The four loaders: `strings` (reading video info), `beam` (detecting the tab area), `pages` (rendering pages), `scan` (the scan step). `createLoader(kind)` returns `{ el, show, hide }`. |
+| `brand/splash.{css,js}` | The opening animation, played once at launch. |
+| `brand/preview.html`, `brand/splash-preview.html` | Every loader at several sizes in both themes, and the opening sequence with a replay button. Open them at `/brand/preview.html` and `/brand/splash-preview.html`. |
+
+Three things hold this together, and all three are easy to undo by accident.
+
+**Colour comes from the tokens in `index.html`, never from a hex code.** The brand orange is `#ff8a3d` only in dark mode; the light theme deliberately darkens it to `#c93f0c` so that white on accent clears WCAG AA. Writing the kit's orange into a component would quietly undo that.
+
+**Every loop returns to the pose it started in, and leaves at that seam** rather than wherever it had reached. A loader runs for as long as the work does, so its seam is seen far more often than its beginning; `motion.js` explains the mechanism and the cap on how long it will wait before fading from where it is.
+
+**Nothing moves under `prefers-reduced-motion`,** and nothing goes blank either: each loader has a resting pose that still says "working".
+
+`npm run icon` draws the app icon from the same mark, so the icon and the interface cannot drift apart.
+
 ## Results
 
 **Tuned videos** — hand-labelled sequences, scored at the default setting. *Recall* = distinct tab screens captured (a page whose notes are lost counts as missed); *precision* = captures that are a new screen (duplicates and intro/outro frames count against it). "Detected box" is the real flow.
