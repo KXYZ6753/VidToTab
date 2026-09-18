@@ -138,11 +138,48 @@ img { display: block; }
 .stepper li.active button { background: var(--accent-soft); color: var(--ink); font-weight: 600; }
 .stepper li.active .num { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 .stepper li.done .num { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.topbar-end { display: flex; align-items: center; gap: 10px; flex: none; }
+/* Mono and tabular so the number does not shuffle the button beside it when it
+   goes from 0.9.9 to 0.10.0. */
+.version { font: 11.5px var(--mono); color: var(--faint); font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* The row is already tight enough that the step labels drop at 760px; the
+   version is the next thing that can go. */
+@media (max-width: 860px) { .version { display: none; } }
 
 main { max-width: 1120px; margin: 0 auto; padding: 22px 20px 120px; }
+/* Offered on the landing page only. In the app view it is noise, and inside the
+   desktop app it is an advert for something already installed — app.js removes
+   it there rather than hiding it, so it cannot be found by a screen reader
+   either. */
+.get-app {
+  max-width: 900px; margin: 30px auto 0; padding: 16px 18px; display: flex; align-items: center; gap: 14px;
+  border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-2);
+}
+.get-app .mark { width: 34px; height: 34px; flex: none; }
+.get-app .body { flex: 1; min-width: 0; }
+.get-app b { font-size: 14.5px; }
+.get-app p { font-size: 13.5px; color: var(--muted); margin-top: 2px; }
+body[data-view="app"] .get-app { display: none; }
+@media (max-width: 640px) { .get-app { flex-direction: column; align-items: flex-start; } .get-app .btn { width: 100%; } }
 .step { animation: rise .25s ease both; }
 @keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
-@media (prefers-reduced-motion: reduce) { .step { animation: none; } * { transition: none !important; } }
+/* Steps arrive from the side they came from: forward slides in from the right,
+   back from the left, so the stepper's four pills feel like places rather than
+   states. Only the incoming step moves — both would have to share the flow at
+   once, which means absolute positioning and a layout jump at the end of every
+   transition, for an effect nobody would be able to name.
+   Distance is small on purpose: this sits under a sticky header on a page that
+   also scrolls to the top, and anything further reads as the whole page lurching. */
+@keyframes step-fwd  { from { opacity: 0; transform: translate3d(18px, 0, 0); } to { opacity: 1; transform: none; } }
+@keyframes step-back { from { opacity: 0; transform: translate3d(-18px, 0, 0); } to { opacity: 1; transform: none; } }
+.step[data-dir="fwd"]  { animation: step-fwd .26s cubic-bezier(.2, .7, .2, 1) both; }
+.step[data-dir="back"] { animation: step-back .26s cubic-bezier(.2, .7, .2, 1) both; }
+/* The directional rules above are more specific than `.step`, so they have to be
+   named here too or reduced motion would silently stop applying to them. */
+@media (prefers-reduced-motion: reduce) {
+  .step, .step[data-dir="fwd"], .step[data-dir="back"] { animation: none; }
+  * { transition: none !important; }
+}
 
 /* ---------- buttons & inputs ---------- */
 .btn {
@@ -491,7 +528,12 @@ button.chip { cursor: pointer; }
     try { saved = localStorage.getItem('vtt.view'); } catch { /* no storage */ }
     let desktop = false;
     try { desktop = window.vidtotab?.shell === 'desktop'; } catch { /* web build */ }
-    document.body.dataset.view = (saved === 'app' || saved === 'home') ? saved : (desktop ? 'app' : 'home');
+    // The desktop app is always the app view. There is no landing page to go
+    // back to there — its whole job is to explain the thing and offer the
+    // download, and inside the download both halves are pointless — so a
+    // remembered "home" from a browser on the same machine must not follow it
+    // in. app.js takes the toggle away to match.
+    document.body.dataset.view = desktop ? 'app' : ((saved === 'app' || saved === 'home') ? saved : 'home');
 
     // The opening animation is decided here for the same reason the view is: by
     // the time app.js runs — a module, therefore deferred — the page has
@@ -534,11 +576,14 @@ button.chip { cursor: pointer; }
     <!-- The way between the landing page and the working layout. Label and icon
          both name the destination, so the button says where it goes rather than
          which mode you are in. -->
-    <button type="button" id="viewToggle" class="btn small view-toggle">
+    <div class="topbar-end">
+      <span id="appVersion" class="version" hidden></span>
+      <button type="button" id="viewToggle" class="btn small view-toggle">
       <svg id="viewIconApp" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="3.5" width="15" height="13" rx="2.5"/><path d="M8 3.5v13"/></svg>
       <svg id="viewIconHome" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" hidden><path d="m2.8 9 7.2-6 7.2 6"/><path d="M4.6 8v8.5h10.8V8"/></svg>
-      <span class="lbl" id="viewToggleLabel">Open the app</span>
-    </button>
+        <span class="lbl" id="viewToggleLabel">Open the app</span>
+      </button>
+    </div>
   </div>
 </header>
 
@@ -628,6 +673,18 @@ button.chip { cursor: pointer; }
       <li><span class="how-num">2</span><div><b>Keeps each page once</b><p>Repeated sections are recognised and folded in, not duplicated.</p></div></li>
       <li><span class="how-num">3</span><div><b>Prints cleanly</b><p>Dark panels become black ink on white paper, with the song title on top.</p></div></li>
     </ul>
+
+    <!-- Removed outright by app.js inside the desktop app, where it would be an
+         advert for the thing you are already running. -->
+    <aside class="get-app" id="getApp">
+      <svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="9" fill="currentColor" style="color: var(--accent)"/><g stroke="#fff" stroke-width="1.75" stroke-linecap="round"><path d="M8.92 8.71h6.66M8.92 11.63h10.83M8.92 14.54h14.16M8.92 17.46h14.16M8.92 20.37h10.83M8.92 23.29h6.66"/></g></svg>
+      <div class="body">
+        <b>There is a desktop app</b>
+        <p>macOS, Windows and Linux. It brings its own ffmpeg and yt-dlp, so there is nothing to install alongside it, and your songsheets stay on your machine.</p>
+      </div>
+      <a class="btn" id="getAppLink" href="https://github.com/KXYZ6753/VidToTab/releases/latest" target="_blank" rel="noopener">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 3v10m0 0 4-4m-4 4-4-4M4 16h12"/></svg>Download</a>
+    </aside>
   </section>
 
   <!-- ============ 2. tab area ============ -->

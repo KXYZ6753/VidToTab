@@ -13,6 +13,11 @@ import { createLoader } from '/brand/loaders.js';
 
   const $ = (id) => document.getElementById(id);
   const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+  // The bridge the Electron preload exposes; absent in a browser, and absent in
+  // a browser that has blocked it, so the read is guarded. It lives up here
+  // rather than beside isAppView because start-up asks it well before that
+  // section is reached, and a const is unreachable until its own line runs.
+  const isDesktop = () => { try { return window.vidtotab?.shell === 'desktop'; } catch { return false; } };
   const store = {
     get(k, d) { try { return localStorage.getItem(k) ?? d; } catch { return d; } },
     set(k, v) { try { localStorage.setItem(k, v); } catch { /* storage unavailable */ } },
@@ -216,6 +221,31 @@ import { createLoader } from '/brand/loaders.js';
   document.getElementById('detectLoaderSlot').append(loaders.detect.el);
   document.getElementById('scanLoaderSlot').append(loaders.scan.el);
 
+  // Inside the desktop app there is no landing page, and no app to go and get.
+  // The toggle is hidden rather than removed because the end-to-end test looks
+  // it up by id after reloading as the desktop shell; the download card is
+  // removed outright, so a screen reader cannot reach an advert for the thing
+  // it is already running.
+  if (isDesktop()) {
+    $('viewToggle').hidden = true;
+    $('getApp')?.remove();
+  }
+
+  // The version comes from the server that is serving this page, not from
+  // anything baked in when it was built: a tab left open against a server that
+  // has since been upgraded would otherwise go on claiming the old one.
+  // /api/health is the endpoint meant to be polled, and the only one carrying it.
+  (async () => {
+    try {
+      const { version } = await (await fetch('/api/health')).json();
+      if (!version) return;
+      const el = $('appVersion');
+      el.textContent = `v${version}`;
+      el.title = `VidToTab ${version}`;
+      el.hidden = false;
+    } catch { /* an older server without the field, or none reachable: no badge */ }
+  })();
+
   // The shimmer is the shape of a thumbnail that has not arrived; the strings
   // say the app is still reading the video. They were being set in one place
   // and cleared in another, which is how they drift, so they move together
@@ -226,9 +256,14 @@ import { createLoader } from '/brand/loaders.js';
   }
 
   function showStep(n) {
-    const changed = n !== state.step;
+    const from = state.step;
+    const changed = n !== from;
     state.step = n;
     state.maxStep = Math.max(state.maxStep, n);
+    // Which way the step came from, set before it is unhidden: the animation is
+    // restarted by the section leaving display:none, so the attribute that
+    // chooses which animation has to already be on it by then.
+    if (changed) sections[n].dataset.dir = n > from ? 'fwd' : 'back';
     for (let i = 1; i <= 4; i++) sections[i].hidden = i !== n;
     if (n !== 3) loaders.scan.hide();
     renderStepper();

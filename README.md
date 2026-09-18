@@ -20,7 +20,7 @@ One codebase behind all of them.
 
 ### Desktop app — macOS, Windows, Linux
 
-**There are no published downloads yet.** CI builds the app and runs it on all three platforms on every commit, but nothing has been released, so for now you build your own:
+Installers for all three platforms are published to [Releases](https://github.com/KXYZ6753/VidToTab/releases) by tagging a version — see [Releasing](#releasing). To build your own:
 
 ```sh
 npm install
@@ -30,7 +30,9 @@ npm run dist            # installers for this platform
 
 It carries its own ffmpeg (LGPL, pinned by checksum) and fetches yt-dlp into its data folder on first run, so it works on a machine that has neither — an app opened from Finder, the Dock or a .desktop file has no Homebrew on its PATH, which is the whole reason it brings its own.
 
-A self-built app is unsigned. macOS wants **right-click → Open** the first time; Windows SmartScreen wants **More info → Run anyway**.
+The macOS app is ad-hoc signed, which is what stops macOS calling it damaged, but it is not notarised: the first launch of a downloaded copy wants **right-click → Open**. Windows SmartScreen wants **More info → Run anyway**. [Releasing](#releasing) explains what it would take to remove both.
+
+The desktop app has no landing page. That view exists to explain the thing and offer the download, and inside the download both halves are pointless, so it opens straight into the working layout and the home toggle is not there — a preference remembered from a browser on the same machine does not follow it in.
 
 ### Local server
 
@@ -129,7 +131,9 @@ Three things hold this together, and all three are easy to undo by accident.
 
 **Every loop returns to the pose it started in, and leaves at that seam** rather than wherever it had reached. A loader runs for as long as the work does, so its seam is seen far more often than its beginning; `motion.js` explains the mechanism and the cap on how long it will wait before fading from where it is.
 
-**Nothing moves under `prefers-reduced-motion`,** and nothing goes blank either: each loader has a resting pose that still says "working".
+**Nothing moves under `prefers-reduced-motion`,** and nothing goes blank either: each loader has a resting pose that still says "working". The step transitions are named there explicitly — they are more specific than the `.step` rule that block already covered, so leaving them out would have quietly exempted them.
+
+Steps arrive from the side they came from: forward from the right, back from the left, decided in `showStep()` before the section is unhidden, since what restarts the animation is the section leaving `display: none`. Only the incoming step moves — animating both would mean taking them out of the flow and paying for it with a layout jump at the end of every transition.
 
 `npm run icon` draws the app icon from the same mark, so the icon and the interface cannot drift apart.
 ### Releasing
