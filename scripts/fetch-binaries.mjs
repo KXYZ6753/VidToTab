@@ -30,11 +30,16 @@ const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = path.join(ROOT, 'build', 'bin');
 
 const NS = 'https://github.com/Nothing-Software/FFmpeg-Builds/releases/download/9.0.1-ntr1';
-const BTBN = 'https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-09-15-13-18';
+const BTBN = 'https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-08-31-13-27';
 
 // Pinned deliberately to dated releases. BtbN's `latest` tag is rolling — its
 // assets are replaced in place, so a checksum pinned against it would break the
 // first time they rebuild.
+//
+// And to a *month-end* one. BtbN deletes its daily builds after about two
+// weeks — the 2026-09-15 pin this replaced was a 404 by the 30th, failing every
+// Linux build and the web image — but keeps the last build of each month for
+// well over a year. When moving the pin, take the last autobuild of a month.
 const TARGETS = {
   'darwin-arm64': {
     url: `${NS}/ffmpeg-9.0.1-ntr1-macos-arm64.zip`,
@@ -49,14 +54,14 @@ const TARGETS = {
     sources: `${NS}`,
   },
   'linux-x64': {
-    url: `${BTBN}/ffmpeg-n9.0.1-30-g9258bacca5-linux64-lgpl-9.0.tar.xz`,
-    sha256: 'ed619a525ed4059f9fccdaef92bcc8af8c4ba882ba5a19317d37c494939f2291',
+    url: `${BTBN}/ffmpeg-n9.0.1-11-ge47273f4d9-linux64-lgpl-9.0.tar.xz`,
+    sha256: '204fc02692b11249c3e688ad18538ce2939129a1fc6abc32a6b2638a024496cf',
     kind: 'tar.xz',
     sources: 'https://github.com/BtbN/FFmpeg-Builds',
   },
   'linux-arm64': {
-    url: `${BTBN}/ffmpeg-n9.0.1-31-g3a7c002718-linuxarm64-lgpl-9.0.tar.xz`,
-    sha256: '4f2c3fd0a0a7ef63f0d4f7ac32d50059f7a53ca14ea079438fecbec07b4546ef',
+    url: `${BTBN}/ffmpeg-n9.0.1-11-ge47273f4d9-linuxarm64-lgpl-9.0.tar.xz`,
+    sha256: 'a65d190b2391420583546eb8be0aa36b4c219bbc0060bab3f4fa618f178151c5',
     kind: 'tar.xz',
     sources: 'https://github.com/BtbN/FFmpeg-Builds',
   },
