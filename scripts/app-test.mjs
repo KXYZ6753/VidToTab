@@ -160,6 +160,7 @@ check('the app page is served', (await probe()) === 200);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let ws = null;
 let quitEdit = null;
+let quitAsked = false;
 try {
   let target = null;
   for (let i = 0; i < 120 && !target; i++) {
@@ -306,6 +307,11 @@ try {
   // wait. The shell has to let the page write it before the window goes.
   await js(`(() => { const t = document.getElementById('titleInput'); t.value = 'Typed Just Before Quitting'; t.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
   quitEdit = path.join(LIBRARY, 'Typed Just Before Quitting', 'sheet.json');
+  // Quit the way the app does — the menu, "Install and close" — rather than by
+  // signal: on Windows a signal from Node is TerminateProcess, which no
+  // program gets to finish anything after.
+  await js(`window.vidtotab.updates.quit()`);
+  quitAsked = true;
 } catch (e) {
   check(`driving the window: ${e.message}`, false);
 } finally {
@@ -313,7 +319,11 @@ try {
   feed.close();
 }
 
-child.kill('SIGTERM');
+const running = () => child.exitCode === null && child.signalCode === null;
+if (quitAsked && running()) {
+  await Promise.race([new Promise((r) => child.once('exit', r)), new Promise((r) => setTimeout(r, 10000))]);
+}
+if (running()) child.kill('SIGTERM');
 await new Promise((r) => setTimeout(r, 4000));
 if (quitEdit) check('an edit made just before quitting is saved on the way out', existsSync(quitEdit));
 const after = await probe();
