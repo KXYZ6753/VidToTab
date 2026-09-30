@@ -30,7 +30,7 @@ npm run dist            # installers for this platform
 
 It carries its own ffmpeg (LGPL, pinned by checksum) and fetches yt-dlp into its data folder on first run, so it works on a machine that has neither — an app opened from Finder, the Dock or a .desktop file has no Homebrew on its PATH, which is the whole reason it brings its own.
 
-The macOS app is ad-hoc signed, which is what stops macOS calling it damaged, but it is not notarised: the first launch of a downloaded copy wants **right-click → Open**. Windows SmartScreen wants **More info → Run anyway**. [Releasing](#releasing) explains what it would take to remove both.
+The macOS app is ad-hoc signed, which is what stops macOS calling it damaged, but it is not notarised: the first launch of a downloaded copy is stopped, and since macOS 15 the way through is **System Settings → Privacy & Security → Open Anyway** (right-click → Open no longer is). Windows SmartScreen wants **More info → Run anyway**. [Releasing](#releasing) explains what it would take to remove both.
 
 The desktop app has no landing page. That view exists to explain the thing and offer the download, and inside the download both halves are pointless, so it opens straight into the working layout and the home toggle is not there — a preference remembered from a browser on the same machine does not follow it in.
 
@@ -150,17 +150,17 @@ The tag runs the same matrix as any other push — module self-checks, server ch
 | Platform | What lands on the release |
 |---|---|
 | macOS, Apple Silicon | `.dmg`, plus a `.zip` of the same app |
-| Windows, x64 | `VidToTab Setup <version>.exe` |
+| Windows, x64 | `VidToTab.Setup.<version>.exe` |
 | Linux, x64 and arm64 | `.deb` |
 | Linux, x64 | `.AppImage` |
 
 The tag has to match `package.json`, and the workflow stops if it does not — installers are named from `package.json`, so a tag made by hand that disagrees with it produces downloads whose names are a lie. `npm version` moves both together, which is why it is the way to make the tag.
 
-A tag with a suffix, `v0.2.0-beta.1`, is published as a pre-release, so "Latest release" on the repo page goes on pointing at the last stable one. Re-running a release that failed part way through is safe: it replaces the files on the existing release rather than refusing because it already exists.
+A tag with a suffix, `v0.2.0-beta.1`, is published as a pre-release, so "Latest release" on the repo page goes on pointing at the last stable one. Re-running a release that failed part way through is safe: it replaces the files on the existing release rather than refusing because it already exists, and publishes it if it had been left a draft — which is what GitHub does to a release whose tag was deleted and pushed again.
 
 The macOS app is ad-hoc signed (`mac.identity: '-'`), and that is not cosmetic. Every Mach-O binary on Apple Silicon must carry a signature to run at all, and an unsigned one is reported as *"VidToTab is damaged and can't be opened"* — an error with no right-click-Open escape. What arrives from electron-builder without an explicit identity is the linker's own signature on the Electron binary, which `codesign --verify` rejects; the ad-hoc pass re-seals the bundle under `com.vidtotab.app`. The hardened runtime stays on with `electron/entitlements.mac.plist`, so notarising later is a credential change rather than a packaging one.
 
-It is still not notarised, so Gatekeeper stops the first launch of a downloaded copy and says Apple cannot check it for malicious software; right-click → **Open** goes through, and the generated release notes say so. Apple's own `syspolicy_check` calls ad-hoc signing a warning and the missing notary ticket fatal, which is the honest summary: this is fine for people who trust the source and wrong for strangers.
+It is still not notarised, so Gatekeeper stops the first launch of a downloaded copy and says Apple cannot check it for malicious software. Since macOS 15 the only way past it is **System Settings → Privacy & Security → Open Anyway** (or `xattr -dr com.apple.quarantine`), and the generated release notes say so. Apple's own `syspolicy_check` calls ad-hoc signing a warning and the missing notary ticket fatal, which is the honest summary: this is fine for people who trust the source and wrong for strangers.
 
 Removing that warning needs a **Developer ID Application** certificate — not the Apple Development or Apple Distribution certificates, which are for Xcode and the App Store — exported as a .p12 into `CSC_LINK` / `CSC_KEY_PASSWORD` repository secrets, App Store Connect API credentials for the notary service, `CSC_IDENTITY_AUTO_DISCOVERY` turned back on and `mac.identity` removed so the real certificate is found. Windows has the same shape of problem and the same shape of answer: SmartScreen warns until the installer is signed.
 
@@ -206,5 +206,5 @@ VIDTOTAB_FFPROBE=$PWD/build/bin/$(node -p "process.platform+'-'+process.arch")/f
 - Live video directly behind the notation can leave faint marks in the clean print; *Original* shows the video frame as-is.
 - Songsheets are stored in the browser. Clearing site data removes them; export a PDF to keep a copy.
 - A **hosted instance is one person at a time** — see [Hosted](#hosted). The limits keep visitors from disturbing each other; they do not make it multi-user.
-- **No downloads are published yet.** The desktop apps are built and tested on all three platforms in CI, but releasing them needs signing to avoid the unsigned-app warnings, so for now you build your own.
+- **The downloads are not signed by a known developer.** macOS wants *Open Anyway* in Privacy & Security on first launch and Windows SmartScreen wants *Run anyway* — see [Releasing](#releasing) for what removing both would take.
 - Planned: AI transcription of captures into re-rendered tab (alphaTex / alphaTab).

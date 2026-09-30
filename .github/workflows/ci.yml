@@ -320,18 +320,18 @@ jobs:
             echo
             echo '**macOS** (Apple Silicon) — the `.dmg`. Open it and drag VidToTab to Applications.'
             echo
-            echo 'It is signed, but only ad-hoc, and it is not notarised — so Gatekeeper stops the first launch and says Apple cannot check it for malicious software. Right-click the app and choose **Open**, which offers a way through that double-clicking does not, or run'
+            echo 'It is signed, but only ad-hoc, and it is not notarised — so Gatekeeper stops the first launch and says Apple cannot check it for malicious software. Since macOS 15, right-click → **Open** no longer gets past that: open the app once, then go to **System Settings → Privacy & Security**, scroll down, and click **Open Anyway**. Or skip the dialog entirely:'
             echo
             echo '```sh'
             echo 'xattr -dr com.apple.quarantine /Applications/VidToTab.app'
             echo '```'
             echo
-            echo '**Windows** (x64) — `VidToTab Setup *.exe`. Also unsigned, so SmartScreen will warn: **More info** then **Run anyway**.'
+            echo '**Windows** (x64) — `VidToTab.Setup.*.exe`. Also unsigned, so SmartScreen will warn: **More info** then **Run anyway**.'
             echo
             echo '**Linux** — the `.deb` for Debian and Ubuntu, x64 or arm64:'
             echo
             echo '```sh'
-            echo 'sudo apt install ./VidToTab_*_amd64.deb'
+            echo 'sudo apt install ./vidtotab_*_amd64.deb'
             echo '```'
             echo
             echo 'or the x64 `.AppImage`, which needs `chmod +x` before it will start.'
@@ -364,10 +364,15 @@ jobs:
           # Re-running a failed release job is normal, and `gh release create`
           # refuses when the release already exists. Replace its files and notes
           # instead of failing at the last step with the builds already done.
+          #
+          # --draft=false because moving a tag (delete, re-push) quietly turns
+          # its release back into a draft, and without it every later run
+          # uploads fresh installers to a release nobody can see. v0.2.0 sat
+          # like that, green and invisible, until someone looked.
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             echo "release $GITHUB_REF_NAME exists — replacing its files"
             gh release upload "$GITHUB_REF_NAME" artifacts/* --clobber
-            gh release edit "$GITHUB_REF_NAME" --notes-file notes.md $pre
+            gh release edit "$GITHUB_REF_NAME" --notes-file notes.md --draft=false $pre
           else
             gh release create "$GITHUB_REF_NAME" artifacts/* \
               --title "VidToTab ${GITHUB_REF_NAME}" \
