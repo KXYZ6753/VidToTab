@@ -1,0 +1,25 @@
+{
+  "video": "yUka8hbTivY",
+  "page": "cap-011",
+  "tStart": 67.75,
+  "sha1": "1f476148b4ea3de614edc2abfca6dd5d0c72d853",
+  "systems": [
+    {
+      "events": [
+        "5:2",
+        "3:2",
+        "2:3 6:x",
+        "5:2",
+        "2:3",
+        "2:3 5:2",
+        "2:3 6:x",
+        "1:0"
+      ]
+    }
+  ],
+  "comments": "No barlines. Two lower-case 'x' marks on the low E line (muted), each stacked under a 3 on the B string; one 2 on A stacked under a B-string 3. Right half of staff empty. / No barlines. Two muted x's on low E, each stacked under a 3 on B; the third 3 on B is stacked over a 2 on A. Rest of the staff empty.",
+  "by": [
+    "A",
+    "B"
+  ]
+}

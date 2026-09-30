@@ -1,0 +1,39 @@
+{
+  "video": "pyDajEy7__E",
+  "page": "cap-011",
+  "tStart": 80.75,
+  "sha1": "40dc240cde2bcc5ca0ca2c1f6a548446b1385d16",
+  "systems": [
+    {
+      "events": [
+        "1:7",
+        "1:0",
+        "1:0",
+        "1:2",
+        "|",
+        "1:3",
+        "1:3",
+        "1:5",
+        "3:7",
+        "1:7",
+        "|",
+        "1:8",
+        "1:7",
+        "2:8",
+        "1:5",
+        "1:7",
+        "1:8",
+        "|",
+        "1:7",
+        "1:5",
+        "1:3",
+        "1:2",
+        "1:5",
+        "1:3",
+        "|"
+      ]
+    }
+  ],
+  "comments": "Single-note line, all digits clear. Last '|' is the closing line at the right end.",
+  "by": "B"
+}

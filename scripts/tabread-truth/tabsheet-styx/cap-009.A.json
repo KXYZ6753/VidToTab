@@ -1,0 +1,36 @@
+{
+  "video": "tabsheet-styx",
+  "page": "cap-009",
+  "tStart": 92.75,
+  "sha1": "0d212afeac4199ac2d9a40c96d68b13f8f545303",
+  "systems": [
+    {
+      "events": [
+        "1:5",
+        "1:7",
+        "1:0",
+        "2:4",
+        "1:0",
+        "1:9",
+        "|",
+        "|",
+        "2:4",
+        "1:0",
+        "3:1",
+        "1:4",
+        "1:0",
+        "2:4",
+        "|",
+        "2:4",
+        "1:0",
+        "3:1",
+        "3:1",
+        "3:2",
+        "1:0",
+        "|"
+      ]
+    }
+  ],
+  "comments": "Measure 2 is empty except a grey whole-rest dash under string 3 (not a note), so two consecutive barlines. Staff ends with a final double barline (thin + thick), recorded as a single '|'.",
+  "by": "A"
+}

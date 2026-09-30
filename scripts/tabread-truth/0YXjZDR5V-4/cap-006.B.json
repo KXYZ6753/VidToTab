@@ -1,0 +1,7 @@
+{ "video": "0YXjZDR5V-4", "page": "cap-006", "tStart": 44.5, "sha1": "1afbba0cd329fe33d405294448efd774f6c20530",
+  "systems": [ { "events": [
+    "3:0 6:0", "1:3", "6:x", "2:3", "3:0 5:0", "3:2", "2:0", "2:1", "2:0 6:x", "3:2", "3:0",
+    "3:0 5:3", "1:3", "6:x", "5:3", "2:3", "3:0 4:0", "3:2", "2:0", "2:1", "2:0", "3:2", "3:0",
+    "1:3 2:3 3:2 4:0"
+  ] } ],
+  "comments": "Arcs (no h/p letters) ignored. An up-strum arrow with a dotted line sits at the far right edge after the last chord; ignored. No barlines.", "by": "B" }

@@ -1,0 +1,12 @@
+{ "video": "eNhFKmm413U", "page": "cap-010", "tStart": 93.25, "sha1": "9cb46451cad260a70d98234fcfa592855a0759dd",
+  "systems": [ { "events": [
+    "|",
+    "4:(5)", "3:(5)", "|",
+    "2:(12) 3:(12)", "3:(7)", "|",
+    "1:0 3:(7)", "2:3", "2:1", "|",
+    "2:3", "2:1", "2:0", "|",
+    "2:1", "2:0", "3:2", "3:0", "|",
+    "4:2", "4:2", "4:4", "|",
+    "3:0 5:3"
+  ] } ],
+  "comments": "Scrolling staff: first solid vertical line after the faded left area / grey TAB overlay recorded as '|' (barline to an off-page measure). Bracketed notes: (5) on D, (5) on G, then a single tall bracket around 12 over 12 on B and G, then (7) on G tied across the barline to another (7). A half-rest symbol sits on the B string after the 12s (ignored). 'pizz.' text below ignored. Staff continues off the right edge after the C chord.", "by": "B" }

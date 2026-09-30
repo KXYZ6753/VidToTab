@@ -11,6 +11,8 @@
 // shaped like ImageData, which is what a canvas gives the browser and what a
 // raw RGBA decode gives a test.
 
+import { findStaves } from './staff.js';
+
 export const SPEED_MIN = 0.25;
 export const SPEED_MAX = 2;
 export const BPM_MIN = 20;
@@ -41,61 +43,21 @@ export function buildSequence(items, { repeats = true } = {}) {
 }
 
 // Where the notes are on a page, so the sweep crosses the music and not the
-// empty staff after the last note. A page is one or more systems: a group of
-// evenly spaced horizontal lines (the tab staff, and a notation staff directly
-// above it if there is one, which are swept together because they are the
-// same moment). Returns systems top to bottom, each with the horizontal span
-// its notes occupy, all in image pixels.
+// empty staff after the last note. A page is one or more systems: a six-line
+// tab staff (found by staff.js, which also rejects header rules and panel
+// frames that would otherwise pass for extra strings), together with a
+// notation staff sitting directly above it if there is one — the same moment,
+// so swept together. Returns systems top to bottom, each with its string line
+// ys and the horizontal span its notes occupy, all in image pixels.
 export function analysePage(img, { inkBelow = 200 } = {}) {
-  const { data, width: W, height: H } = img;
+  const { width: W, height: H } = img;
   if (!W || !H) return { systems: [], found: false };
-  const ink = new Uint8Array(W * H);
-  const rowInk = new Uint32Array(H);
-  for (let y = 0; y < H; y++) {
-    let n = 0;
-    for (let x = 0; x < W; x++) {
-      const i = (y * W + x) * 4;
-      // Transparent counts as paper; otherwise luma.
-      const dark = data[i + 3] > 32 && (data[i] * 299 + data[i + 1] * 587 + data[i + 2] * 114) / 1000 < inkBelow;
-      if (dark) { ink[y * W + x] = 1; n++; }
-    }
-    rowInk[y] = n;
-  }
-
-  // Staff lines: rows inked across most of the width. Dashed lines (the
-  // ASCII style) cover about half; solid ones nearly all of it. Runs of such
-  // rows are one line drawn a few pixels thick.
-  const lines = [];
-  for (let y = 0; y < H; y++) {
-    if (rowInk[y] < W * 0.3) continue;
-    const last = lines[lines.length - 1];
-    if (last && y - last.y1 <= 1) last.y1 = y;
-    else lines.push({ y0: y, y1: y });
-  }
-  for (const l of lines) l.y = (l.y0 + l.y1) / 2;
-
-  // Staves: consecutive lines at a steady spacing. Four to eight lines covers
-  // guitar, bass, ukulele and a notation staff; anything else is a rule or a
-  // border, not a staff.
-  const staves = [];
-  let run = [];
-  const flush = () => {
-    if (run.length >= 4 && run.length <= 8) staves.push(run);
-    else if (run.length > 8) staves.push(run.slice(0, 8));
-    run = [];
-  };
-  for (const l of lines) {
-    if (!run.length) { run.push(l); continue; }
-    const gap = l.y - run[run.length - 1].y;
-    const prevGap = run.length > 1 ? run[run.length - 1].y - run[run.length - 2].y : gap;
-    const steady = gap >= 4 && gap <= H / 3 && Math.abs(gap - prevGap) <= Math.max(2, prevGap * 0.35);
-    if (steady) run.push(l);
-    else { flush(); run.push(l); }
-  }
-  flush();
+  const dark = 1 - inkBelow / 255;
+  const staves = findStaves(img, { dark });
+  const ink = staves.ink;
 
   const lineRows = new Uint8Array(H);
-  for (const l of lines) for (let y = Math.max(0, l.y0 - 1); y <= Math.min(H - 1, l.y1 + 1); y++) lineRows[y] = 1;
+  for (const l of staves.lines) for (let y = Math.max(0, l.y0 - 1); y <= Math.min(H - 1, l.y1 + 1); y++) lineRows[y] = 1;
 
   const measure = (top, bottom, spacing) => {
     // A column is a note where it has ink that is not a staff line: fret
@@ -106,7 +68,7 @@ export function analysePage(img, { inkBelow = 200 } = {}) {
     let x1 = -1;
     for (let x = 0; x < W; x++) {
       let n = 0;
-      for (let y = top; y <= bottom; y++) if (!lineRows[y] && ink[y * W + x]) n++;
+      for (let y = top; y <= bottom; y++) if (!lineRows[y] && ink[y * W + x] >= dark) n++;
       if (n >= need) { if (x0 < 0) x0 = x; x1 = x; }
     }
     if (x0 < 0) return { x0: 0, x1: W };
@@ -114,31 +76,22 @@ export function analysePage(img, { inkBelow = 200 } = {}) {
     return { x0: Math.max(0, x0 - pad), x1: Math.min(W, x1 + pad) };
   };
 
-  let systems = staves.map((st) => {
-    const gaps = st.slice(1).map((l, i) => l.y - st[i].y).sort((a, b) => a - b);
-    const spacing = gaps[Math.floor(gaps.length / 2)];
-    return {
-      top: Math.max(0, Math.floor(st[0].y - spacing * 0.9)),
-      bottom: Math.min(H - 1, Math.ceil(st[st.length - 1].y + spacing * 0.9)),
-      spacing,
-      lines: st.length,
-    };
+  const systems = staves.systems.map((st) => {
+    let top = st.top;
+    // A notation staff directly above its tab staff is the same system.
+    for (const o of staves.other) {
+      const oBottom = o.lines[o.lines.length - 1] + o.spacing * 0.9;
+      if (oBottom <= st.top + 1 && st.top - oBottom < 2.5 * Math.max(o.spacing, st.spacing)) {
+        top = Math.max(0, Math.floor(o.lines[0] - o.spacing * 0.9));
+      }
+    }
+    return { top, bottom: st.bottom, spacing: st.spacing, lines: 6, ys: st.lines, ...measure(top, st.bottom, st.spacing) };
   });
-  // A notation staff sitting directly on its tab staff is the same system.
-  const merged = [];
-  for (const s of systems) {
-    const prev = merged[merged.length - 1];
-    if (prev && s.top - prev.bottom < 2.5 * Math.max(prev.spacing, s.spacing)) {
-      prev.bottom = s.bottom;
-      prev.lines += s.lines;
-    } else merged.push({ ...s });
-  }
-  systems = merged.map((s) => ({ ...s, ...measure(s.top, s.bottom, s.spacing) }));
 
   if (!systems.length) {
     // No staff to be found: sweep the whole picture, across whatever is on it.
     const span = measure(0, H - 1, Math.max(4, H / 12));
-    return { systems: [{ top: 0, bottom: H - 1, spacing: 0, lines: 0, ...span }], found: false };
+    return { systems: [{ top: 0, bottom: H - 1, spacing: 0, lines: 0, ys: [], ...span }], found: false };
   }
   return { systems, found: true };
 }
@@ -204,6 +157,14 @@ export function selfCheck(assert) {
   assert.ok(s.top < 40 && s.bottom > 140 && s.top > 15, 'the band covers the staff and not the title');
   assert.equal(sweepAt(page.systems, 0).x, s.x0);
   assert.equal(sweepAt(page.systems, 1).x, s.x1);
+
+  // A panel frame just under the staff, at nearly the string spacing, used to
+  // be read as a seventh string and stretch the band; it is not one.
+  for (let x = 0; x < W; x++) { px(x, 157, 120); px(x, 158, 120); }
+  const framed = analysePage({ data, width: W, height: H });
+  assert.equal(framed.systems.length, 1);
+  assert.equal(framed.systems[0].ys.length, 6);
+  assert.ok(framed.systems[0].ys[5] < 145, `the frame is not part of the staff (${framed.systems[0].bottom})`);
 
   // Two systems share the time by width.
   const two = [{ x0: 0, x1: 300 }, { x0: 0, x1: 100 }];

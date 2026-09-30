@@ -1,0 +1,35 @@
+{
+  "video": "9E9lOx6LfTk",
+  "page": "cap-021",
+  "tStart": 60,
+  "sha1": "e5e4c159c8f0777101395e06c9b8953f46b72ad3",
+  "systems": [
+    {
+      "events": [
+        "1:7 2:0",
+        "1:0 2:0 5:x",
+        "3:7",
+        "1:0 2:0 6:0",
+        "2:0 3:0 5:x",
+        "2:h3",
+        "|",
+        "1:0 2:0 5:3",
+        "1:3 2:0 3:0 5:x",
+        "5:2",
+        "1:2 2:0",
+        "2:3 5:x",
+        "1:0",
+        "|",
+        "6:0",
+        "2:7",
+        "2:8 3:0 5:x",
+        "1:5",
+        "1:8 6:0",
+        "1:10 2:0 3:0 5:x",
+        "|"
+      ]
+    }
+  ],
+  "comments": "The H arc joins the 0 and 3 on string 2 at the end of measure 1. Staff continues briefly past the last barline with no notes.",
+  "by": "B"
+}

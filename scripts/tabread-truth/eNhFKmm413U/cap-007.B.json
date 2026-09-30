@@ -1,0 +1,11 @@
+{ "video": "eNhFKmm413U", "page": "cap-007", "tStart": 63.75, "sha1": "fd20d8483c3557001957e80276ce0e6bae86ba00",
+  "systems": [ { "events": [
+    "4:2", "3:0", "|",
+    "3:2 4:4 5:5", "2:1", "2:0", "|",
+    "2:1 3:2 6:1", "2:1", "2:3", "|",
+    "1:0 3:0 5:3", "1:3", "|",
+    "1:5 2:0 3:0 6:3", "1:3", "1:0", "|",
+    "2:3 3:2 4:4", "1:8", "1:7", "|",
+    "1:5 5:0", "4:7", "3:5", "2:5?"
+  ] } ],
+  "comments": "Scrolling staff: the first measure is partly hidden under the faded left area / grey TAB overlay (its beat-1 notes are not visible; a dot below the staff hints at a hidden bass note); only 4:2 and 3:0 are visible. D/F# chord shows only 3/2/4 on B/G/D, nothing on low E. Last note on the B string is cut to a sliver at the right edge; its left side looks like a 5.", "by": "B" }

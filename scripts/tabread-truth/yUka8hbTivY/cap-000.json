@@ -1,0 +1,32 @@
+{
+  "video": "yUka8hbTivY",
+  "page": "cap-000",
+  "tStart": 0,
+  "sha1": "3c5dfc5a7d343e9422cfeec3a47886803b9c8285",
+  "systems": [
+    {
+      "events": [
+        "6:3",
+        "4:0",
+        "3:2",
+        "2:2",
+        "3:2",
+        "3:2",
+        "2:3",
+        "2:3 5:0",
+        "3:2",
+        "3:2",
+        "4:4",
+        "4:4",
+        "4:2",
+        "4:4",
+        "4:2"
+      ]
+    }
+  ],
+  "comments": "No barlines in this style; notes are evenly spaced. The only stacked event is the second 3 on B sitting directly above the 0 on A (under the 'A' chord name). Short dashes between digits are just the string line, not technique marks. Right third of the staff is empty. / No barlines in this style. Notes on an even ~120px grid; the second 3 on B sits exactly above the 0 on A (same x), recorded as one event. Short dashes between digits are just broken staff line, not techniques. Right third of the staff is empty.",
+  "by": [
+    "A",
+    "B"
+  ]
+}

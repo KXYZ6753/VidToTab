@@ -1,0 +1,36 @@
+{
+  "video": "MENRbBUBYd4",
+  "page": "cap-000",
+  "tStart": 0.25,
+  "sha1": "4c8a67d740ecde9e337cf41cdc9915af6b55cbd2",
+  "systems": [
+    {
+      "events": [
+        "6:0",
+        "2:0",
+        "2:0",
+        "2:0",
+        "6:x",
+        "3:2",
+        "3:2",
+        "3:2 4:0",
+        "4:2",
+        "3:0",
+        "6:x",
+        "3:2",
+        "3:0",
+        "6:0",
+        "2:0",
+        "2:0",
+        "2:0",
+        "6:x",
+        "3:2 4:1",
+        "6:x",
+        "3:2 4:2 6:2",
+        "4:2"
+      ]
+    }
+  ],
+  "comments": "Scrolling-style tab on an even 120px (2x) grid; no barlines drawn anywhere on the page. Column alignment confirmed by blob centres (e.g. 3:2+4:0 share a column, 3:2+4:1, and 3:2+4:2+6:2). Curved panel frame below the staff ignored.",
+  "by": "B"
+}

@@ -1,0 +1,37 @@
+{
+  "video": "tabsheet-styx",
+  "page": "cap-004",
+  "tStart": 42.75,
+  "sha1": "49edb088eab9bb74830a187cde61c67463187ca8",
+  "systems": [
+    {
+      "events": [
+        "2:2",
+        "1:7",
+        "1:5",
+        "1:4",
+        "|",
+        "1:3",
+        "1:2",
+        "|",
+        "1:0",
+        "|",
+        "1:0",
+        "1:7",
+        "1:4",
+        "|",
+        "1:2",
+        "1:4",
+        "2:2",
+        "1:7",
+        "1:4",
+        "|"
+      ]
+    }
+  ],
+  "comments": "Grey rest dash on string 4 at the start of measure 4 - not a note, ignored. Final '|' is the staff's closing line at the right edge. / Single-note line, all digits clear. Gray dash on string 4 in measure 4 is a rest, ignored. Last '|' is the closing line at the right end.",
+  "by": [
+    "A",
+    "B"
+  ]
+}

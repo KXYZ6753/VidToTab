@@ -1,0 +1,39 @@
+{
+  "video": "9E9lOx6LfTk",
+  "page": "cap-013",
+  "tStart": 38.25,
+  "sha1": "42d391eaf2cd5396ba65852233619d9c1dcd748d",
+  "systems": [
+    {
+      "events": [
+        "4:2",
+        "3:0 5:x",
+        "3:h2",
+        "|",
+        "2:0 4:0",
+        "2:0",
+        "5:x",
+        "2:0",
+        "5:4",
+        "4:2",
+        "3:0 5:x",
+        "3:h2",
+        "|",
+        "2:0 5:3",
+        "2:h3",
+        "2:0 3:0 5:x",
+        "5:3",
+        "2:0",
+        "2:h3",
+        "2:0 5:x",
+        "1:0",
+        "|"
+      ]
+    }
+  ],
+  "comments": "Page starts mid-bar: 4:2 sits right at the left edge but is whole. A short curved stroke just above string 5 at the very left edge (tail of an arc or slide from the previous page) has no readable note and is left out. Page ends on a barline. Grey speck in bar 3 is not a note. / The 2 on string 4 at the far left edge is complete in the original. A small arc tail on string 5 at the left edge (end of an arc from the previous page) was ignored. All three arcs have a visible H. Staff continues briefly past the last barline to the right edge with no notes.",
+  "by": [
+    "A",
+    "B"
+  ]
+}

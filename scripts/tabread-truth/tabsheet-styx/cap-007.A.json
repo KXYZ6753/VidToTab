@@ -1,0 +1,36 @@
+{
+  "video": "tabsheet-styx",
+  "page": "cap-007",
+  "tStart": 73.25,
+  "sha1": "0456f0136fd6aa08d967bf1c0ff5507624a1b1cc",
+  "systems": [
+    {
+      "events": [
+        "2:2",
+        "1:4",
+        "2:0",
+        "2:2",
+        "1:4",
+        "1:2",
+        "|",
+        "1:2",
+        "1:4",
+        "1:7",
+        "1:4",
+        "1:2",
+        "1:4",
+        "|",
+        "1:4",
+        "1:2",
+        "|",
+        "2:4",
+        "2:0",
+        "2:4",
+        "1:4",
+        "|"
+      ]
+    }
+  ],
+  "comments": "Small grey quarter-rest symbol across strings 2-4 at the start of measure 3 - not a note, ignored. Final '|' is the staff's closing line at the right edge.",
+  "by": "A"
+}

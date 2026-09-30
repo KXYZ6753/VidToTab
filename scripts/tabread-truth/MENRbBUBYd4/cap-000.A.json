@@ -1,0 +1,36 @@
+{
+  "video": "MENRbBUBYd4",
+  "page": "cap-000",
+  "tStart": 0.25,
+  "sha1": "4c8a67d740ecde9e337cf41cdc9915af6b55cbd2",
+  "systems": [
+    {
+      "events": [
+        "6:0",
+        "2:0",
+        "2:0",
+        "2:0",
+        "6:x",
+        "3:2",
+        "3:2",
+        "3:2 4:0",
+        "4:2",
+        "3:0",
+        "6:x",
+        "3:2",
+        "3:0",
+        "6:0",
+        "2:0",
+        "2:0",
+        "2:0",
+        "6:x",
+        "3:2 4:1",
+        "6:x",
+        "3:2 4:2 6:2",
+        "4:2"
+      ]
+    }
+  ],
+  "comments": "ASCII-style scrolling tab on a fixed character grid; notes sharing a column are stacked. No barlines. Nothing on strings 1 and 5. The rounded frame line below the staff is a panel border, ignored.",
+  "by": "A"
+}

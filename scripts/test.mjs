@@ -17,6 +17,13 @@ const mods = [
   // Play-along: the sequence with repeats, the pace, and finding the notes on
   // a page so the sweep crosses them rather than empty staff.
   { name: 'practice', file: path.join(here, '..', 'public', 'shared', 'practice.js') },
+  // Follow-along: the staff finder shared with practice, tunings and pitches,
+  // page fingerprints, corrections to a reading, and the ground-truth grammar.
+  { name: 'staff', file: path.join(here, '..', 'public', 'shared', 'staff.js') },
+  { name: 'follow', file: path.join(here, '..', 'public', 'shared', 'follow.js') },
+  { name: 'sha1', file: path.join(here, '..', 'public', 'shared', 'sha1.js') },
+  { name: 'transcript', file: path.join(here, '..', 'public', 'shared', 'transcript.js') },
+  { name: 'tabread-truth', file: path.join(here, 'tabread-truth.mjs') },
   // Only its pure parts run here — IndexedDB does not exist in Node, and the
   // storage paths are covered by the browser end-to-end test instead.
   { name: 'library', file: path.join(here, '..', 'public', 'lib', 'library.js') },

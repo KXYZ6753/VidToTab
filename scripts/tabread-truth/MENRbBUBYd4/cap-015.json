@@ -1,0 +1,36 @@
+{
+  "video": "MENRbBUBYd4",
+  "page": "cap-015",
+  "tStart": 88.75,
+  "sha1": "cc2701edde87ef364323b77aab7341badeb1ba3b",
+  "systems": [
+    {
+      "events": [
+        "5:2",
+        "3:2",
+        "2:0 6:x",
+        "1:0",
+        "2:3 5:2",
+        "2:p0",
+        "3:0 6:x",
+        "3:2",
+        "6:0",
+        "3:0",
+        "3:0 6:x",
+        "4:2 6:0",
+        "4:4 6:x",
+        "3:0 5:0",
+        "3:2 6:x",
+        "2:0 5:0",
+        "2:1 6:x",
+        "2:4 5:0",
+        "1:0 6:x"
+      ]
+    }
+  ],
+  "comments": "Character-grid tab; '3p0' on string 2 (the 3 stacked with 5:2). No barlines. / Even 120px (2x) grid; column alignment confirmed by blob centres. '3p0' on string 2 (the 3 stacked with 5:2). No barlines on the page. Panel border below staff ignored.",
+  "by": [
+    "A",
+    "B"
+  ]
+}

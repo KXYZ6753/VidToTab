@@ -1,0 +1,22 @@
+{
+  "video": "Fv3pCR1Btjk",
+  "page": "cap-003",
+  "tStart": 15.75,
+  "sha1": "d40ef9b23feb6f25b4a7932f03ccfb1ad7d00ac8",
+  "systems": [
+    {
+      "events": [
+        "1:1 5:0",
+        "2:1 6:x",
+        "1:6 6:4",
+        "3:5",
+        "2:6"
+      ]
+    }
+  ],
+  "comments": "Only five events at the left; the rest of the staff is empty. Chord name 'G#' ignored. Lower-case x on string 6 read as a muted note. / Only five events at the left; the rest of the staff is empty. No barlines. Chord name \"G#\" above ignored.",
+  "by": [
+    "A",
+    "B"
+  ]
+}

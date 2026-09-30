@@ -1,0 +1,27 @@
+{
+  "video": "MENRbBUBYd4",
+  "page": "cap-004",
+  "tStart": 25.25,
+  "sha1": "9d8ec5999728b9c4a77b51087675f8d57aabde53",
+  "systems": [
+    {
+      "events": [
+        "4:2 6:0",
+        "4:p0",
+        "4:h2",
+        "4:2",
+        "3:0",
+        "3:h2",
+        "3:h4",
+        "3:0",
+        "3:h2",
+        "4:4"
+      ]
+    }
+  ],
+  "comments": "Legato written inline: '2p0h2' on string 4 (first 2 stacked with 6:0), then '0h2h4' and '0h2' on string 3. No barlines. Below the six-line staff, past the rounded panel border, is a separate single line carrying four 'D' letters (a chord/text lane, not a tab string) - ignored. / Written '2p0h2' on string 4 (over 6:0 in the first column), then 2, '0h2h4' and '0h2' on string 3, then 4 on string 4. Rest of the staff is empty. No barlines on the page. 'D' letters on the line below the panel border ignored.",
+  "by": [
+    "A",
+    "B"
+  ]
+}

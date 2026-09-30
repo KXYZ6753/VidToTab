@@ -1,0 +1,31 @@
+{
+  "video": "Fv3pCR1Btjk",
+  "page": "cap-006",
+  "tStart": 34.5,
+  "sha1": "ec42f956ea8e07be9f20b6a50a2845d49af05ad7",
+  "systems": [
+    {
+      "events": [
+        "2:4 5:3",
+        "3:0",
+        "2:4",
+        "5:3",
+        "3:0",
+        "2:4 5:6",
+        "3:0",
+        "2:6",
+        "1:3 2:1 3:1 6:1",
+        "1:3 2:1",
+        "6:1",
+        "1:3 2:0 3:0 6:3",
+        "3:0",
+        "2:0"
+      ]
+    }
+  ],
+  "comments": "Wavy vertical lines before the F and G chords are arpeggio (rolled-chord) signs spanning all six strings, not barlines, and are ignored. The 2:6 just before the first wavy line is drawn a little lighter/softer than the other digits but reads clearly as 6. Chord names Cm/D/F/G ignored. Right part of the staff is empty. / No barlines. The F and G chords have wavy rolled-chord signs in front of them (ignored). The 6 on string 2 just before the F chord is slightly greyer on its right half but clearly a 6. Right part of the staff is empty. Chord names ignored.",
+  "by": [
+    "A",
+    "B"
+  ]
+}

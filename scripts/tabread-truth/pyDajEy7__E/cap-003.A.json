@@ -1,0 +1,36 @@
+{
+  "video": "pyDajEy7__E",
+  "page": "cap-003",
+  "tStart": 23.5,
+  "sha1": "d98f69ef39d66177e79e83b846143bb821e4d72f",
+  "systems": [
+    {
+      "events": [
+        "1:0",
+        "1:0",
+        "2:0",
+        "2:4",
+        "1:0",
+        "|",
+        "1:2",
+        "2:0",
+        "1:5",
+        "1:4",
+        "1:2",
+        "1:0",
+        "|",
+        "2:0",
+        "1:0",
+        "2:4",
+        "2:2",
+        "|",
+        "1:4",
+        "1:4",
+        "1:2",
+        "|"
+      ]
+    }
+  ],
+  "comments": "Grey rest symbol (small bar sitting on string 4) at the start of the last measure - not a note, ignored. Final '|' is the staff's closing line at the right edge.",
+  "by": "A"
+}

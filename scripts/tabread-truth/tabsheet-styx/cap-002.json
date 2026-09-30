@@ -1,0 +1,40 @@
+{
+  "video": "tabsheet-styx",
+  "page": "cap-002",
+  "tStart": 23,
+  "sha1": "27763d73e6378ea5fec4a50390a158aaf9351c0e",
+  "systems": [
+    {
+      "events": [
+        "1:0",
+        "1:2",
+        "1:0",
+        "2:2",
+        "|",
+        "1:2",
+        "1:4",
+        "1:2",
+        "1:5",
+        "|",
+        "1:4",
+        "1:2",
+        "1:0",
+        "1:2",
+        "1:0",
+        "2:4",
+        "|",
+        "1:0",
+        "2:4",
+        "2:2",
+        "2:0",
+        "2:2",
+        "|"
+      ]
+    }
+  ],
+  "comments": "Single-note melody, all digits clear. Final '|' is the staff's closing line at the right edge. / Single-note line, all digits clear. Closely spaced '2 0 2' (m3, string 1) and '4 2 0' (m4, string 2) are separate single-digit notes with visible gaps. Last '|' is the closing line at the right end.",
+  "by": [
+    "A",
+    "B"
+  ]
+}

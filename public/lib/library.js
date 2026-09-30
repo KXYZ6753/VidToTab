@@ -96,6 +96,8 @@ export function normaliseSheet(input = {}) {
       speed: Math.min(2, Math.max(0.25, Math.round((Number(input.practice?.speed) || 1) * 100) / 100)),
       songBpm: (() => { const b = Math.round(Number(input.practice?.songBpm) || 0); return b >= 20 && b <= 400 ? b : 0; })(),
     },
+    listen: cleanListen(input.listen),
+    transcript: cleanTranscript(input.transcript),
     url: String(input.url || '').slice(0, 2000),
     channel: String(input.channel || '').slice(0, 300),
     duration: Number(input.duration) || 0,
@@ -112,6 +114,63 @@ export function normaliseSheet(input = {}) {
     savedAt: Number(input.savedAt) || now,
     updatedAt: now,
   };
+}
+
+// Follow-along settings saved with a songsheet: its tuning, capo, how strict
+// chords are, and wait or play. Mirrored by cleanListen in
+// electron/library-fs.cjs; its self-check compares the two.
+const TUNING_IDS = ['standard', 'dropD', 'halfDown', 'wholeDown', 'dadgad', 'openG', 'openD', 'custom'];
+export function cleanListen(l) {
+  if (!l || typeof l !== 'object') return null;
+  const tuning = Array.isArray(l.tuning) && l.tuning.length === 6 && l.tuning.every((n) => Number.isInteger(n) && n >= 28 && n <= 76)
+    ? [...l.tuning] : null;
+  return {
+    tuningId: TUNING_IDS.includes(l.tuningId) ? l.tuningId : 'standard',
+    tuning,
+    capo: Math.min(12, Math.max(0, Math.round(Number(l.capo) || 0))),
+    strictness: ['lenient', 'strict', 'bass'].includes(l.strictness) ? l.strictness : 'lenient',
+    mode: l.mode === 'play' ? 'play' : 'wait',
+  };
+}
+
+// Pages whose reading someone corrected, keyed by the SHA-1 of the page's
+// clean image — so re-saving keeps them and a new scan (new pixels) does not
+// inherit them. Pages nobody touched are not stored at all: reading them again
+// is quick and gets better when the reader does. Compact on purpose: a note is
+// [string, fret|null, techniques, x, y, w, h, flags] (flags: 1 set by hand,
+// 2 confirmed, 4 was unsure). Bounded to 300 pages, 400 events a system and
+// about a megabyte; the oldest edits go first. Mirrored in library-fs.cjs.
+const r1 = (v) => Math.round((Number(v) || 0) * 10) / 10;
+export function cleanTranscript(t) {
+  if (!t || typeof t !== 'object' || !t.pages || typeof t.pages !== 'object') return null;
+  const entries = Object.entries(t.pages)
+    .filter(([hash, pg]) => /^[0-9a-f]{40}$/.test(hash) && pg && Array.isArray(pg.systems))
+    .sort((a, b) => (Number(b[1].at) || 0) - (Number(a[1].at) || 0))
+    .slice(0, 300);
+  const pages = {};
+  let size = 0;
+  for (const [hash, pg] of entries) {
+    const clean = {
+      at: Number(pg.at) || 0,
+      model: String(pg.model ?? '').slice(0, 40),
+      w: Math.max(0, Math.round(Number(pg.w) || 0)),
+      h: Math.max(0, Math.round(Number(pg.h) || 0)),
+      systems: pg.systems.slice(0, 8).map((sys) => ({
+        lines: (Array.isArray(sys?.lines) ? sys.lines : []).slice(0, 6).map(r1),
+        events: (Array.isArray(sys?.events) ? sys.events : []).slice(0, 400).map((ev) => ({
+          x: r1(ev?.x),
+          n: (Array.isArray(ev?.n) ? ev.n : []).slice(0, 6)
+            .filter((n) => Array.isArray(n) && Number.isInteger(n[0]) && n[0] >= 1 && n[0] <= 6
+              && (n[1] === null || (Number.isInteger(n[1]) && n[1] >= 0 && n[1] <= 24)))
+            .map((n) => [n[0], n[1], String(n[2] ?? '').replace(/[^a-z0-9~/\\()<>]/g, '').slice(0, 12), r1(n[3]), r1(n[4]), r1(n[5]), r1(n[6]), (Number(n[7]) || 0) & 7]),
+        })).filter((ev) => ev.n.length),
+      })),
+    };
+    size += JSON.stringify(clean).length;
+    if (size > 1_000_000) break;
+    pages[hash] = clean;
+  }
+  return Object.keys(pages).length ? { v: 1, pages } : null;
 }
 
 export const pageKey = (sheetId, index) => `${sheetId}:${String(index).padStart(4, '0')}`;
@@ -132,7 +191,8 @@ async function idbSave(meta, pages, thumb) {
   const pageStore = tx.objectStore(PAGES);
   const prev = await reqValue(sheetStore.get(id)).catch(() => null);
   const sheet = normaliseSheet({
-    artist: prev?.artist, notes: prev?.notes, practice: prev?.practice, savedAt: prev?.savedAt, ...defined(meta), id, pageCount: pages.length,
+    artist: prev?.artist, notes: prev?.notes, practice: prev?.practice, listen: prev?.listen, transcript: prev?.transcript,
+    savedAt: prev?.savedAt, ...defined(meta), id, pageCount: pages.length,
   });
   // Replacing a sheet must not leave the previous run's pages behind.
   const stale = await reqValue(pageStore.index('sheetId').getAllKeys(IDBKeyRange.only(sheet.id))).catch(() => []);
@@ -180,7 +240,7 @@ async function idbUpdate(id, patch) {
   const prev = await reqValue(store.get(id));
   if (!prev) throw new Error('That songsheet is no longer stored.');
   const allowed = {};
-  for (const k of ['title', 'artist', 'notes', 'look', 'paper', 'practice']) if (patch[k] !== undefined) allowed[k] = patch[k];
+  for (const k of ['title', 'artist', 'notes', 'look', 'paper', 'practice', 'listen', 'transcript']) if (patch[k] !== undefined) allowed[k] = patch[k];
   const sheet = { ...normaliseSheet({ ...prev, ...allowed }), thumb: prev.thumb || null };
   store.put(sheet);
   await done(tx);
@@ -237,8 +297,8 @@ export async function getSheet(id) {
   };
 }
 
-// Title, artist, notes, look, paper, practice pace: the edits that need no
-// page rewritten.
+// Title, artist, notes, look, paper, practice pace, follow-along settings,
+// corrected readings: the edits that need no page rewritten.
 export async function updateSheet(id, patch = {}) {
   const lib = folder();
   if (!lib) return idbUpdate(id, patch);
@@ -381,6 +441,21 @@ export function selfCheck(assert) {
   assert.equal(s.artist, '', 'no artist unless someone typed one');
   assert.deepEqual(s.practice, { speed: 1, songBpm: 0 }, 'real speed, no tempo, until someone sets them');
   assert.deepEqual(normaliseSheet({ practice: { speed: 9, songBpm: 1000 } }).practice, { speed: 2, songBpm: 0 });
+  assert.equal(s.listen, null, 'no follow-along settings until someone sets them');
+  assert.deepEqual(cleanListen({ tuningId: 'dropD', capo: 40, strictness: 'x', mode: 'play' }),
+    { tuningId: 'dropD', tuning: null, capo: 12, strictness: 'lenient', mode: 'play' });
+  const hash = 'a'.repeat(40);
+  const tr = cleanTranscript({ pages: {
+    [hash]: { at: 5, model: 'm1', w: 900, h: 200, systems: [{ lines: [10.04, 20, 30, 40, 50, 60], events: [
+      { x: 12.34, n: [[1, 3, 'h', 10, 5, 8, 12, 1], [7, 3, '', 0, 0, 0, 0, 0], [2, 30, '', 0, 0, 0, 0, 0], [6, null, 'x', 1, 1, 1, 1, 9]] },
+      { x: 20, n: [] },
+    ] }] },
+    'not-a-hash': { systems: [] },
+  } });
+  assert.deepEqual(Object.keys(tr.pages), [hash], 'only real page hashes');
+  assert.deepEqual(tr.pages[hash].systems[0].events, [{ x: 12.3, n: [[1, 3, 'h', 10, 5, 8, 12, 1], [6, null, 'x', 1, 1, 1, 1, 1]] }],
+    'bad strings and frets dropped, empty events dropped, flags bounded');
+  assert.equal(cleanTranscript({ pages: {} }), null);
   assert.equal(normaliseSheet({ notes: 'n'.repeat(6000) }).notes.length, 5000, 'notes are bounded');
   assert.deepEqual(defined({ a: 1, b: undefined, c: null }), { a: 1, c: null }, 'only undefined means "not mentioned"');
   assert.equal(relayed(new Error("Error invoking remote method 'library:save': Error: Disk full")).message, 'Disk full');

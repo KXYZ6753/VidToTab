@@ -1,0 +1,25 @@
+{
+  "video": "yUka8hbTivY",
+  "page": "cap-014",
+  "tStart": 75.75,
+  "sha1": "7736d159f6cd70c41763d7b243928604c6815715",
+  "systems": [
+    {
+      "events": [
+        "5:2",
+        "3:2",
+        "2:3 6:x",
+        "5:2",
+        "2:3",
+        "2:3 5:2",
+        "2:3 6:x",
+        "1:0"
+      ]
+    }
+  ],
+  "comments": "No barlines. Same notes as cap-011 (a repeat of that phrase): two 'x' mutes on low E each under a B-string 3, one A-string 2 under a B-string 3. Right half of staff empty. / No barlines. Same content as cap-011: two muted x's on low E stacked under 3s on B, one 3 on B stacked over 2 on A. Rest of the staff empty.",
+  "by": [
+    "A",
+    "B"
+  ]
+}

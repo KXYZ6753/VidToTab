@@ -41,7 +41,7 @@ const PAGE_RE = /^page-\d{3,4}(?:-[0-9a-f]{8})?(?:-original)?\.png$/;
 const HASH_RE = /^[0-9a-f]{40}$/;
 // Windows refuses these as names whatever follows the dot.
 const RESERVED_RE = /^(con|prn|aux|nul|com\d|lpt\d)(\..*)?$/i;
-const EDITABLE = ['title', 'artist', 'notes', 'look', 'paper', 'practice'];
+const EDITABLE = ['title', 'artist', 'notes', 'look', 'paper', 'practice', 'listen', 'transcript'];
 
 function assertId(id) {
   if (typeof id !== 'string' || !ID_RE.test(id)) throw new Error('That is not a songsheet id.');
@@ -70,6 +70,55 @@ function childFile(dir, name) {
 }
 
 const str = (v, max) => String(v ?? '').slice(0, max);
+
+// cleanListen and cleanTranscript in public/lib/library.js, mirrored: this
+// file is packed inside the app and cannot import the browser's module, so
+// the self-check below runs both on the same input instead.
+const TUNING_IDS = ['standard', 'dropD', 'halfDown', 'wholeDown', 'dadgad', 'openG', 'openD', 'custom'];
+function cleanListen(l) {
+  if (!l || typeof l !== 'object') return null;
+  const tuning = Array.isArray(l.tuning) && l.tuning.length === 6 && l.tuning.every((n) => Number.isInteger(n) && n >= 28 && n <= 76)
+    ? [...l.tuning] : null;
+  return {
+    tuningId: TUNING_IDS.includes(l.tuningId) ? l.tuningId : 'standard',
+    tuning,
+    capo: Math.min(12, Math.max(0, Math.round(Number(l.capo) || 0))),
+    strictness: ['lenient', 'strict', 'bass'].includes(l.strictness) ? l.strictness : 'lenient',
+    mode: l.mode === 'play' ? 'play' : 'wait',
+  };
+}
+const r1 = (v) => Math.round((Number(v) || 0) * 10) / 10;
+function cleanTranscript(t) {
+  if (!t || typeof t !== 'object' || !t.pages || typeof t.pages !== 'object') return null;
+  const entries = Object.entries(t.pages)
+    .filter(([hash, pg]) => /^[0-9a-f]{40}$/.test(hash) && pg && Array.isArray(pg.systems))
+    .sort((a, b) => (Number(b[1].at) || 0) - (Number(a[1].at) || 0))
+    .slice(0, 300);
+  const pages = {};
+  let size = 0;
+  for (const [hash, pg] of entries) {
+    const clean = {
+      at: Number(pg.at) || 0,
+      model: String(pg.model ?? '').slice(0, 40),
+      w: Math.max(0, Math.round(Number(pg.w) || 0)),
+      h: Math.max(0, Math.round(Number(pg.h) || 0)),
+      systems: pg.systems.slice(0, 8).map((sys) => ({
+        lines: (Array.isArray(sys?.lines) ? sys.lines : []).slice(0, 6).map(r1),
+        events: (Array.isArray(sys?.events) ? sys.events : []).slice(0, 400).map((ev) => ({
+          x: r1(ev?.x),
+          n: (Array.isArray(ev?.n) ? ev.n : []).slice(0, 6)
+            .filter((n) => Array.isArray(n) && Number.isInteger(n[0]) && n[0] >= 1 && n[0] <= 6
+              && (n[1] === null || (Number.isInteger(n[1]) && n[1] >= 0 && n[1] <= 24)))
+            .map((n) => [n[0], n[1], String(n[2] ?? '').replace(/[^a-z0-9~/\\()<>]/g, '').slice(0, 12), r1(n[3]), r1(n[4]), r1(n[5]), r1(n[6]), (Number(n[7]) || 0) & 7]),
+        })).filter((ev) => ev.n.length),
+      })),
+    };
+    size += JSON.stringify(clean).length;
+    if (size > 1_000_000) break;
+    pages[hash] = clean;
+  }
+  return Object.keys(pages).length ? { v: 1, pages } : null;
+}
 const sha1 = (buf) => require('node:crypto').createHash('sha1').update(buf).digest('hex');
 
 // Windows refuses to rename a folder while anything holds a file inside it —
@@ -104,6 +153,8 @@ function cleanMeta(input = {}, previous = {}) {
       speed: Math.min(2, Math.max(0.25, Math.round((Number(pick('practice')?.speed) || 1) * 100) / 100)),
       songBpm: (() => { const b = Math.round(Number(pick('practice')?.songBpm) || 0); return b >= 20 && b <= 400 ? b : 0; })(),
     },
+    listen: cleanListen(pick('listen')),
+    transcript: cleanTranscript(pick('transcript')),
     url: str(pick('url'), 2000),
     channel: str(pick('channel'), 300),
     duration: Number(pick('duration')) || 0,
@@ -233,6 +284,7 @@ function summary(rec, dir, extra = {}) {
     artist: str(rec.artist, 200),
     notes: str(rec.notes, 5000),
     practice: rec.practice && typeof rec.practice === 'object' ? rec.practice : { speed: 1, songBpm: 0 },
+    listen: cleanListen(rec.listen),
     url: str(rec.url, 2000),
     channel: str(rec.channel, 300),
     duration: Number(rec.duration) || 0,
@@ -308,7 +360,9 @@ async function get(root, id) {
       color,
     });
   }
-  return { ...summary(rec, dir, { thumb: await readThumb(dir, rec) }), pageCount: pages.length, missing, pages };
+  // The corrected readings travel only with the full songsheet, not in the
+  // list the library screen draws from.
+  return { ...summary(rec, dir, { thumb: await readThumb(dir, rec) }), transcript: cleanTranscript(rec.transcript), pageCount: pages.length, missing, pages };
 }
 
 // pages: [{ tStart, tEnd, alsoAt, w, h, clean: bytes, color: bytes|null }]
@@ -598,7 +652,9 @@ async function selfCheck() {
     assert.notEqual(cleanMeta({ ...input, updatedAt: 77 }).updatedAt, 77, 'an ordinary save is stamped now');
     const web = normaliseSheet(input);
     const desk = cleanMeta(input);
-    for (const k of ['id', 'title', 'artist', 'notes', 'practice', 'url', 'channel', 'duration', 'recipe', 'look', 'paper', 'savedAt']) {
+    input.listen = { tuningId: 'custom', tuning: [62, 57, 55, 50, 45, 38], capo: 3.6, strictness: 'bass', mode: 'x' };
+    input.transcript = { pages: { ['b'.repeat(40)]: { at: 9, model: 'm', w: 9.4, h: 3, systems: [{ lines: [1.26], events: [{ x: 3.33, n: [[2, 12, 'hx!', 1, 2, 3, 4, 3], [9, 1, '', 0, 0, 0, 0, 0]] }] }] }, bad: {} } };
+    for (const k of ['id', 'title', 'artist', 'notes', 'practice', 'listen', 'transcript', 'url', 'channel', 'duration', 'recipe', 'look', 'paper', 'savedAt']) {
       assert.deepEqual(desk[k], web[k], `desktop and browser disagree about ${k}`);
     }
   } finally {

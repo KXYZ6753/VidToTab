@@ -1,0 +1,30 @@
+{
+  "video": "MENRbBUBYd4",
+  "page": "cap-019",
+  "tStart": 106,
+  "sha1": "983bd3a5f0e4b15f30b1863d3c2d066f032abcc6",
+  "systems": [
+    {
+      "events": [
+        "5:2",
+        "2:0",
+        "2:0 6:x",
+        "2:0",
+        "2:0 5:2",
+        "3:2 6:x",
+        "2:3 6:x",
+        "2:1",
+        "6:x",
+        "2:0",
+        "6:x",
+        "3:2",
+        "4:2 5:2 6:0"
+      ]
+    }
+  ],
+  "comments": "Character-grid tab; right ~45% of the staff is empty. No barlines. / Even 120px (2x) grid; column alignment confirmed by blob centres. Right ~40% of the staff is empty. No barlines on the page. Panel border below staff ignored.",
+  "by": [
+    "A",
+    "B"
+  ]
+}

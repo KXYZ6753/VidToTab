@@ -1,0 +1,17 @@
+{
+  "video": "yUka8hbTivY",
+  "page": "cap-007",
+  "tStart": 44,
+  "sha1": "eae36338715bc18eb2678386cb16d31591a326d3",
+  "systems": [
+    {
+      "events": [
+        "5:2", "4:4", "3:2", "2:2", "2:3",
+        "1:5 2:3 3:2 4:0", "1:5 2:3 3:2", "1:5 2:3 3:2", "1:5 2:3 3:2", "1:5 2:3 3:2",
+        "2:3"
+      ]
+    }
+  ],
+  "comments": "No barlines. Bm arpeggio then a D chord (e5/B3/G2/D0) followed by four repeated e5/B3/G2 triads and a final lone B3. Dashes between digits are line segments only. Right third of staff empty.",
+  "by": "A"
+}

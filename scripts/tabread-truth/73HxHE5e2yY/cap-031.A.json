@@ -1,0 +1,18 @@
+{
+  "video": "73HxHE5e2yY",
+  "page": "cap-031",
+  "tStart": 153.25,
+  "sha1": "c7eb3a350716a1a2dd99a78bd424ca1957f79f09",
+  "systems": [
+    {
+      "events": [
+        "1:3 2:0 3:0 4:0 5:2 6:3",
+        "|",
+        "2:3 3:2 4:0 5:2",
+        "|"
+      ]
+    }
+  ],
+  "comments": "One G chord in bar 1, one Bm7 chord (strings 2-5) in bar 2. Boxed section letter 'D' at top-left is a rehearsal mark, ignored. The final '|' is the thin vertical line closing the staff at the right edge (end of measure 2); the line at the left edge where the staff starts is not counted as a barline.",
+  "by": "A"
+}

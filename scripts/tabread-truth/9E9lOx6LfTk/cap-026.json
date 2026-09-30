@@ -1,0 +1,39 @@
+{
+  "video": "9E9lOx6LfTk",
+  "page": "cap-026",
+  "tStart": 74.5,
+  "sha1": "0efec0a13af73c50f46047c046d361500eab8be9",
+  "systems": [
+    {
+      "events": [
+        "1:3?",
+        "|",
+        "1:5 6:0",
+        "1:/7",
+        "1:0 2:0 5:x",
+        "1:3",
+        "2:3 6:0",
+        "1:0",
+        "2:0 4:x",
+        "2:h3",
+        "|",
+        "1:0 5:3",
+        "5:x",
+        "2:3",
+        "1:0 5:2",
+        "1:3",
+        "1:5 2:0 3:0 5:x",
+        "1:/7",
+        "|",
+        "1:0 6:0",
+        "5:x"
+      ]
+    }
+  ],
+  "comments": "First digit on string 1 is cut by the left page edge; reads as 3 (could be 8). Two 5-to-7 slides on string 1 are drawn with a rising slanted stroke, recorded as /7; their arcs (and any letter above them) run into the header / page top. The arc over 0-3 on string 1 in measure 2 also runs into the header, so its letter (if any) is cut off and no mark was added; the arc over 0-3 on string 2 has a visible H. Staff continues past the right edge. / Settled: an arc whose H/P letter is cut off by the page edge carries no mark (only written letters are transcribed).",
+  "by": [
+    "A",
+    "B",
+    "settled"
+  ]
+}

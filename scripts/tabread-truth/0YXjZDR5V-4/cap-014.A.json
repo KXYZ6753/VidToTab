@@ -1,0 +1,9 @@
+{ "video": "0YXjZDR5V-4", "page": "cap-014", "tStart": 86.5, "sha1": "fcd4044afad2613aeebe1ba00e7464534e583a29",
+  "systems": [ { "events": [
+    "2:8", "1:12 6:8", "1:10", "6:x", "2:8", "2:8 6:8", "6:x",
+    "1:3", "1:3 4:0", "1:2 6:x", "1:0", "4:0", "1:2", "6:x", "1:3", "6:0",
+    "1:3 2:0 3:0 4:2 5:2 6:0",
+    "1:3", "1:3 4:0", "1:2", "1:0", "1:2", "1:3", "6:0",
+    "1:3 2:0 3:0 4:2 5:2 6:0"
+  ] } ],
+  "comments": "Text tab in a proportional font, so a few notes fall between columns: after 1:0 the string-1 notes 2 and 3 sit half a column off the string-4 0 / string-6 x / string-6 0 notes, so they are separate events. The same thing happens with the last 1:3 and the 6:0 just before the final G chord. The double-headed vertical arrow right after the first G chord is a strum mark and was ignored. '12' and '10' on string 1 are two-digit frets with dashes touching.", "by": "A" }

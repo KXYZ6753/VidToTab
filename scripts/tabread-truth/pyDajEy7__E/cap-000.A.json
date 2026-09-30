@@ -1,0 +1,43 @@
+{
+  "video": "pyDajEy7__E",
+  "page": "cap-000",
+  "tStart": 0,
+  "sha1": "68d3600809a20baeb7497b26631cc45a61d1ccfe",
+  "systems": [
+    {
+      "events": [
+        "1:4",
+        "2:2",
+        "2:4",
+        "2:5",
+        "2:7",
+        "3:4",
+        "1:5",
+        "|",
+        "1:4",
+        "1:0",
+        "1:2",
+        "2:2",
+        "2:2",
+        "2:4",
+        "|",
+        "2:5",
+        "3:2",
+        "2:2",
+        "2:4",
+        "2:5",
+        "2:2",
+        "2:4",
+        "|",
+        "1:0",
+        "1:2",
+        "2:4",
+        "1:5",
+        "1:4",
+        "|"
+      ]
+    }
+  ],
+  "comments": "Single-note melody, all digits clear. Final '|' is the vertical line closing the staff at the right edge (spans all six strings). No line at the left edge.",
+  "by": "A"
+}

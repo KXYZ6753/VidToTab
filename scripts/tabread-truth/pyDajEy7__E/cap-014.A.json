@@ -1,0 +1,39 @@
+{
+  "video": "pyDajEy7__E",
+  "page": "cap-014",
+  "tStart": 103.5,
+  "sha1": "4c13457e2bdbfe34edbca3bcb9df004c7f60d4c9",
+  "systems": [
+    {
+      "events": [
+        "1:7",
+        "2:5",
+        "1:2",
+        "1:3",
+        "1:5",
+        "3:7",
+        "1:8",
+        "|",
+        "1:7",
+        "2:8",
+        "1:10",
+        "1:9",
+        "1:10",
+        "1:12",
+        "|",
+        "1:8",
+        "1:3",
+        "1:5",
+        "1:7",
+        "|",
+        "1:7",
+        "1:7",
+        "1:5",
+        "1:7",
+        "|"
+      ]
+    }
+  ],
+  "comments": "Staff ends with a final double barline (thin + thick) at the right edge, recorded as a single '|'. A faint grey dotted vertical line just left of the last 1:7 looks like a playhead/cursor, ignored.",
+  "by": "A"
+}

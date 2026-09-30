@@ -1,0 +1,29 @@
+{
+  "video": "73HxHE5e2yY",
+  "page": "cap-038",
+  "tStart": 183.5,
+  "sha1": "da5f575af4512f209753b70df7015490dc21fb7b",
+  "systems": [
+    {
+      "events": [
+        "1:3 2:0 3:0 4:0 5:2 6:3",
+        "1:3 2:0 3:0 4:0 5:2 6:3",
+        "1:3 2:0 3:0 4:0 5:2 6:3",
+        "1:3 2:0 3:0 4:0 5:2 6:3",
+        "1:3 2:0 3:0 4:0 5:2 6:3",
+        "|",
+        "1:0 2:2 3:2 4:2 5:0",
+        "1:0 2:2 3:2 4:2 5:0",
+        "2:3 3:2 4:0 5:2",
+        "2:3 3:2 4:0 5:2",
+        "2:3 3:2 4:0 5:2",
+        "|"
+      ]
+    }
+  ],
+  "comments": "G x5, barline, A x2 (strings 1-5), Bm7 x3 (strings 2-5). The final '|' is the thin vertical line closing the staff at the right edge (end of measure 2); the line at the left edge where the staff starts is not counted as a barline. / G bar: 5 six-string chords. Second bar: 2 A chords (strings 1-5) then 3 Bm7 chords (strings 2-5). Grey arc residue ignored.",
+  "by": [
+    "A",
+    "B"
+  ]
+}

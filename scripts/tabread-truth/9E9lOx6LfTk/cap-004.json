@@ -1,0 +1,36 @@
+{
+  "video": "9E9lOx6LfTk",
+  "page": "cap-004",
+  "tStart": 12.75,
+  "sha1": "7cfef71fe9055d9aeff6561d36d37d5c9d8b68e5",
+  "systems": [
+    {
+      "events": [
+        "|",
+        "1:0 2:0 3:0 4:2 5:2 6:0",
+        "1:0 2:0 3:0",
+        "1:0 2:0 3:0 6:x",
+        "2:3",
+        "1:0",
+        "|",
+        "6:0",
+        "1:0",
+        "2:3",
+        "1:0 2:0 3:0 4:2 5:x",
+        "|",
+        "2:0 6:0",
+        "6:0",
+        "3:2 6:0",
+        "6:0",
+        "2:0 6:0",
+        "6:0",
+        "2:1 6:0"
+      ]
+    }
+  ],
+  "comments": "Page opens with a barline (no bar tail before it). Up/down strum arrows through the first two chords ignored. The X on string 6 sits under the third 0-0-0 chord (same vertical). Grey speck in bar 2 is not a note. / Page starts with a barline a little right of where the staff lines begin (lines extend left of it), so it is recorded as a barline. Strum arrows ignored. Staff continues past the right edge, no closing barline.",
+  "by": [
+    "A",
+    "B"
+  ]
+}

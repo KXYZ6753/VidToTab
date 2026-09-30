@@ -1,0 +1,32 @@
+{
+  "video": "Fv3pCR1Btjk",
+  "page": "cap-015",
+  "tStart": 82,
+  "sha1": "e4eb62e75129566284f43d04273e20e4e4a5a0b6",
+  "systems": [
+    {
+      "events": [
+        "2:1 6:3",
+        "2:h3",
+        "3:0",
+        "6:3",
+        "6:x",
+        "2:0",
+        "2:1 6:1",
+        "2:h3",
+        "3:0",
+        "3:0 6:x",
+        "2:3",
+        "2:1 6:0",
+        "3:0 6:x",
+        "3:h2",
+        "3:3 4:1",
+        "3:2",
+        "3:0 6:1",
+        "2:3 3:0 6:3"
+      ]
+    }
+  ],
+  "comments": "Hammer-ons written inline (\"1h3\" twice on string 2, \"0h2\" on string 3). The final G chord has a wavy rolled-chord sign in front (ignored). No barlines; right part of the staff empty. Chord names ignored.",
+  "by": "B"
+}

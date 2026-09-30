@@ -1,0 +1,29 @@
+{
+  "video": "yT9gKKwBeVw",
+  "page": "cap-006",
+  "tStart": 48.75,
+  "sha1": "79894076a444b24949e87422f3f815b5a0f0fe88",
+  "systems": [
+    {
+      "events": [
+        "2:3 6:0",
+        "2:1",
+        "6:0",
+        "2:3",
+        "6:0",
+        "1:3",
+        "6:0",
+        "1:1",
+        "6:0",
+        "6:0",
+        "2:3 6:0",
+        "2:1 6:0"
+      ]
+    }
+  ],
+  "comments": "Sparse dash tab; first column (2:3 over 6:0) sits at the very left edge but is fully visible. Right ~40% of the staff is empty. No barlines. / ASCII-dash style, no barlines.",
+  "by": [
+    "A",
+    "B"
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "video": "tabsheet-styx",
+  "page": "cap-000",
+  "tStart": 0,
+  "sha1": "0362931bfd38e3eb39c0fda6b045b3de9a073bb9",
+  "systems": [
+    {
+      "events": [
+        "1:0",
+        "1:7",
+        "1:4",
+        "|",
+        "1:2",
+        "1:4",
+        "2:2",
+        "1:7",
+        "1:4",
+        "|",
+        "1:2",
+        "1:4",
+        "2:2",
+        "|",
+        "1:0",
+        "2:4",
+        "1:4",
+        "|"
+      ]
+    }
+  ],
+  "comments": "Grey rest symbols (a dash on string 4 in measure 1, a small grey quarter-rest squiggle on strings 2-3 at the start of measure 4) - not notes, ignored. Final '|' is the staff's closing line at the right edge. / Single-note line, all digits clear. Gray dash on string 4 (measure 1) and small gray squiggle between strings 2-3 (start of last measure) are rests, ignored. Last '|' is the closing line at the right end.",
+  "by": [
+    "A",
+    "B"
+  ]
+}

@@ -1,0 +1,39 @@
+{
+  "video": "pyDajEy7__E",
+  "page": "cap-008",
+  "tStart": 58.25,
+  "sha1": "bb3df8503dbb17fbc038b30950d39fe2be51e539",
+  "systems": [
+    {
+      "events": [
+        "1:2",
+        "1:4",
+        "1:5",
+        "|",
+        "1:7",
+        "1:7",
+        "1:5",
+        "|",
+        "1:3",
+        "1:3",
+        "1:2",
+        "1:0",
+        "1:2",
+        "|",
+        "1:3",
+        "1:7",
+        "1:7",
+        "1:5",
+        "|",
+        "1:3",
+        "1:3",
+        "1:5",
+        "3:7",
+        "1:8",
+        "|"
+      ]
+    }
+  ],
+  "comments": "Faint grey rest marks on string 4 at the start of measures 1 and 2 - not notes, ignored. Final '|' is the staff's closing line at the right edge.",
+  "by": "A"
+}

@@ -1,0 +1,22 @@
+{
+  "video": "eNhFKmm413U",
+  "page": "cap-010",
+  "tStart": 93.25,
+  "sha1": "9cb46451cad260a70d98234fcfa592855a0759dd",
+  "systems": [
+    {
+      "events": [
+        "|",
+        "4:(5)", "3:(5)", "|",
+        "2:(12) 3:(12)", "3:(7)", "|",
+        "1:0 3:(7)", "2:3", "2:1", "|",
+        "2:3", "2:1", "2:0", "|",
+        "2:1", "2:0", "3:2", "3:0", "|",
+        "4:2", "4:2", "4:4", "|",
+        "3:0 5:3"
+      ]
+    }
+  ],
+  "comments": "Solid vertical line at the start of the staff recorded as a barline. Parenthesised notes: (5) on D and G, then a 12/12 dyad on B+G enclosed by one tall pair of brackets, then (7) on G tied across the barline to another (7) on G sounding with the open high e ('pizz.' text below ignored). Rest symbol near the B string in bar 2 ignored. Last C chord complete; no closing barline.",
+  "by": "A"
+}

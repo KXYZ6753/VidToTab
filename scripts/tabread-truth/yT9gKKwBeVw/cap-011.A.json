@@ -1,0 +1,6 @@
+{ "video": "yT9gKKwBeVw", "page": "cap-011", "tStart": 78.75, "sha1": "2df41092d476419c6c776bd4b3573338b8d332fe",
+  "systems": [ { "events": [
+    "2:1", "2:3", "2:1", "1:3", "1:0", "1:0 6:0", "6:x", "6:0", "2:1", "1:0",
+    "2:3 6:2", "6:x", "2:0", "6:2", "3:0", "6:x", "3:2 4:2 5:0", "6:x", "2:1", "5:0"
+  ] } ],
+  "comments": "Slur arcs (2:1-3-1 and 1:3-0) carry no h/p letters, so no technique marks. The last 5:0 sits just past the end of the dashes at the right edge but is fully visible. No barlines.", "by": "A" }

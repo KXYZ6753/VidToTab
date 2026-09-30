@@ -1,0 +1,35 @@
+{
+  "video": "9E9lOx6LfTk",
+  "page": "cap-017",
+  "tStart": 48.75,
+  "sha1": "8f7d9f95ca94b689ee0d5c136feffce43b04acff",
+  "systems": [
+    {
+      "events": [
+        "3:0?",
+        "3:h2",
+        "|",
+        "2:0 5:3",
+        "1:3 5:3",
+        "1:2",
+        "5:2",
+        "2:3",
+        "5:2",
+        "3:2",
+        "|",
+        "6:0",
+        "3:0",
+        "3:2 6:0",
+        "2:3",
+        "2:0 5:5",
+        "4:2 5:5",
+        "2:0",
+        "|",
+        "3:2 5:0",
+        "3:2 5:0"
+      ]
+    }
+  ],
+  "comments": "First note (0 on string 3) is clipped by the left page edge but still reads as 0. The arc from it to the 2 has a visible H. Staff continues past the right edge.",
+  "by": "B"
+}

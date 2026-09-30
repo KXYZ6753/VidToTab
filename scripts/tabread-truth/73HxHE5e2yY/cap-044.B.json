@@ -1,0 +1,17 @@
+{
+  "video": "73HxHE5e2yY",
+  "page": "cap-044",
+  "tStart": 225,
+  "sha1": "5b939193143275af4b5027e49f8faa59312bdd35",
+  "systems": [
+    {
+      "events": [
+        "1:3 2:0 3:0 4:0 5:2 6:3",
+        "|",
+        "|"
+      ]
+    }
+  ],
+  "comments": "One G strum (all six strings), barline, then an empty measure holding only a whole rest (block on string 2, ignored), ending in a final double barline (thin+thick) recorded as a single closing '|'. Heavy grey video residue (guitar neck, arcs) over the first bar ignored.",
+  "by": "B"
+}

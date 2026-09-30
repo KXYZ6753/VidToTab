@@ -1,0 +1,26 @@
+{
+  "video": "73HxHE5e2yY",
+  "page": "cap-000",
+  "tStart": 1.25,
+  "sha1": "19b0e02328a77fc59036a1f04b9396b7c96d6e14",
+  "systems": [
+    {
+      "events": [
+        "2:0",
+        "2:0",
+        "2:2",
+        "2:3",
+        "1:5",
+        "|",
+        "1:4",
+        "1:5",
+        "1:4",
+        "1:0",
+        "2:0",
+        "|"
+      ]
+    }
+  ],
+  "comments": "Intro, single notes. Grey arcs above the staff and small grey dashes on the lines are leftover video, ignored. The final '|' is the thin vertical line closing the staff at the right edge (end of measure 2); the line at the left edge where the staff starts is not counted as a barline.",
+  "by": "A"
+}
