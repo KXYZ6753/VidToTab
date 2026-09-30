@@ -496,11 +496,91 @@ body[data-view="app"] .source-card { margin: 14px 0 0; }
 .practice-bar .spacer { flex: 1; }
 .practice-bar button { background: rgba(255, 255, 255, .12); border: none; color: inherit; font: inherit; font-weight: 600; padding: 7px 14px; border-radius: 9px; cursor: pointer; }
 .practice-bar button:hover { background: rgba(255, 255, 255, .2); }
+.practice-bar .pr-seg button { background: none; padding: 5px 12px; }
+.practice-bar .pr-seg button[aria-pressed="true"] { background: rgba(255, 255, 255, .16); color: #f2f2f4; }
 .practice-bar .quiet { color: #a9a9b2; }
 /* Big invisible tap targets so a phone or tablet turns pages by touch. */
 .practice-tap { position: absolute; top: 0; bottom: 56px; width: 28%; background: none; border: none; cursor: pointer; opacity: 0; }
 .practice-tap.prev { left: 0; }
 .practice-tap.next { right: 0; }
+
+/* Listen: the timer's controls step aside for the microphone's. */
+.ls-controls { display: none; align-items: center; gap: 6px; }
+.practice[data-listen] .ls-controls { display: flex; }
+.practice[data-listen="wait"] .pr-transport, .practice[data-listen="wait"] .pr-pace { display: none; }
+.practice-bar .ls-pill { display: inline-flex; align-items: center; gap: 8px; }
+.ls-pill svg { width: 16px; height: 16px; }
+.ls-pill-meter { width: 46px; height: 6px; border-radius: 3px; background: rgba(255, 255, 255, .12); overflow: hidden; }
+.ls-pill-meter span, .ls-meter span { display: block; height: 100%; width: 0; background: #52c77a; transition: width .08s linear; }
+#lsSetupBtn[aria-expanded="true"] { background: rgba(255, 255, 255, .22); }
+.ls-msg { position: absolute; left: 50%; bottom: 72px; z-index: 3; transform: translateX(-50%); max-width: min(640px, calc(100vw - 32px)); display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; padding: 10px 14px; border-radius: 12px; background: #26272d; border: 1px solid rgba(255, 255, 255, .12); box-shadow: 0 12px 30px -8px rgba(0, 0, 0, .8); font-size: 14px; }
+.ls-msg[hidden] { display: none; }
+.ls-msg button, .ls-setup button { background: rgba(255, 255, 255, .12); border: none; color: inherit; font: inherit; font-weight: 600; padding: 6px 12px; border-radius: 8px; cursor: pointer; }
+.ls-msg button:hover, .ls-setup button:hover { background: rgba(255, 255, 255, .2); }
+.ls-setup { max-height: calc(100vh - 90px); overflow-y: auto; }
+.ls-setup select { font: inherit; color: inherit; background: #2a2b31; border: 1px solid rgba(255, 255, 255, .16); border-radius: 8px; padding: 5px 8px; min-width: 0; }
+.ls-setup .ls-allow { background: var(--pr-accent); color: #1d1206; padding: 9px 14px; }
+.ls-setup .ls-allow:hover { background: #ff9d5c; }
+.ls-state { color: #c9c9d0; }
+.ls-live { display: flex; flex-direction: column; gap: 12px; }
+.ls-live[hidden] { display: none; }
+.ls-meter { height: 8px; border-radius: 4px; background: rgba(255, 255, 255, .1); overflow: hidden; }
+.ls-warn { color: #ffb561; font-size: 13px; }
+.ls-warn:empty { display: none; }
+.ls-tuner { display: grid; grid-template-columns: 56px 1fr; grid-template-rows: auto auto; align-items: center; gap: 4px 12px; }
+.ls-tuner-note { grid-row: span 2; font: 700 28px/1 var(--font); text-align: center; }
+.ls-tuner-scale { position: relative; height: 18px; border-radius: 4px; background: linear-gradient(90deg, transparent 45%, rgba(82, 199, 122, .35) 45% 55%, transparent 55%), rgba(255, 255, 255, .08); }
+.ls-tuner-scale span { position: absolute; top: 0; bottom: 0; left: 50%; width: 3px; margin-left: -1.5px; background: #ffb561; border-radius: 2px; transition: left .1s; }
+.ls-tuner-scale span.in { background: #52c77a; }
+.ls-row { display: flex; align-items: center; gap: 10px; }
+.ls-custom { display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; }
+.ls-custom[hidden] { display: none; }
+.ls-custom input { width: 100%; font: inherit; color: inherit; background: rgba(255, 255, 255, .08); border: 1px solid rgba(255, 255, 255, .16); border-radius: 6px; padding: 4px; text-align: center; }
+.ls-hint { color: #8d8d96; font-size: 12px; }
+/* What was read off the page, lit as it is heard. */
+.ls-layer { position: absolute; inset: 0; pointer-events: none; }
+.ls-note[data-state] { position: absolute; border-radius: 4px; border: 2px solid transparent; }
+.ls-note.current { border-color: var(--pr-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--pr-accent) 30%, transparent); }
+.ls-note.current.got { border-color: #52c77a; background: rgba(82, 199, 122, .18); }
+.ls-note.heard { background: rgba(82, 199, 122, .28); }
+.ls-note.skipped { background: rgba(160, 160, 170, .25); }
+.ls-note.missed { background: rgba(255, 138, 61, .15); }
+.ls-note.optional { border-style: dashed; }
+.ls-note.uncertain::after { content: '?'; position: absolute; top: -12px; right: -8px; font: 700 12px/1 var(--font); color: #ffb561; }
+.ls-note.wrong { animation: ls-wrong .45s; }
+@keyframes ls-wrong { 30% { border-color: #ff5d5d; background: rgba(255, 93, 93, .3); } }
+@media (prefers-reduced-motion: reduce) { .ls-note.wrong { animation: none; } .ls-tuner-scale span { transition: none; } }
+
+/* Fix-by-click: above practice, which is where it is opened from most. */
+.tab-edit { position: fixed; inset: 0; z-index: 70; display: flex; flex-direction: column; background: #111113; color: #f2f2f4; }
+.tab-edit[hidden] { display: none; }
+.te-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; padding: 10px 16px; background: rgba(255, 255, 255, .06); font-size: 14px; }
+.te-bar .spacer { flex: 1; }
+.te-bar button, .te-key { background: rgba(255, 255, 255, .12); border: none; color: inherit; font: inherit; font-weight: 600; padding: 6px 12px; border-radius: 8px; cursor: pointer; }
+.te-bar button:hover, .te-key:hover { background: rgba(255, 255, 255, .2); }
+.te-bar button:disabled { opacity: .4; cursor: default; }
+.te-status { font-variant-numeric: tabular-nums; color: #a9a9b2; }
+.te-status.warn { color: #ffb561; }
+.te-stage { position: relative; flex: 1; min-height: 0; overflow: auto; padding: 16px; display: grid; place-items: start center; }
+.te-page { position: relative; line-height: 0; background: #fff; border-radius: 6px; }
+.te-page img { display: block; max-width: calc(100vw - 32px); height: auto; }
+.te-notes { position: absolute; inset: 0; }
+.te-note { position: absolute; padding: 0; border: 2px solid rgba(64, 132, 255, .7); border-radius: 4px; background: rgba(64, 132, 255, .08); cursor: pointer; }
+.te-note.unsure { border-color: #ff9d2e; background: rgba(255, 157, 46, .16); }
+.te-note.edited { border-color: #3fb96b; }
+.te-note.selected { border-color: #f2f2f4; box-shadow: 0 0 0 3px rgba(64, 132, 255, .6); }
+.te-label { position: absolute; left: 50%; top: -18px; transform: translateX(-50%); font: 700 12px/1 var(--mono); padding: 2px 4px; border-radius: 4px; background: #1e1f24; color: #f2f2f4; white-space: nowrap; }
+.te-note.unsure .te-label { background: #ff9d2e; color: #1d1206; }
+.te-pop { position: absolute; z-index: 2; width: 330px; padding: 12px; border-radius: 12px; background: #1e1f24; border: 1px solid rgba(255, 255, 255, .12); box-shadow: 0 20px 50px -10px rgba(0, 0, 0, .8); display: flex; flex-direction: column; gap: 8px; line-height: 1.3; }
+.te-pop[hidden] { display: none; }
+.te-pop-title { font-weight: 650; }
+.te-keys { display: flex; flex-wrap: wrap; gap: 4px; }
+.te-key { min-width: 34px; padding: 5px 6px; font-variant-numeric: tabular-nums; }
+.te-key.wide { padding: 5px 10px; }
+.te-key[aria-pressed="true"] { background: var(--pr-accent, #ff8a3d); color: #1d1206; }
+.te-key.danger { color: #ff8080; }
+.te-help { padding: 8px 16px 12px; color: #8d8d96; font-size: 12px; }
+.te-help kbd { font: 11px var(--mono); padding: 1px 5px; border-radius: 4px; background: rgba(255, 255, 255, .1); }
 
 .drop-veil { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; background: color-mix(in srgb, var(--bg) 75%, transparent); backdrop-filter: blur(3px); pointer-events: none; }
 .drop-veil div { border: 2px dashed var(--accent); border-radius: 20px; padding: 40px 60px; font-size: 20px; font-weight: 650; color: var(--accent); background: var(--surface); }
@@ -965,6 +1045,8 @@ button.chip { cursor: pointer; }
       <div class="review-controls">
         <button type="button" class="btn" id="practiceBtn" title="Full-screen pages for playing along (P)">
           <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4h5a2 2 0 0 1 2 2v9a2 2 0 0 0-2-2H3Z"/><path d="M17 4h-5a2 2 0 0 0-2 2v9a2 2 0 0 1 2-2h5Z"/></svg>Practice</button>
+        <button type="button" class="btn" id="notesBtn" title="See and fix the notes read off each page (E)">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h14M3 10h14M3 14h14"/><circle cx="7" cy="10" r="1.6" fill="currentColor"/><circle cx="13" cy="6" r="1.6" fill="currentColor"/></svg>Notes</button>
         <!-- Filled from shared/look.js so the preview, the PNG and the PDF all
              offer exactly the same set. -->
         <div class="seg" id="lookSeg" role="group" aria-label="Page look"></div>
@@ -1118,8 +1200,21 @@ button.chip { cursor: pointer; }
   <button type="button" id="practicePrev" class="practice-tap prev" aria-label="Previous page"></button>
   <button type="button" id="practiceNext" class="practice-tap next" aria-label="Next page"></button>
   <div class="pr-progress" aria-hidden="true"><div id="practiceProgress"></div></div>
+  <div class="ls-msg" id="listenMsg" role="status" aria-live="polite" hidden></div>
   <div class="practice-bar">
     <button type="button" id="practiceBack">Back</button>
+    <div class="pr-seg" role="group" aria-label="Follow along by">
+      <button type="button" data-follow="timer" aria-pressed="true" title="Pages turn on a timer">Timer</button>
+      <button type="button" data-follow="listen" aria-pressed="false" title="Pages turn when the notes are heard (L)">Listen</button>
+    </div>
+    <div class="ls-controls" role="group" aria-label="Listening">
+      <button type="button" id="lsSetupBtn" class="ls-pill" aria-expanded="false" aria-controls="listenSetup" title="Microphone, tuner and tuning (T)">
+        <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><rect x="7" y="2.5" width="6" height="10" rx="3"/><path d="M4.5 9.5a5.5 5.5 0 0 0 11 0h-1.6a3.9 3.9 0 0 1-7.8 0Zm4.7 6.4h1.6v2h-1.6z"/></svg>
+        <span class="ls-pill-meter" aria-hidden="true"><span id="lsPillMeter"></span></span>
+      </button>
+      <button type="button" id="lsSkip" title="Skip this note (N)">Skip</button>
+      <button type="button" id="lsFix" title="Fix what was read off this page (E)">Fix notes</button>
+    </div>
     <div class="pr-transport" role="group" aria-label="Playback">
       <button type="button" id="practiceRestart" class="pr-icon" aria-label="Back to the first page" title="Back to the first page (Home)">
         <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><rect x="4" y="4.5" width="2.2" height="11" rx="1"/><path d="M16 5.2v9.6a.8.8 0 0 1-1.2.7L7.6 10.7a.8.8 0 0 1 0-1.4l7.2-4.8a.8.8 0 0 1 1.2.7Z"/></svg></button>
@@ -1152,8 +1247,84 @@ button.chip { cursor: pointer; }
     <label class="pr-check"><input type="checkbox" id="practiceCountIn"> Count in before playing</label>
     <label class="pr-check"><input type="checkbox" id="practiceRepeats"> Play repeats where the video repeats them</label>
     <label class="pr-check"><input type="checkbox" id="practicePlayhead"> Also show a playhead over the notes <em class="pr-exp">experimental</em></label>
-    <p class="pr-keys"><kbd>K</kbd> play · <kbd>[</kbd> <kbd>]</kbd> speed · <kbd>0</kbd> real speed · <kbd>←</kbd> <kbd>→</kbd> or space to turn · <kbd>Home</kbd> start · <kbd>Esc</kbd> leave</p>
+    <p class="pr-keys"><kbd>K</kbd> play · <kbd>[</kbd> <kbd>]</kbd> speed · <kbd>0</kbd> real speed · <kbd>←</kbd> <kbd>→</kbd> or space to turn · <kbd>Home</kbd> start · <kbd>L</kbd> listen · <kbd>E</kbd> fix notes · <kbd>Esc</kbd> leave</p>
   </div>
+  <!-- Listen: the microphone, a tuner, and what the guitar is tuned to. The
+       notes come from reading the page; the microphone is only compared with
+       them, and nothing is recorded or sent anywhere. -->
+  <div class="pr-settings ls-setup" id="listenSetup" hidden>
+    <p id="lsMicState" class="ls-state"></p>
+    <button type="button" id="lsAllow" class="ls-allow">Allow the microphone</button>
+    <div id="lsLive" class="ls-live" hidden>
+      <label class="pr-field"><span>Microphone</span><select id="lsDevice"></select></label>
+      <div class="ls-meter" aria-hidden="true"><span id="lsMeterFill"></span></div>
+      <p id="lsClip" class="ls-warn" hidden></p>
+      <div class="ls-tuner" aria-live="off">
+        <span id="lsTunerNote" class="ls-tuner-note">–</span>
+        <div class="ls-tuner-scale"><span id="lsNeedle"></span></div>
+        <span id="lsTunerCents" class="quiet">Play one open string</span>
+      </div>
+      <p id="lsDrift" class="ls-warn"></p>
+      <div class="ls-row">
+        <button type="button" id="lsQuiet">Stay quiet 3 s</button>
+        <span id="lsQuietDone" class="quiet" hidden>Room noise measured.</span>
+      </div>
+      <div class="ls-row">
+        <button type="button" id="lsRecord">Record a test clip</button>
+        <span class="quiet">Saves the sound and the notes it should match, so it can be replayed as a test.</span>
+      </div>
+    </div>
+    <label class="pr-field"><span>Tuning</span><select id="lsTuning"></select></label>
+    <div class="ls-custom" id="lsCustom" hidden aria-label="Custom tuning, MIDI note per string from high e to low E">
+      <input type="number" min="28" max="76" aria-label="String 1"><input type="number" min="28" max="76" aria-label="String 2"><input type="number" min="28" max="76" aria-label="String 3"><input type="number" min="28" max="76" aria-label="String 4"><input type="number" min="28" max="76" aria-label="String 5"><input type="number" min="28" max="76" aria-label="String 6">
+    </div>
+    <label class="pr-field"><span>Capo</span><select id="lsCapo"></select></label>
+    <label class="pr-field"><span>Chords</span><select id="lsStrict">
+      <option value="lenient">Lenient — all but one note of a big chord</option>
+      <option value="strict">Strict — every note</option>
+      <option value="bass">Bass note and the right notes anywhere</option>
+    </select></label>
+    <div class="pr-field"><span>Mode</span>
+      <div class="pr-seg" id="lsModeSeg" role="group" aria-label="Listening mode">
+        <button type="button" data-mode="wait" title="Waits on each note until it is played (W)">Wait for me</button>
+        <button type="button" data-mode="play" title="Keeps time and scores what was hit (W)">Play along</button>
+      </div></div>
+    <p class="ls-hint">Headphones help if the video is playing too — the microphone hears the speakers.</p>
+    <p class="pr-keys"><kbd>N</kbd> skip note · <kbd>B</kbd> back a note · <kbd>K</kbd> pause · <kbd>T</kbd> this panel · <kbd>E</kbd> fix notes</p>
+  </div>
+</div>
+
+<!-- Fix-by-click: what was read off a page, as boxes over the page. Built and
+     driven by tabedit.js. -->
+<div id="tabEdit" class="tab-edit" hidden role="dialog" aria-label="Fix the notes">
+  <div class="te-bar">
+    <button type="button" id="teClose">Done</button>
+    <button type="button" id="tePrevPage" aria-label="Previous page">‹</button>
+    <span id="tePos"></span>
+    <button type="button" id="teNextPage" aria-label="Next page">›</button>
+    <span id="teStatus" class="te-status" role="status"></span>
+    <button type="button" id="teNextUnsure" title="Next note to check (N)">Next to check</button>
+    <span class="spacer"></span>
+    <label class="pr-check"><input type="checkbox" id="teShowReadings" checked> Show what was read</label>
+    <button type="button" id="teUndo" title="Undo (U)">Undo</button>
+    <button type="button" id="teRedo" title="Redo (Shift+Cmd+Z)">Redo</button>
+  </div>
+  <div class="te-stage">
+    <div class="te-page"><img alt="The page being fixed"><div class="te-notes"></div></div>
+    <div class="te-pop" hidden>
+      <p id="tePopTitle" class="te-pop-title"></p>
+      <div id="teFrets" class="te-keys"></div>
+      <div id="teStrings" class="te-keys"></div>
+      <div id="teTechs" class="te-keys"></div>
+      <div class="te-keys">
+        <button type="button" id="teConfirm" class="te-key wide">Looks right</button>
+        <button type="button" id="teSeparate" class="te-key wide">Separate</button>
+        <button type="button" id="teJoin" class="te-key wide">Join to previous</button>
+        <button type="button" id="teDelete" class="te-key wide danger">Delete</button>
+      </div>
+    </div>
+  </div>
+  <p class="te-help">Click a note to change it, or empty staff to add one. Keys: digits set the fret, <kbd>x</kbd> muted, <kbd>↑</kbd> <kbd>↓</kbd> string, <kbd>←</kbd> <kbd>→</kbd> other notes, <kbd>h</kbd> <kbd>p</kbd> <kbd>/</kbd> <kbd>b</kbd> <kbd>~</kbd> <kbd>&lt;</kbd> <kbd>(</kbd> <kbd>g</kbd> techniques, <kbd>|</kbd> separate, <kbd>+</kbd> join, <kbd>Enter</kbd> looks right, <kbd>Delete</kbd>, <kbd>N</kbd> next to check, <kbd>U</kbd> undo, <kbd>Esc</kbd> done.</p>
 </div>
 
 <div id="dropVeil" class="drop-veil" hidden><div>Drop the video to load it</div></div>

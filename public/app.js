@@ -10,6 +10,10 @@ import {
 } from '/lib/library.js';
 import { createLoader } from '/brand/loaders.js';
 import { analysePage, buildSequence, cleanBpm, clampSpeed, sweepAt } from '/shared/practice.js';
+import { normaliseListen } from '/shared/follow.js';
+import { createReadings } from '/readings.js';
+import { createEditor } from '/tabedit.js';
+import { createListen } from '/follow-ui.js';
 
 (() => {
 
@@ -176,6 +180,7 @@ import { analysePage, buildSequence, cleanBpm, clampSpeed, sweepAt } from '/shar
     sheetId: null,          // library record this scan belongs to
     practice: -1,           // entry playing in the practice view, -1 = closed
     pace: { speed: 1, songBpm: 0 }, // practice pace, saved with the songsheet
+    listen: normaliseListen(),      // tuning, capo, chord strictness: saved with the songsheet
     fromLibrary: false,     // opened from storage: no video, so no steps 2-3
     snapshotApplied: false,
     serverBoot: null,       // which server process the job ids belong to
@@ -353,6 +358,7 @@ import { analysePage, buildSequence, cleanBpm, clampSpeed, sweepAt } from '/shar
       // Its pages are held as object URLs that are about to be revoked, so an
       // edit still waiting to be saved has to read them first.
       await settleSave();
+      await flushTranscript();
       releaseHeldUrls();
       Object.assign(state, {
         fromLibrary: false, sheetId: null, meta: null, captures: [], items: [],
@@ -1084,6 +1090,16 @@ import { analysePage, buildSequence, cleanBpm, clampSpeed, sweepAt } from '/shar
   // work folder is wiped by the next video, and a saved sheet has no filename
   // to point at anyway.
   function buildReview(captures) {
+    // A new scan's pages have no corrections; the same scan rebuilt (a
+    // reload, a re-run of step 3) keeps any made so far.
+    if (!captures.some((c) => c.clean) && readingsJob !== state.jobId) {
+      readings.reset(null);
+      readingsJob = state.jobId;
+      transcriptOf = null;
+      transcriptDirty = false;
+      state.listen = normaliseListen();
+      bindSheet(state.sheetId);
+    }
     releaseHeldUrls();
     state.captures = [...captures].sort((a, b) => a.tStart - b.tStart);
     state.items = state.captures.map((c, i) => {
@@ -1560,6 +1576,9 @@ import { analysePage, buildSequence, cleanBpm, clampSpeed, sweepAt } from '/shar
 
   document.addEventListener('keydown', (e) => {
     if (e.metaKey || e.ctrlKey) return;
+    // The note editor handles its own keys (in the capture phase); nothing
+    // behind it reacts to the ones it leaves.
+    if (editor.isOpen) return;
     // Practice mode takes keys first and unconditionally: the guards below skip
     // Space over a focused button, which would activate that button instead of
     // turning the page — and Space is what a page-turner pedal sends.
@@ -1644,6 +1663,10 @@ import { analysePage, buildSequence, cleanBpm, clampSpeed, sweepAt } from '/shar
         // The Practice button offers this shortcut, so it has to exist.
         e.preventDefault();
         openPractice();
+        break;
+      case 'e': case 'E':
+        e.preventDefault();
+        openNotes();
         break;
       case 'Enter': {
         const it = state.items[state.selected];
@@ -1777,7 +1800,10 @@ import { analysePage, buildSequence, cleanBpm, clampSpeed, sweepAt } from '/shar
           // server, so the first scan after every launch is job 2 — matched on
           // the id alone, it adopted the last session's songsheet and was
           // saved over it.
-          if (held && held.id && held.jobId === state.jobId && held.boot === state.serverBoot) state.sheetId = held.id;
+          if (held && held.id && held.jobId === state.jobId && held.boot === state.serverBoot) {
+            state.sheetId = held.id;
+            if (readingsJob === state.jobId) bindSheet(held.id);
+          }
         } catch { /* nothing remembered, or unreadable */ }
       }
     }
@@ -1869,6 +1895,8 @@ import { analysePage, buildSequence, cleanBpm, clampSpeed, sweepAt } from '/shar
     set repeats(v) { store.set('vtt.prRepeats', v ? '1' : '0'); },
     get playhead() { return store.get('vtt.prPlayhead', '0') === '1'; },
     set playhead(v) { store.set('vtt.prPlayhead', v ? '1' : '0'); },
+    get follow() { return store.get('vtt.prFollow', 'timer') === 'listen' ? 'listen' : 'timer'; },
+    set follow(v) { store.set('vtt.prFollow', v); },
   };
 
   const player = {
@@ -2009,7 +2037,8 @@ import { analysePage, buildSequence, cleanBpm, clampSpeed, sweepAt } from '/shar
     const e = player.seq[state.practice];
     const f = Math.min(1, player.t / e.dur);
     const card = currentCard();
-    if (card) {
+    // Wait mode fills a card by the notes heard instead.
+    if (card && !(listen.active && listen.mode === 'wait')) {
       const secs = Math.max(0, Math.ceil((e.dur - player.t) / state.pace.speed));
       const last = state.practice === player.seq.length - 1;
       fillCard(card, f, `${last ? 'ends' : 'next'} in ${fmtTime(secs)}`);
@@ -2082,6 +2111,7 @@ import { analysePage, buildSequence, cleanBpm, clampSpeed, sweepAt } from '/shar
       if (player.seq[n + 1]) pageGeometry(player.seq[n + 1].item);
     }
     renderSweep();
+    listen.onEntryShown(n);
   }
 
   function goTo(i) {
@@ -2206,12 +2236,14 @@ import { analysePage, buildSequence, cleanBpm, clampSpeed, sweepAt } from '/shar
     }
     player.t += dt * state.pace.speed;
     const e = player.seq[state.practice];
+    listen.onClock(state.practice, Math.min(player.t, e.dur), e.dur, state.pace.speed);
     if (player.t >= e.dur) {
       if (state.practice >= player.seq.length - 1) {
         player.t = e.dur;
         renderSweep();
         setPlaying(false);
         $('practicePos').textContent += '  ·  the end';
+        listen.onEnd();
         return;
       }
       const carry = player.t - e.dur;
@@ -2243,13 +2275,16 @@ import { analysePage, buildSequence, cleanBpm, clampSpeed, sweepAt } from '/shar
     for (const b of document.querySelectorAll('#practiceSettings [data-layout]')) b.setAttribute('aria-pressed', String(b.dataset.layout === prefs.layout));
     $('practicePlayhead').checked = prefs.playhead;
     renderPace();
+    renderFollow();
     buildStage();
     setPlaying(false);
     holdScreenAwake();
+    if (prefs.follow === 'listen') listen.enter();
   }
 
   function closePractice() {
     setPlaying(false);
+    listen.close();
     state.practice = -1;
     $('practice').hidden = true;
     $('practiceScroll').textContent = '';
@@ -2275,6 +2310,7 @@ import { analysePage, buildSequence, cleanBpm, clampSpeed, sweepAt } from '/shar
     if (i < 0) { i = Math.max(0, player.seq.findIndex((e) => e.item === was.item)); player.t = 0; }
     state.practice = i;
     buildStage();
+    if (listen.active) listen.refresh();
   }
 
   function practiceKeys(e) {
@@ -2282,11 +2318,16 @@ import { analysePage, buildSequence, cleanBpm, clampSpeed, sweepAt } from '/shar
     if (k === 'Escape') {
       e.preventDefault();
       if (!$('practiceSettings').hidden) toggleSettings(false);
+      else if (!$('listenSetup').hidden) $('lsSetupBtn').click();
       else closePractice();
       return;
     }
-    // Typing a tempo is not a page turn.
-    if (e.target instanceof Element && e.target.matches('input')) return;
+    // Typing a tempo, or picking a tuning, is not a page turn.
+    if (e.target instanceof Element && e.target.matches('input, select')) return;
+    // Enter and Space press a focused button in a panel or a message — Allow
+    // the microphone, Try again — rather than turning the page. Elsewhere
+    // they still turn it, since Space is what a page-turner pedal sends.
+    if ((k === 'Enter' || k === ' ') && e.target instanceof Element && e.target.closest('.pr-settings button, .ls-msg button')) return;
     // Backspace is deliberately not a page-turn key: it deletes a page in the
     // review list one Esc away, and a key that means two different things
     // depending on an invisible mode is a mistake waiting to happen.
@@ -2298,6 +2339,9 @@ import { analysePage, buildSequence, cleanBpm, clampSpeed, sweepAt } from '/shar
       return;
     }
     const lower = k.length === 1 ? k.toLowerCase() : k;
+    if (lower === 'l') { e.preventDefault(); setFollow(listen.active ? 'timer' : 'listen'); return; }
+    if (lower === 'e') { e.preventDefault(); openEditorAt(state.practice); return; }
+    if (listen.active && listen.keys(e)) { e.preventDefault(); return; }
     if (lower === 'k' || lower === 'p') { e.preventDefault(); togglePlay(); }
     else if (k === '[' || k === '-') { e.preventDefault(); nudge(-1); }
     else if (k === ']' || k === '=' || k === '+') { e.preventDefault(); nudge(1); }
@@ -2306,6 +2350,7 @@ import { analysePage, buildSequence, cleanBpm, clampSpeed, sweepAt } from '/shar
   }
 
   function toggleSettings(open) {
+    if (open) listen.closeSetup();
     $('practiceSettings').hidden = !open;
     $('practiceSettingsBtn').setAttribute('aria-expanded', String(open));
   }
@@ -2347,6 +2392,131 @@ import { analysePage, buildSequence, cleanBpm, clampSpeed, sweepAt } from '/shar
     if (document.visibilityState === 'visible') holdScreenAwake();
     else if (player.playing) setPlaying(false);
   });
+
+  // ---------- reading the tab, fixing it, and listening ----------
+
+  // What each page says as notes. Read on demand, kept for the session;
+  // corrections are saved with the songsheet (sheet.transcript).
+  const readings = createReadings({ loadImage, grabBlob, onSaved: () => { transcriptDirty = true; syncTranscript(); } });
+  let transcriptOf = null;    // stored songsheet whose corrections `readings` holds
+  let readingsJob = null;     // scan whose pages `readings` was reset for
+  let transcriptDirty = false; // a fix not yet written
+
+  // Corrections are written with updateSheet, a moment after the last one,
+  // and only into the songsheet whose stored corrections `readings` holds —
+  // writing into any other would replace its corrections with these. A scan
+  // gets there once its first save lands, or, picked up again after a
+  // reload, once its stored corrections and Listen settings are read back.
+  function bindSheet(id) {
+    if (!id || transcriptOf === id) return;
+    getSheet(id).then((sheet) => {
+      if (!sheet || state.sheetId !== id || transcriptOf === id) return;
+      readings.adopt(sheet.transcript);
+      if (sheet.listen) state.listen = normaliseListen(sheet.listen);
+      transcriptOf = id;
+      if (transcriptDirty) syncTranscript();
+    }).catch(() => { /* not stored yet: bound after its first save */ });
+  }
+
+  let transcriptTimer = 0;
+  let transcriptJob = Promise.resolve();
+  function syncTranscript() {
+    clearTimeout(transcriptTimer);
+    transcriptTimer = setTimeout(flushTranscript, 600);
+  }
+  // Now rather than in a moment: before another songsheet replaces these.
+  function flushTranscript() {
+    clearTimeout(transcriptTimer);
+    transcriptTimer = 0;
+    const id = state.sheetId;
+    if (!transcriptDirty || !id || state.saveOff || transcriptOf !== id) return transcriptJob;
+    const t = readings.transcript;
+    transcriptDirty = false;
+    transcriptJob = transcriptJob.then(() => updateSheet(id, { transcript: Object.keys(t.pages).length ? t : null }))
+      .catch(() => { if (transcriptOf === id) transcriptDirty = true; /* kept in memory; written with the next fix */ });
+    return transcriptJob;
+  }
+
+  let listenTimer = 0;
+  function saveListen(patch) {
+    state.listen = normaliseListen({ ...state.listen, ...patch });
+    clearTimeout(listenTimer);
+    const id = state.sheetId;
+    if (!id || state.saveOff) return;
+    const listenNow = state.listen;
+    listenTimer = setTimeout(() => { updateSheet(id, { listen: listenNow }).catch(() => { /* kept on screen */ }); }, 800);
+  }
+
+  // The editor, over whatever pages are being practised (or the songsheet's).
+  let editorChanged = false;
+  const editor = createEditor({
+    el,
+    readings,
+    pageSrc: (it) => it.src,
+    onChange: () => { editorChanged = true; },
+    onClose: () => {
+      listen.hold(false);
+      if (editorChanged && listen.active) listen.refresh();
+      editorChanged = false;
+    },
+  });
+  function openEditorAt(entry = 0, focus = null) {
+    const list = state.practice >= 0 ? player.seq.map((e) => e.item) : visibleItems();
+    const pages = [...new Set(list)];
+    if (!pages.length) return;
+    // Nothing moves on behind the editor: the clock stops, listening holds.
+    if (state.practice >= 0) {
+      setPlaying(false);
+      listen.hold(true);
+    }
+    const at = list[entry] ? pages.indexOf(list[entry]) : 0;
+    editor.open(pages, Math.max(0, at), focus);
+  }
+
+  const cardFor = (k) => (prefs.layout === 'page' ? (k === state.practice ? player.single : null) : player.rows[k]);
+  const listen = createListen({
+    $,
+    el,
+    readings,
+    settings: () => state.listen,
+    saveSettings: saveListen,
+    getSeq: () => player.seq,
+    current: () => state.practice,
+    showEntry: (k) => showEntry(k),
+    cardFor,
+    fill: (k, f, label) => { const c = cardFor(k); if (c) fillCard(c, f, label); },
+    openEditor: openEditorAt,
+    stopClock: () => setPlaying(false),
+    closeSettings: () => toggleSettings(false),
+    download: downloadBlob,
+    restart: () => { goTo(0); setPlaying(true); },
+    desktopMic: () => (isDesktop() && window.vidtotab?.mic ? window.vidtotab.mic : null),
+    savedDevice: () => store.get('vtt.micDevice', '') || undefined,
+    saveDevice: (id) => store.set('vtt.micDevice', id),
+  });
+
+  function renderFollow() {
+    for (const b of document.querySelectorAll('#practice [data-follow]')) b.setAttribute('aria-pressed', String(b.dataset.follow === prefs.follow));
+  }
+  function setFollow(mode) {
+    prefs.follow = mode;
+    renderFollow();
+    if (mode === 'listen') {
+      setPlaying(false);
+      listen.enter();
+    } else {
+      listen.leave();
+      showEntry(state.practice, { scroll: 'instant' });
+    }
+  }
+  for (const b of document.querySelectorAll('#practice [data-follow]')) b.addEventListener('click', () => setFollow(b.dataset.follow));
+  $('lsFix').addEventListener('click', () => openEditorAt(state.practice));
+  function openNotes() {
+    const vis = visibleItems();
+    const sel = state.selected >= 0 ? state.items[state.selected] : null;
+    openEditorAt(Math.max(0, vis.indexOf(sel)));
+  }
+  $('notesBtn').addEventListener('click', openNotes);
 
   // ---------- songsheet library ----------
 
@@ -2455,6 +2625,7 @@ import { analysePage, buildSequence, cleanBpm, clampSpeed, sweepAt } from '/shar
         paper: target.paper,
       }, pages, thumb);
       await requestPersistence();
+      if (state.sheetId === target.id) bindSheet(target.id);
       renderLibrary(); // so the home screen already shows it when you go back
     } catch (err) {
       addWarning('Could not save this songsheet: ' + err.message);
@@ -2631,6 +2802,7 @@ import { analysePage, buildSequence, cleanBpm, clampSpeed, sweepAt } from '/shar
     // the screen as it is now, and finished before reading — reopening the
     // same songsheet would otherwise read the copy from before the edit.
     await settleSave();
+    await flushTranscript();
     let sheet = null;
     try { sheet = await getSheet(id); } catch { /* unreadable */ }
     if (!sheet || !sheet.pages?.length) { showError('That songsheet could not be opened.'); return; }
@@ -2651,6 +2823,11 @@ import { analysePage, buildSequence, cleanBpm, clampSpeed, sweepAt } from '/shar
     state.meta = { title: sheet.title, url: sheet.url, channel: sheet.channel, duration: sheet.duration, thumb: false, ready: false, width: 0, height: 0, fps: 0 };
     state.title = sheet.title;
     state.pace = { speed: clampSpeed(sheet.practice?.speed ?? 1), songBpm: cleanBpm(sheet.practice?.songBpm) };
+    state.listen = normaliseListen(sheet.listen || {});
+    readings.reset(sheet.transcript);
+    transcriptOf = sheet.id;
+    transcriptDirty = false;
+    readingsJob = null;
     state.look = lookById(sheet.look).id;
     state.paper = sheet.paper === 'a4' ? 'a4' : 'letter';
     state.lastAnalyze = sheet.recipe?.rect ? sheet.recipe : null;
