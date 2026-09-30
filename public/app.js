@@ -1901,14 +1901,7 @@ import { analysePage, buildSequence, cleanBpm, clampSpeed, sweepAt } from '/shar
     player.looks.set(key, job);
     job.then((u) => { if (img.isConnected || img.id) img.src = u; }).catch(() => { /* keep the print render */ });
   }
-  // Whether the paper is light or dark decides how the fill reaches it: tinting
-  // white paper and lifting dark paper, both leaving the ink as it is.
-  const paperIsLight = () => {
-    const look = lookById(state.look);
-    if (isOriginal(look)) return false;
-    const [r, g, b] = paperRgb(look);
-    return r * 0.299 + g * 0.587 + b * 0.114 > 128;
-  };
+
   const bpmNow = () => (state.pace.songBpm ? Math.round(state.pace.songBpm * state.pace.speed) : 0);
 
   // Where the notes are on a page, found once per page and kept: the clean
@@ -1941,7 +1934,7 @@ import { analysePage, buildSequence, cleanBpm, clampSpeed, sweepAt } from '/shar
 
   // One page as a card, as on the songsheet step: its number, when it is in
   // the video, and — while it plays — how long until the next one. The fill
-  // runs across the whole card, frame and paper alike.
+  // runs across the card behind the page; the page itself is left as it is.
   function cardEl(e, i) {
     const card = el('div', 'pr-card');
     card.appendChild(el('div', 'pr-card-fill'));
@@ -1955,7 +1948,7 @@ import { analysePage, buildSequence, cleanBpm, clampSpeed, sweepAt } from '/shar
     head.appendChild(el('span', 'spacer'));
     head.appendChild(el('span', 'pr-left'));
     card.appendChild(head);
-    const paper = el('div', `pr-paper ${paperIsLight() ? 'light' : 'dark'}`);
+    const paper = el('div', 'pr-paper');
     const look = lookById(state.look);
     paper.style.background = isOriginal(look) ? '#0b0b0c' : rgbCss(paperRgb(look));
     const img = el('img');
@@ -1964,7 +1957,6 @@ import { analysePage, buildSequence, cleanBpm, clampSpeed, sweepAt } from '/shar
     if (e.item.w && e.item.h) { img.width = e.item.w; img.height = e.item.h; }
     lookSrc(e.item, img);
     paper.appendChild(img);
-    paper.appendChild(el('div', 'pr-paper-fill'));
     paper.appendChild(el('div', 'pr-marks'));
     card.appendChild(paper);
     card.dataset.entry = String(i);
@@ -1975,7 +1967,7 @@ import { analysePage, buildSequence, cleanBpm, clampSpeed, sweepAt } from '/shar
   // countdown says it in seconds at the current pace.
   function fillCard(card, f, remaining) {
     const pct = `${Math.min(1, Math.max(0, f)) * 100}%`;
-    for (const x of card.querySelectorAll('.pr-card-fill, .pr-paper-fill')) x.style.width = pct;
+    card.querySelector('.pr-card-fill').style.width = pct;
     const left = card.querySelector('.pr-left');
     if (left) left.textContent = remaining == null ? '' : remaining;
   }

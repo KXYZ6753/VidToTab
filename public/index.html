@@ -435,9 +435,10 @@ body[data-view="app"] .source-card { margin: 14px 0 0; }
 .practice[data-layout="scroll"] .practice-tap { display: none; }
 /* A page is a card, as on the songsheet step: number, time, and — while it
    plays — how long until the next. The card is the timer: it fills left to
-   right, frame and paper together, over the time the page lasts. */
+   right behind the page over the time the page lasts, and the page itself is
+   never tinted. */
 .pr-card { position: relative; isolation: isolate; width: min(100%, 1500px); padding: 10px; border-radius: 14px; background: #1b1c20; border: 1px solid #2d2e34; overflow: hidden; color: #f2f2f4; text-align: left; opacity: .78; transition: opacity .25s, border-color .2s, box-shadow .2s; }
-.pr-card-fill { position: absolute; top: 0; bottom: 0; left: 0; width: 0; z-index: -1; background: color-mix(in srgb, var(--pr-accent) 22%, transparent); }
+.pr-card-fill { position: absolute; top: 0; bottom: 0; left: 0; width: 0; z-index: -1; background: color-mix(in srgb, var(--pr-accent) 30%, transparent); }
 .pr-card-head { display: flex; align-items: center; gap: 8px; margin: 0 2px 8px; font-size: 13px; }
 .pr-num { font-weight: 700; color: #98938b; min-width: 22px; font-variant-numeric: tabular-nums; }
 .pr-chip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px; border-radius: 999px; border: 1px solid #3b3c43; background: #222328; font-weight: 600; font-variant-numeric: tabular-nums; }
@@ -445,13 +446,8 @@ body[data-view="app"] .source-card { margin: 14px 0 0; }
 .pr-chip.repeat { border-style: dashed; font-weight: 500; color: #a7a198; }
 .pr-left { font: 600 13px var(--mono); color: var(--pr-accent); font-variant-numeric: tabular-nums; }
 .pr-card .spacer { flex: 1; }
-/* The paper keeps the look's own colour; the fill reaches it by blending, so
-   white paper is tinted and dark paper lifted while the ink stays the ink. */
 .pr-paper { position: relative; line-height: 0; border-radius: 6px; overflow: hidden; border: 1px solid #2d2e34; }
 .pr-paper img { display: block; width: 100%; height: auto; }
-.pr-paper-fill { position: absolute; top: 0; bottom: 0; left: 0; width: 0; pointer-events: none; }
-.pr-paper.light .pr-paper-fill { background: color-mix(in srgb, var(--pr-accent) 42%, white); mix-blend-mode: multiply; }
-.pr-paper.dark .pr-paper-fill { background: color-mix(in srgb, var(--pr-accent) 38%, black); mix-blend-mode: screen; }
 .pr-card[data-current] { opacity: 1; border-color: var(--pr-accent); box-shadow: 0 0 0 1px var(--pr-accent), 0 12px 40px -12px rgba(0, 0, 0, .8); }
 .pr-marks { position: absolute; inset: 0; pointer-events: none; }
 .pr-fill { position: absolute; background: color-mix(in srgb, var(--pr-accent) 24%, transparent); border-radius: 2px; }
