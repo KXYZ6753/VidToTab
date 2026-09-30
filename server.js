@@ -176,6 +176,10 @@ if (process.env.VIDTOTAB_DATA_DIR && (!preflight.ytdlp || preflight.ytdlpStale))
 // otherwise that call reads it inside its temporal dead zone.
 let jobCounter = 0;
 let runCounter = 0;
+// Job ids start again at 1 every time the server does, so an id alone cannot
+// say which process a remembered job came from. The page pairs the two when it
+// remembers which songsheet a scan belongs to; see handleEvent in app.js.
+const BOOT_ID = crypto.randomUUID();
 let job = freshJob('idle', null);
 
 function freshJob(phase, meta) {
@@ -269,7 +273,7 @@ function sse(req, res) {
   // Someone else's job is not theirs to watch: a stranger gets an idle snapshot
   // rather than the title, warnings and page thumbnails of another visitor's video.
   const mine = ownsJob(req);
-  const snap = { phase: 'state', jobId: job.id, job: mine ? job.phase : 'idle', runId: job.runId };
+  const snap = { phase: 'state', jobId: job.id, boot: BOOT_ID, job: mine ? job.phase : 'idle', runId: job.runId };
   if (mine) {
     if (job.meta) snap.meta = job.meta;
     if (job.captures.length) snap.captures = job.captures;

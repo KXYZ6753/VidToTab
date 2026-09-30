@@ -4,7 +4,10 @@
    from an older run is ignored. Loaded as a module so the preview can share the
    look maths with the PNG and PDF exports instead of reimplementing it. */
 import { LOOKS, applyLook, inkRgb, isIdentity, isOriginal, lookById, mixRgb, paperRgb, rgbCss } from '/shared/look.js';
-import { deleteSheet, getSheet, hasStorage, listSheets, newId, requestPersistence, saveSheet } from '/lib/library.js';
+import {
+  chooseLibraryFolder, deleteSheets, folderInfo, getSheet, hasStorage, listSheets, migrateBrowserSheets, newId,
+  openLibraryFolder, requestPersistence, revealSheet, saveSheet, updateSheet, usesFolder,
+} from '/lib/library.js';
 import { createLoader } from '/brand/loaders.js';
 
 (() => {
@@ -18,6 +21,9 @@ import { createLoader } from '/brand/loaders.js';
   // rather than beside isAppView because start-up asks it well before that
   // section is reached, and a const is unreachable until its own line runs.
   const isDesktop = () => { try { return window.vidtotab?.shell === 'desktop'; } catch { return false; } };
+  // What ipcRenderer.invoke puts in front of an error from the shell. The
+  // message underneath was written for people; the prefix was not.
+  const shellMsg = (e) => String(e?.message || e).replace(/^Error invoking remote method '[^']+':\s*(?:Error:\s*)?/, '');
   const store = {
     get(k, d) { try { return localStorage.getItem(k) ?? d; } catch { return d; } },
     set(k, v) { try { localStorage.setItem(k, v); } catch { /* storage unavailable */ } },
@@ -170,6 +176,9 @@ import { createLoader } from '/brand/loaders.js';
     practice: -1,           // page shown in the full-screen reader, -1 = closed
     fromLibrary: false,     // opened from storage: no video, so no steps 2-3
     snapshotApplied: false,
+    serverBoot: null,       // which server process the job ids belong to
+    screen: 'steps',        // 'steps' | 'library' (desktop): which of the two the main area shows
+    saveOff: false,         // the open songsheet was deleted from the library: stop saving it back
   };
 
   const video = $('video');
@@ -185,8 +194,9 @@ import { createLoader } from '/brand/loaders.js';
     for (const btn of stepBtns) {
       const n = +btn.dataset.step;
       const li = btn.parentElement;
-      li.classList.toggle('active', n === state.step);
-      li.classList.toggle('done', n < state.step);
+      const onSteps = state.screen === 'steps';
+      li.classList.toggle('active', onSteps && n === state.step);
+      li.classList.toggle('done', onSteps && n < state.step);
       // A songsheet opened from the library has no video behind it, so the
       // steps that need one stay shut. Reaching them showed an empty video
       // stage, which reads as broken rather than as "there is nothing here".
@@ -257,13 +267,17 @@ import { createLoader } from '/brand/loaders.js';
 
   function showStep(n) {
     const from = state.step;
-    const changed = n !== from;
+    // The library screen is not a step, but every way out of it is one, so it
+    // is closed here rather than by each of them.
+    const fromLibrary = state.screen === 'library';
+    if (fromLibrary) leaveLibrary();
+    const changed = n !== from || fromLibrary;
     state.step = n;
     state.maxStep = Math.max(state.maxStep, n);
     // Which way the step came from, set before it is unhidden: the animation is
     // restarted by the section leaving display:none, so the attribute that
     // chooses which animation has to already be on it by then.
-    if (changed) sections[n].dataset.dir = n > from ? 'fwd' : 'back';
+    if (changed) sections[n].dataset.dir = n > from || fromLibrary ? 'fwd' : 'back';
     for (let i = 1; i <= 4; i++) sections[i].hidden = i !== n;
     if (n !== 3) loaders.scan.hide();
     renderStepper();
@@ -290,7 +304,7 @@ import { createLoader } from '/brand/loaders.js';
   for (const btn of stepBtns) {
     btn.addEventListener('click', () => {
       const n = +btn.dataset.step;
-      if (n <= state.maxStep && n !== state.step) showStep(n);
+      if (n <= state.maxStep && (n !== state.step || state.screen === 'library')) showStep(n);
     });
   }
 
@@ -332,12 +346,15 @@ import { createLoader } from '/brand/loaders.js';
   // were ready — clear it exactly the way a cancelled download is cleared. A
   // real video is left alone: throwing away a download or a scan in progress is
   // not what "new" means, and the stepper is still the way back to it.
-  function newScan() {
+  async function newScan() {
     if (state.fromLibrary) {
+      // Its pages are held as object URLs that are about to be revoked, so an
+      // edit still waiting to be saved has to read them first.
+      await settleSave();
       releaseHeldUrls();
       Object.assign(state, {
         fromLibrary: false, sheetId: null, meta: null, captures: [], items: [],
-        selected: -1, undoStack: [], maxStep: 1, title: '',
+        selected: -1, undoStack: [], maxStep: 1, title: '', saveOff: false,
       });
       $('reviewList').textContent = '';
       state.meta = null;
@@ -348,6 +365,7 @@ import { createLoader } from '/brand/loaders.js';
   }
 
   $('sideNew').addEventListener('click', newScan);
+  $('sideLibrary').addEventListener('click', () => showLibrary());
   $('sidePractice').addEventListener('click', () => openPractice());
 
   // The sidebar follows state that changes three steps away — a scan finishing,
@@ -366,6 +384,8 @@ import { createLoader } from '/brand/loaders.js';
     const ready = state.items.some((it) => !it.deleted);
     $('sidePractice').disabled = !ready;
     $('sidePracticeWhy').hidden = ready;
+    if (state.screen === 'library') $('sideLibrary').setAttribute('aria-current', 'true');
+    else $('sideLibrary').removeAttribute('aria-current');
   }
 
   // ---------- banners ----------
@@ -442,7 +462,9 @@ import { createLoader } from '/brand/loaders.js';
   // The save in flight, if any. A new video wipes the work folder server-side,
   // so anything still being read out of it has to finish first.
   let sheetSave = null;
-  const settleSave = () => (sheetSave ? sheetSave.catch(() => {}) : Promise.resolve());
+  // An edit waiting out its debounce is written first: whatever replaces the
+  // songsheet on screen would otherwise take the edit with it.
+  const settleSave = () => { flushSave(); return sheetSave ? sheetSave.catch(() => {}) : Promise.resolve(); };
 
   function resetForNewSource(label) {
     Object.assign(state, {
@@ -452,7 +474,7 @@ import { createLoader } from '/brand/loaders.js';
       // Sensitivity belongs to a video, not to the session: leaving it at the
       // previous song's "Fewer pages" silently merged pages in the next one,
       // from a control hidden inside a collapsed section.
-      sensitivity: 0.5, warnings: [], jobId: null, sheetId: null, fromLibrary: false,
+      sensitivity: 0.5, warnings: [], jobId: null, sheetId: null, fromLibrary: false, saveOff: false,
     });
     $('librarySection').hidden = true;
     updateSensSeg();
@@ -907,10 +929,16 @@ import { createLoader } from '/brand/loaders.js';
     }
     const btn = $('analyzeBtn');
     btn.disabled = true;
+    // A re-scan replaces the pages the last one left in the work folder, so an
+    // edit still waiting to be saved has to read them first.
+    await settleSave();
     try {
       const res = await api('/api/analyze', { rect, startTime, sensitivity, allowFallback });
       state.runId = Math.max(state.runId, res?.runId || 0);
       state.lastAnalyze = { rect, startTime, sensitivity };
+      // A songsheet removed from the library while its scan was on screen
+      // stopped saving; asking for a new scan is asking for a new result.
+      state.saveOff = false;
       state.sensitivity = sensitivity;
       updateSensSeg();
       if (state.job !== 'analyzing') {
@@ -1204,6 +1232,7 @@ import { createLoader } from '/brand/loaders.js';
     }
     renderReview();
     showToast('Page removed', true);
+    queueSave();
   }
 
   function undo() {
@@ -1214,6 +1243,7 @@ import { createLoader } from '/brand/loaders.js';
     if (i >= 0) state.deletedStamps.splice(i, 1);
     hideToast();
     renderReview();
+    queueSave();
   }
 
   function seekToSource(t) {
@@ -1238,7 +1268,7 @@ import { createLoader } from '/brand/loaders.js';
   }
   $('toastUndo').addEventListener('click', undo);
 
-  $('titleInput').addEventListener('input', () => { state.title = $('titleInput').value; });
+  $('titleInput').addEventListener('input', () => { state.title = $('titleInput').value; queueSave(); });
   // Built from the shared list, so the preview, the PNG and the PDF always
   // offer exactly the same looks. Each button gets its listener as it is
   // created — the markup ships empty, so querying for buttons at start-up
@@ -1256,6 +1286,7 @@ import { createLoader } from '/brand/loaders.js';
         state.look = look.id;
         store.set('vtt.look', state.look);
         renderReview();
+        queueSave();
       });
       seg.appendChild(b);
     }
@@ -1263,6 +1294,7 @@ import { createLoader } from '/brand/loaders.js';
   $('paperSelect').addEventListener('change', () => {
     state.paper = $('paperSelect').value === 'a4' ? 'a4' : 'letter';
     store.set('vtt.paper', state.paper);
+    queueSave();
   });
 
   function updateSensSeg() {
@@ -1534,6 +1566,7 @@ import { createLoader } from '/brand/loaders.js';
       if (t.matches('input, textarea, select')) return;
       if ((e.key === 'Enter' || e.key === ' ') && t.matches('button, a, summary')) return;
     }
+    if (state.screen === 'library') { libraryKeys(e); return; }
     if (e.key === 'Escape' && state.selectMode) { setSelectMode(false); return; }
     if (state.step === 2) step2Keys(e);
     else if (state.step === 4) step4Keys(e);
@@ -1632,9 +1665,9 @@ import { createLoader } from '/brand/loaders.js';
     // Kept so that starting another video can wait for it: the save reads each
     // page back from /captures/, and the server deletes that folder the moment a
     // new video arrives.
-    sheetSave = saveCurrentSheet()
-      .catch(() => { /* reported inside */ })
-      .finally(() => { sheetSave = null; });
+    const run = saveCurrentSheet().catch(() => { /* reported inside */ });
+    sheetSave = run;
+    run.finally(() => { if (sheetSave === run) sheetSave = null; });
   }
 
   function backToSource() {
@@ -1725,6 +1758,7 @@ import { createLoader } from '/brand/loaders.js';
     // Ignore events about a video we have already moved on from. Pasting a
     // second link while the first was still downloading used to let the old
     // flow's events drive the UI back to the start screen.
+    if (typeof ev.boot === 'string') state.serverBoot = ev.boot;
     if (typeof ev.jobId === 'number') {
       if (state.jobId !== null && ev.jobId < state.jobId) return;
       if (ev.jobId > (state.jobId ?? -1)) state.jobId = ev.jobId;
@@ -1736,7 +1770,11 @@ import { createLoader } from '/brand/loaders.js';
       if (state.sheetId === null && state.jobId !== null) {
         try {
           const held = JSON.parse(store.get('vtt.sheet', 'null'));
-          if (held && held.id && held.jobId === state.jobId) state.sheetId = held.id;
+          // The same job of the same server process. Job ids restart with the
+          // server, so the first scan after every launch is job 2 — matched on
+          // the id alone, it adopted the last session's songsheet and was
+          // saved over it.
+          if (held && held.id && held.jobId === state.jobId && held.boot === state.serverBoot) state.sheetId = held.id;
         } catch { /* nothing remembered, or unreadable */ }
       }
     }
@@ -1883,31 +1921,51 @@ import { createLoader } from '/brand/loaders.js';
     }
   }
 
-  async function saveCurrentSheet() {
-    if (!hasStorage() || !state.items.length) return;
-    // Bind the record, and everything that describes it, before the first
-    // await. This fetches a blob per page, and the guard in openSheet does not
-    // cover that window: onDone sets the job to 'done' and *then* calls this, so
-    // the scan is no longer "busy" while it is still saving. Opening a stored
-    // songsheet in between used to repoint state.sheetId — and every other field
-    // was read at the end too, so the scan's pages landed in whatever had just
-    // been opened, under that songsheet's title.
-    const items = state.items;
-    const target = {
-      id: state.sheetId || newId(),
-      jobId: state.jobId,
-      title: state.title || state.meta?.title || 'Untitled songsheet',
-      url: state.meta?.url || '',
-      channel: state.meta?.channel || '',
-      duration: state.meta?.duration || 0,
-      recipe: state.lastAnalyze || {},
-      look: state.look,
-      paper: state.paper,
-      thumbUrl: state.meta?.thumb ? '/thumb.jpg?v=' + state.thumbVersion : null,
+  // Everything a save needs, read off the screen in one synchronous step,
+  // before the first await. A save fetches a blob per page, and the screen can
+  // change under it: onDone sets the job to 'done' and *then* saves, so the
+  // scan is no longer "busy" while it is still saving, and opening a stored
+  // songsheet in between used to repoint state.sheetId — every field was read
+  // at the end, so the scan's pages landed in whatever had just been opened,
+  // under that songsheet's title. Taking the snapshot first is what makes a
+  // save describe the songsheet it was started for, whatever is on screen by
+  // the time it lands.
+  function snapshotSheet() {
+    if (!hasStorage() || !state.items.length || state.saveOff) return null;
+    // The id is claimed now, not after the pages are read: an edit saved while
+    // the first save is still reading pages must land in the same songsheet
+    // rather than start a second one.
+    if (!state.sheetId) state.sheetId = newId();
+    return {
+      items: state.items,
+      // Which pages, fixed now: removing or restoring one while this save is
+      // still reading the others must not change what it is saving.
+      keep: state.items.filter((it) => !it.deleted),
+      // Only a scan belongs to a server job. A songsheet opened from the
+      // library does not, and binding it to whatever job the server last had
+      // let a reload hand that job's pages to it.
+      live: !state.fromLibrary,
+      target: {
+        id: state.sheetId,
+        jobId: state.jobId,
+        boot: state.serverBoot,
+        title: state.title || state.meta?.title || 'Untitled songsheet',
+        url: state.meta?.url || '',
+        channel: state.meta?.channel || '',
+        duration: state.meta?.duration || 0,
+        recipe: state.lastAnalyze || {},
+        look: state.look,
+        paper: state.paper,
+        thumbUrl: state.meta?.thumb ? '/thumb.jpg?v=' + state.thumbVersion : null,
+      },
     };
+  }
+
+  async function writeSheet(snap) {
+    if (!snap) return;
+    const { keep, target } = snap;
     const pages = [];
-    for (const it of items) {
-      if (it.deleted) continue;
+    for (const it of keep) {
       // Works for both a live capture (/captures/…) and a page already held as
       // a blob, so re-saving an opened songsheet needs no special case.
       const clean = await grabBlob(it.src);
@@ -1919,20 +1977,23 @@ import { createLoader } from '/brand/loaders.js';
     // These live in the server's work folder, which a new video deletes, so a
     // save racing one dropped whatever had already gone and stored a songsheet
     // with fewer pages than the scan found — silently, looking like success.
-    const wanted = items.filter((it) => !it.deleted).length;
+    const wanted = keep.length;
     if (pages.length !== wanted) {
       addWarning(`This songsheet was not saved: ${wanted - pages.length} of ${wanted} pages could not be read back. It is still on screen — export it, or scan again.`);
       return;
     }
+    // Every page removed: nothing to store, and nothing to delete either — the
+    // stored copy keeps its pages until one is put back or it is removed from
+    // the library on purpose.
     if (!pages.length) return;
     // Same trap, and the thumbnail is optional — a missing one must leave the
-    // songsheet saveable rather than storing an error body as its picture.
+    // songsheet saveable rather than storing an error body as its picture. A
+    // songsheet opened from storage has no thumbnail URL at all; null keeps
+    // the one already stored.
     const thumb = target.thumbUrl ? await grabBlob(target.thumbUrl) : null;
-    // Only claim the id for what is on screen if what is on screen is still
-    // this scan. If something else was opened meanwhile, this saves as its own
-    // record and leaves their view alone.
-    if (state.items === items) state.sheetId = target.id;
-    store.set('vtt.sheet', JSON.stringify({ id: target.id, jobId: target.jobId }));
+    // Removed from the library while this save was reading pages.
+    if (trashedIds.has(target.id)) return;
+    if (snap.live) store.set('vtt.sheet', JSON.stringify({ id: target.id, jobId: target.jobId, boot: target.boot }));
     try {
       await saveSheet({
         id: target.id,
@@ -1949,6 +2010,48 @@ import { createLoader } from '/brand/loaders.js';
     } catch (err) {
       addWarning('Could not save this songsheet: ' + err.message);
     }
+  }
+
+  const saveCurrentSheet = () => writeSheet(snapshotSheet());
+
+  // Edits on the songsheet step — the title, a removed page, the look, the
+  // paper — are saved back as they happen, a moment after the last one.
+  // Before this they lived only on screen, so a page removed from a stored
+  // songsheet came back the next time it was opened.
+  const SAVE_DELAY_MS = 700;
+  let saveTimer = 0;
+  function queueSave() {
+    if (state.saveOff || scanBusy() || !state.items.length) return;
+    // No record yet and none on its way: a scan whose first save has not been
+    // made, or one that found nothing. onDone makes that first save.
+    if (!state.sheetId && !sheetSave) return;
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(flushSave, SAVE_DELAY_MS);
+  }
+
+  // Write the queued edit now, from what is on screen now. Saves run one after
+  // another, so an older save still reading its pages cannot land after this
+  // one and put the old version back.
+  function flushSave() {
+    if (!saveTimer) return;
+    clearTimeout(saveTimer);
+    saveTimer = 0;
+    const snap = snapshotSheet();
+    if (!snap) return;
+    const run = (sheetSave || Promise.resolve()).catch(() => {}).then(() => writeSheet(snap));
+    sheetSave = run;
+    run.catch(() => {}).finally(() => { if (sheetSave === run) sheetSave = null; });
+  }
+
+  // The open songsheet was just removed from the library. It stays on screen —
+  // it can still be exported — but nothing more is saved, or the next edit
+  // would quietly bring it back.
+  const trashedIds = new Set();
+  function detachOpenSheet() {
+    clearTimeout(saveTimer);
+    saveTimer = 0;
+    state.sheetId = null;
+    state.saveOff = true;
   }
 
   // The sidebar's copy of the same records. Different job: the grid on the home
@@ -1985,23 +2088,33 @@ import { createLoader } from '/brand/loaders.js';
     syncSidebar();
   }
 
+  // The home screen's grid shows the latest few in the desktop app, where the
+  // library screen is the place to see all of them.
+  const HOME_LIMIT = 8;
+
   async function renderLibrary() {
     const section = $('librarySection');
     if (!hasStorage()) { section.hidden = true; renderSideList([]); return; }
+    const folderMode = libraryScreenAvailable();
     let sheets = [];
-    try { sheets = await listSheets(); } catch { sheets = []; }
-    renderSideList(sheets);
+    try { sheets = await listSheets(folderMode ? Infinity : 60); } catch { sheets = []; }
+    renderSideList(sheets.slice(0, 60));
+    $('sideLibrary').hidden = !folderMode;
+    $('sideLibraryCount').textContent = folderMode && sheets.length ? String(sheets.length) : '';
+    if (state.screen === 'library') refreshLibraryView();
     const host = $('libraryGrid');
     host.textContent = '';
     $('libCount').textContent = sheets.length ? `${sheets.length} saved` : '';
-    $('libNote').textContent = sheets.length
-      ? 'Kept in this browser. Export a PDF to keep a copy anywhere else.' : '';
+    $('libOpenAll').hidden = !folderMode;
+    $('libNote').textContent = !sheets.length ? ''
+      : folderMode ? 'Each songsheet is saved as a folder of pages you can open outside the app.'
+        : 'Kept in this browser. Export a PDF to keep a copy anywhere else.';
     // No need to check whether a video is loaded: this section lives inside
     // step 1, so it is already only visible on the home screen. Hiding it
     // whenever a video was loaded meant it disappeared after the first scan —
     // exactly when someone has songsheets worth going back to.
     section.hidden = sheets.length === 0;
-    for (const s of sheets) {
+    for (const s of folderMode ? sheets.slice(0, HOME_LIMIT) : sheets) {
       const card = el('button', 'lib-card');
       card.type = 'button';
       const img = el('img', 'lib-thumb');
@@ -2016,21 +2129,40 @@ import { createLoader } from '/brand/loaders.js';
       const body = el('div', 'lib-body');
       body.appendChild(el('div', 'lib-name', s.title));
       body.appendChild(el('div', 'lib-sub',
-        [`${s.pageCount} page${s.pageCount === 1 ? '' : 's'}`, s.channel].filter(Boolean).join(' · ')));
+        [`${s.pageCount} page${s.pageCount === 1 ? '' : 's'}`, s.artist || s.channel].filter(Boolean).join(' · ')));
       card.appendChild(body);
       const del = el('button', 'lib-del', '×');
       del.type = 'button';
-      del.title = 'Remove from your songsheets';
+      del.title = folderMode ? `Move to the ${trashName()}` : 'Remove from your songsheets';
       del.setAttribute('aria-label', 'Remove ' + s.title);
-      del.addEventListener('click', async (e) => {
+      del.addEventListener('click', (e) => {
         e.stopPropagation();
-        try { await deleteSheet(s.id); showToast('Songsheet removed', false); } catch { /* already gone */ }
-        renderLibrary();
+        trashSheets([s.id]);
       });
       card.appendChild(del);
       card.addEventListener('click', () => openSheet(s.id));
       host.appendChild(card);
     }
+  }
+  $('libOpenAll').addEventListener('click', () => showLibrary());
+
+  // One way to remove songsheets, from the home grid and the library screen
+  // alike. In the desktop app the shell asks first, natively, and moves each
+  // folder to the Trash, so the answer can be "none of them".
+  async function trashSheets(ids) {
+    if (!ids.length) return 0;
+    flushLibraryEdit();
+    let n = 0;
+    try { n = await deleteSheets(ids); } catch (err) { showError('Could not remove that: ' + err.message); return 0; }
+    if (!n) return 0;
+    for (const id of ids) trashedIds.add(id);
+    if (state.sheetId && ids.includes(state.sheetId)) detachOpenSheet();
+    for (const id of ids) lv.picked.delete(id);
+    if (ids.includes(lv.selected)) lv.selected = null;
+    const where = libraryScreenAvailable() ? `Moved to the ${trashName()}` : 'Removed';
+    showToast(n === 1 ? `Songsheet ${where.toLowerCase()}` : `${n} songsheets ${where.toLowerCase()}`, false);
+    renderLibrary();
+    return n;
   }
 
   // A scan in flight owns the songsheet on screen. Opening a stored one during
@@ -2046,10 +2178,26 @@ import { createLoader } from '/brand/loaders.js';
       showToast('Finish or cancel the scan first — opening a songsheet now would save the scan over it.');
       return;
     }
+    // The songsheet being left may have an edit waiting; it is written from
+    // the screen as it is now, and finished before reading — reopening the
+    // same songsheet would otherwise read the copy from before the edit.
+    await settleSave();
     let sheet = null;
     try { sheet = await getSheet(id); } catch { /* unreadable */ }
     if (!sheet || !sheet.pages?.length) { showError('That songsheet could not be opened.'); return; }
     state.sheetId = sheet.id;
+    state.saveOff = false;
+    // Warnings belong to a scan; a stored songsheet brings none of its own.
+    state.warnings = [];
+    renderWarnings();
+    // Pages its folder lists but that could not be read — deleted by hand, or
+    // online-only in a synced folder while offline. Saving it back would store
+    // only the pages that loaded and drop the rest for good, so it opens
+    // without saving until they are readable again.
+    if (sheet.missing) {
+      state.saveOff = true;
+      addWarning(`${sheet.missing} page${sheet.missing === 1 ? '' : 's'} of this songsheet could not be read from its folder, so changes to it are not being saved — otherwise ${sheet.missing === 1 ? 'that page' : 'those pages'} would be lost. If the folder is in iCloud Drive or OneDrive, connect and download it, then open it again.`);
+    }
     // No video is loaded for a saved sheet, so the source is metadata only.
     state.meta = { title: sheet.title, url: sheet.url, channel: sheet.channel, duration: sheet.duration, thumb: false, ready: false, width: 0, height: 0, fps: 0 };
     state.title = sheet.title;
@@ -2067,6 +2215,665 @@ import { createLoader } from '/brand/loaders.js';
     $('librarySection').hidden = true;
     showStep(4);
   }
+
+  // ---------- library screen (desktop) ----------
+
+  // The full browser over the songsheet folder: search, sort, rename, notes,
+  // bulk removal. Desktop only, because it is the view of a folder — the web
+  // build keeps its songsheets in the browser and has the home grid for them.
+  const libraryScreenAvailable = () => isDesktop() && usesFolder();
+  const platform = () => { try { return window.vidtotab?.platform || ''; } catch { return ''; } };
+  const trashName = () => (platform() === 'win32' ? 'Recycle Bin' : 'Trash');
+  const folderAppName = () => ({ darwin: 'Finder', win32: 'Explorer' })[platform()] || 'folder';
+
+  const lv = {
+    sheets: [],
+    info: null,
+    error: null,
+    selected: null,        // id shown in the detail panel
+    picked: new Set(),     // ids ticked in select mode
+    selecting: false,
+    query: '',
+    sort: store.get('vtt.libSort', 'edited'),
+    token: 0,              // newest refresh; older ones are dropped when they land
+    pageUrls: [],          // object URLs for the detail panel's page strip
+    pagesFor: null,
+    edit: null,            // { id, patch } waiting out its debounce
+    editTimer: 0,
+  };
+  if (!['edited', 'added', 'title', 'artist', 'pages'].includes(lv.sort)) lv.sort = 'edited';
+  $('lvSort').value = lv.sort;
+  $('lvdReveal').textContent = `Show in ${folderAppName()}`;
+  $('lvOpenFolder').textContent = `Show in ${folderAppName()}`;
+  $('lvdTrash').textContent = `Move to ${trashName()}`;
+  $('lvBulkTrash').textContent = `Move to ${trashName()}`;
+
+  function showLibrary() {
+    if (!libraryScreenAvailable()) return;
+    if (state.screen !== 'library') {
+      state.screen = 'library';
+      for (let i = 1; i <= 4; i++) sections[i].hidden = true;
+      $('libraryView').hidden = false;
+      renderStepper();
+      window.scrollTo({ top: 0 });
+      $('libraryView').focus({ preventScroll: true });
+    }
+    refreshLibraryView();
+  }
+
+  // Called by showStep, which every way out of the library goes through.
+  function leaveLibrary() {
+    flushLibraryEdit();
+    state.screen = 'steps';
+    $('libraryView').hidden = true;
+    // Coming back refills the details from disk: the songsheet may have been
+    // renamed on the songsheet step in the meantime.
+    delete $('lvDetail').dataset.sheet;
+    setSelecting(false);
+  }
+
+  async function refreshLibraryView() {
+    const token = ++lv.token;
+    let sheets = [];
+    let info = null;
+    let error = null;
+    try {
+      [sheets, info] = await Promise.all([listSheets(Infinity), folderInfo()]);
+    } catch (err) {
+      error = err.message;
+    }
+    if (token !== lv.token) return;
+    lv.sheets = sheets;
+    lv.info = info;
+    lv.error = error;
+    const ids = new Set(sheets.map((x) => x.id));
+    for (const id of [...lv.picked]) if (!ids.has(id)) lv.picked.delete(id);
+    if (lv.selected && !ids.has(lv.selected)) lv.selected = null;
+    renderLibraryView();
+  }
+
+  const fold = (x) => String(x || '').normalize('NFKC').toLocaleLowerCase();
+  const byTitle = (a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: 'base', numeric: true });
+
+  function visibleSheets() {
+    const words = fold(lv.query).split(/\s+/).filter(Boolean);
+    const hits = lv.sheets.filter((x) => {
+      if (!words.length) return true;
+      const hay = fold([x.title, x.artist, x.channel, x.notes].join(' '));
+      return words.every((w) => hay.includes(w));
+    });
+    const sorters = {
+      edited: (a, b) => b.updatedAt - a.updatedAt,
+      added: (a, b) => b.savedAt - a.savedAt,
+      title: byTitle,
+      // Songsheets with no artist yet go last rather than first.
+      artist: (a, b) => {
+        const x = a.artist || a.channel;
+        const y = b.artist || b.channel;
+        if (!x !== !y) return x ? -1 : 1;
+        return (x || '').localeCompare(y || '', undefined, { sensitivity: 'base' }) || byTitle(a, b);
+      },
+      pages: (a, b) => b.pageCount - a.pageCount || byTitle(a, b),
+    };
+    return hits.sort(sorters[lv.sort] || sorters.edited);
+  }
+
+  const fmtBytes = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(n >= 10485760 ? 0 : 1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
+  function fmtWhen(ms) {
+    if (!ms) return '';
+    const d = new Date(ms);
+    const ago = Date.now() - ms;
+    try {
+      const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' });
+      if (ago < 60000) return 'just now';
+      if (ago < 3600000) return rtf.format(-Math.round(ago / 60000), 'minute');
+      if (ago < 86400000) return rtf.format(-Math.round(ago / 3600000), 'hour');
+      if (ago < 7 * 86400000) return rtf.format(-Math.round(ago / 86400000), 'day');
+    } catch { /* no Intl: absolute date below */ }
+    const sameYear = d.getFullYear() === new Date().getFullYear();
+    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', ...(sameYear ? {} : { year: 'numeric' }) });
+  }
+  // The home folder as ~ on macOS and Linux, where that is how people write it.
+  function shortPath(dir) {
+    const home = lv.info?.home;
+    if (!dir) return '';
+    if (home && platform() !== 'win32' && (dir === home || dir.startsWith(home + '/'))) return '~' + dir.slice(home.length);
+    return dir;
+  }
+
+  const TICK = '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m4.5 10.5 3.5 3.5 7.5-8"/></svg>';
+
+  function renderLibraryView() {
+    const total = lv.sheets.length;
+    const bytes = lv.sheets.reduce((n, x) => n + (x.bytes || 0), 0);
+    $('lvCount').textContent = total ? `${total} songsheet${total === 1 ? '' : 's'} · ${fmtBytes(bytes)}` : '';
+    const dir = lv.info?.dir || '';
+    $('lvPath').textContent = shortPath(dir);
+    $('lvPath').title = dir;
+    $('lvError').hidden = !lv.error;
+    $('lvErrorMsg').textContent = lv.error || '';
+
+    const shown = visibleSheets();
+    const grid = $('lvGrid');
+    grid.textContent = '';
+    for (const x of shown) grid.appendChild(libraryCard(x));
+
+    const empty = !lv.error && shown.length === 0;
+    $('lvEmpty').hidden = !empty;
+    if (empty) {
+      $('lvEmptyTitle').textContent = total ? `Nothing matches “${lv.query.trim()}”` : 'No songsheets yet';
+      $('lvEmptyText').textContent = total
+        ? 'Search looks at titles, artists, channels and notes.'
+        : 'Every scan is saved here automatically, as a folder of pages. Paste a video link to make the first one.';
+    }
+    $('lvTools').hidden = total === 0;
+    renderBulk(shown);
+    renderDetail();
+  }
+
+  function libraryCard(x) {
+    const card = el('button', 'lv-card');
+    card.type = 'button';
+    card.dataset.sheet = x.id;
+    if (lv.selecting) card.setAttribute('aria-pressed', String(lv.picked.has(x.id)));
+    else if (lv.selected === x.id) card.setAttribute('aria-current', 'true');
+    const img = el('img', 'lv-thumb');
+    img.alt = '';
+    img.loading = 'lazy';
+    if (x.thumb) {
+      const u = URL.createObjectURL(x.thumb);
+      img.src = u;
+      img.addEventListener('load', () => URL.revokeObjectURL(u), { once: true });
+      img.addEventListener('error', () => URL.revokeObjectURL(u), { once: true });
+    }
+    card.appendChild(img);
+    const text = el('span', 'lv-text');
+    text.appendChild(el('span', 'lv-name', x.title));
+    text.appendChild(el('span', 'lv-sub',
+      [x.artist || x.channel, `${x.pageCount} page${x.pageCount === 1 ? '' : 's'}`].filter(Boolean).join(' · ')));
+    text.appendChild(el('span', 'lv-when', `Edited ${fmtWhen(x.updatedAt)}`));
+    card.appendChild(text);
+    // The songsheet on the songsheet step right now, so it can be found again.
+    if (state.sheetId === x.id) card.appendChild(el('span', 'lv-open-tag', 'Open'));
+    if (lv.selecting) card.appendChild(icon(`<span class="lv-tick" aria-hidden="true">${TICK}</span>`));
+    card.setAttribute('aria-label', `${x.title}, ${x.pageCount} page${x.pageCount === 1 ? '' : 's'}`);
+    card.addEventListener('click', () => {
+      if (lv.selecting) {
+        if (lv.picked.has(x.id)) lv.picked.delete(x.id); else lv.picked.add(x.id);
+        card.setAttribute('aria-pressed', String(lv.picked.has(x.id)));
+        renderBulk(visibleSheets());
+        return;
+      }
+      selectSheet(x.id);
+    });
+    card.addEventListener('dblclick', () => { if (!lv.selecting) openFromLibrary(x.id); });
+    // Enter opens, as it does on a file in Finder or Explorer; a click or
+    // Space shows the details.
+    card.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' || lv.selecting) return;
+      e.preventDefault();
+      openFromLibrary(x.id);
+    });
+    return card;
+  }
+
+  function selectSheet(id) {
+    if (lv.selected === id) return;
+    flushLibraryEdit();
+    lv.selected = id;
+    for (const c of $('lvGrid').querySelectorAll('.lv-card')) {
+      if (c.dataset.sheet === id) c.setAttribute('aria-current', 'true'); else c.removeAttribute('aria-current');
+    }
+    renderDetail();
+  }
+
+  function releasePageUrls() {
+    for (const u of lv.pageUrls) { try { URL.revokeObjectURL(u); } catch { /* already gone */ } }
+    lv.pageUrls = [];
+    lv.pagesFor = null;
+  }
+
+  function renderDetail() {
+    const x = lv.sheets.find((y) => y.id === lv.selected) || null;
+    const panel = $('lvDetail');
+    panel.hidden = !x || lv.selecting;
+    $('lvBody').classList.toggle('has-detail', !panel.hidden);
+    if (!x) { delete panel.dataset.sheet; releasePageUrls(); $('lvdPages').textContent = ''; return; }
+    // Fields are filled only for a newly shown songsheet, never while one is
+    // being typed into: a refresh landing mid-word would put the old text back.
+    if (panel.dataset.sheet !== x.id) {
+      panel.dataset.sheet = x.id;
+      $('lvdTitle').value = x.title;
+      $('lvdArtist').value = x.artist || '';
+      $('lvdNotes').value = x.notes || '';
+      $('lvdSaved').textContent = '';
+      const img = $('lvdThumb');
+      img.removeAttribute('src');
+      if (x.thumb) {
+        const u = URL.createObjectURL(x.thumb);
+        img.src = u;
+        img.addEventListener('load', () => URL.revokeObjectURL(u), { once: true });
+      }
+      img.hidden = !x.thumb;
+      loadPageStrip(x.id);
+    }
+    const facts = $('lvdFacts');
+    facts.textContent = '';
+    const fact = (k, v, href) => {
+      if (!v) return;
+      facts.appendChild(el('dt', null, k));
+      const dd = el('dd');
+      if (href) {
+        const a = el('a', null, v);
+        a.href = href;
+        a.target = '_blank';
+        a.rel = 'noopener';
+        dd.appendChild(a);
+      } else dd.textContent = v;
+      facts.appendChild(dd);
+    };
+    fact('Pages', String(x.pageCount));
+    fact('Source', x.channel || (x.url ? 'Video' : ''), /^https?:\/\//i.test(x.url) ? x.url : null);
+    if (x.duration) fact('Length', fmtTime(x.duration));
+    fact('On disk', x.bytes ? fmtBytes(x.bytes) : '');
+    fact('Added', x.savedAt ? new Date(x.savedAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : '');
+    fact('Edited', fmtWhen(x.updatedAt));
+    fact('Folder', x.folder || '');
+    const busyNow = scanBusy();
+    $('lvdOpen').disabled = busyNow;
+    $('lvdPractice').disabled = busyNow;
+    $('lvdOpen').title = busyNow ? 'Finish or cancel the scan first' : '';
+  }
+
+  // The pages themselves, small, so a songsheet can be recognised without
+  // opening it. Read from disk only for the one being looked at.
+  async function loadPageStrip(id) {
+    releasePageUrls();
+    const host = $('lvdPages');
+    host.textContent = '';
+    lv.pagesFor = id;
+    let full = null;
+    try { full = await getSheet(id); } catch { full = null; }
+    if (lv.pagesFor !== id || lv.selected !== id || !full) return;
+    for (const p of full.pages) {
+      if (!p.clean) continue;
+      const u = URL.createObjectURL(p.clean);
+      lv.pageUrls.push(u);
+      const img = el('img');
+      img.src = u;
+      img.alt = `Page ${p.index + 1}`;
+      img.loading = 'lazy';
+      host.appendChild(img);
+    }
+  }
+
+  // Title, artist and notes save themselves a moment after typing stops, and
+  // straight away when the panel is left.
+  function queueLibraryEdit(field, value) {
+    const id = lv.selected;
+    if (!id) return;
+    if (lv.edit && lv.edit.id !== id) flushLibraryEdit();
+    lv.edit = { id, patch: { ...(lv.edit?.patch || {}), [field]: value } };
+    $('lvdSaved').textContent = 'Editing…';
+    clearTimeout(lv.editTimer);
+    lv.editTimer = setTimeout(flushLibraryEdit, 600);
+  }
+
+  function flushLibraryEdit() {
+    clearTimeout(lv.editTimer);
+    const job = lv.edit;
+    lv.edit = null;
+    if (!job) return Promise.resolve();
+    if (job.patch.title !== undefined && !job.patch.title.trim()) delete job.patch.title;
+    // The songsheet open on the songsheet step saves itself too, from what is
+    // on screen there; its title has to follow the rename or the next edit
+    // there would name it back.
+    if (job.patch.title !== undefined && state.sheetId === job.id) {
+      state.title = job.patch.title;
+      if (document.activeElement !== $('titleInput')) $('titleInput').value = state.title;
+    }
+    return updateSheet(job.id, job.patch).then((saved) => {
+      const i = lv.sheets.findIndex((y) => y.id === job.id);
+      if (i >= 0) lv.sheets[i] = { ...lv.sheets[i], ...saved, thumb: saved?.thumb || lv.sheets[i].thumb };
+      if (lv.selected === job.id && !lv.edit) $('lvdSaved').textContent = 'Saved';
+      // Cards and the sidebar show the title; redraw them, not the fields.
+      const card = $('lvGrid').querySelector(`.lv-card[data-sheet="${CSS.escape(job.id)}"]`);
+      if (card && i >= 0) card.replaceWith(libraryCard(lv.sheets[i]));
+      renderLibrary();
+    }).catch((err) => {
+      if (lv.selected === job.id) $('lvdSaved').textContent = 'Not saved: ' + err.message;
+    });
+  }
+
+  $('lvdTitle').addEventListener('input', () => queueLibraryEdit('title', $('lvdTitle').value));
+  $('lvdArtist').addEventListener('input', () => queueLibraryEdit('artist', $('lvdArtist').value));
+  $('lvdNotes').addEventListener('input', () => queueLibraryEdit('notes', $('lvdNotes').value));
+  for (const id of ['lvdTitle', 'lvdArtist', 'lvdNotes']) $(id).addEventListener('blur', () => flushLibraryEdit());
+  $('lvdTitle').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('lvdTitle').blur(); } });
+  $('lvdArtist').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('lvdArtist').blur(); } });
+
+  async function openFromLibrary(id) {
+    await flushLibraryEdit();
+    await openSheet(id);
+  }
+  $('lvdOpen').addEventListener('click', () => lv.selected && openFromLibrary(lv.selected));
+  $('lvdPractice').addEventListener('click', async () => {
+    const id = lv.selected;
+    if (!id) return;
+    await openFromLibrary(id);
+    if (state.sheetId === id) openPractice();
+  });
+  $('lvdReveal').addEventListener('click', async () => {
+    if (!lv.selected) return;
+    await flushLibraryEdit(); // a rename moves the folder; show where it is now
+    revealSheet(lv.selected).catch((err) => showError(err.message));
+  });
+  $('lvdTrash').addEventListener('click', () => lv.selected && trashSheets([lv.selected]));
+  $('lvdClose').addEventListener('click', () => {
+    flushLibraryEdit();
+    lv.selected = null;
+    renderLibraryView();
+  });
+
+  $('lvOpenFolder').addEventListener('click', () => openLibraryFolder().catch((err) => showError(err.message)));
+  $('lvChange').addEventListener('click', async () => {
+    await flushLibraryEdit();
+    let r = null;
+    try { r = await chooseLibraryFolder(); } catch (err) { showError(err.message); return; }
+    if (!r) return;
+    // Left behind in the old folder: the open songsheet is not in the library
+    // any more, and saving it would copy it into the new one.
+    if (!r.moved && r.dir !== lv.info?.dir && state.sheetId && lv.sheets.some((y) => y.id === state.sheetId)) detachOpenSheet();
+    showToast(r.moved ? `Moved ${r.moved} songsheet${r.moved === 1 ? '' : 's'} to ${shortPath(r.dir)}` : `Now using ${shortPath(r.dir)}`, false);
+    lv.selected = null;
+    lv.picked.clear();
+    renderLibrary();
+    refreshLibraryView();
+  });
+
+  let searchTimer = 0;
+  $('lvSearch').addEventListener('input', () => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => { lv.query = $('lvSearch').value; renderLibraryView(); }, 90);
+  });
+  $('lvSort').addEventListener('change', () => {
+    lv.sort = $('lvSort').value;
+    store.set('vtt.libSort', lv.sort);
+    renderLibraryView();
+  });
+
+  function setSelecting(on) {
+    if (lv.selecting === on) return;
+    lv.selecting = on;
+    if (!on) lv.picked.clear();
+    else flushLibraryEdit();
+    $('lvSelect').setAttribute('aria-pressed', String(on));
+    // The bar that appears has its own Done; two ways out of one mode, side
+    // by side, only makes someone wonder how they differ.
+    $('lvSelect').hidden = on;
+    if (state.screen === 'library') renderLibraryView();
+  }
+  $('lvSelect').addEventListener('click', () => setSelecting(!lv.selecting));
+  $('lvBulkDone').addEventListener('click', () => setSelecting(false));
+  $('lvSelectAll').addEventListener('click', () => {
+    const shown = visibleSheets();
+    const all = shown.every((x) => lv.picked.has(x.id));
+    for (const x of shown) { if (all) lv.picked.delete(x.id); else lv.picked.add(x.id); }
+    renderLibraryView();
+  });
+  $('lvBulkTrash').addEventListener('click', async () => {
+    const n = await trashSheets([...lv.picked]);
+    if (n) setSelecting(false);
+  });
+
+  function renderBulk(shown) {
+    $('lvBulk').hidden = !lv.selecting;
+    if (!lv.selecting) return;
+    const n = lv.picked.size;
+    $('lvBulkCount').textContent = n ? `${n} selected` : 'Choose songsheets';
+    $('lvBulkTrash').disabled = n === 0;
+    $('lvSelectAll').textContent = shown.length && shown.every((x) => lv.picked.has(x.id)) ? 'Select none' : 'Select all';
+  }
+
+  function libraryKeys(e) {
+    const k = e.key;
+    if (k === '/') { e.preventDefault(); $('lvSearch').focus(); $('lvSearch').select(); return; }
+    if (k === 'Escape') {
+      if (lv.selecting) setSelecting(false);
+      else if (lv.selected) { flushLibraryEdit(); lv.selected = null; renderLibraryView(); }
+      return;
+    }
+    if ((k === 'Delete' || k === 'Backspace') && lv.selecting && lv.picked.size) {
+      e.preventDefault();
+      $('lvBulkTrash').click();
+    }
+  }
+
+  // ---------- updates (desktop) ----------
+
+  // A notice and a download, not an auto-updater: see electron/updates.cjs for
+  // why. The shell does the asking and the downloading; this only shows what
+  // it found and passes on which button was pressed.
+  const shellUpdates = (() => { try { return window.vidtotab?.updates || null; } catch { return null; } })();
+  const upd = {
+    info: null,          // the shell's summary of the latest release
+    status: 'idle',      // idle | downloading | verifying | done | error
+    received: 0,
+    total: 0,
+    file: '',
+    name: '',
+    error: '',
+    opened: false,       // the installer was opened (macOS: now quit and drag)
+    dismissed: false,    // closed for this session; a check someone asks for undoes it
+    checking: false,
+    checkError: '',
+    auto: true,
+  };
+
+  const mb = (n) => `${Math.max(1, Math.round((n || 0) / 1048576))} MB`;
+
+  function updButton(label, fn, cls = 'btn small') {
+    const b = el('button', cls, label);
+    b.type = 'button';
+    b.addEventListener('click', fn);
+    return b;
+  }
+
+  function renderUpdate() {
+    if (!shellUpdates) return;
+    const info = upd.info;
+    const banner = $('updateBanner');
+    const active = upd.status !== 'idle' || Boolean(info?.available);
+    banner.hidden = !active || upd.dismissed;
+    const badge = $('appVersion');
+    if (info?.available) {
+      badge.dataset.update = '1';
+      badge.title = `VidToTab ${info.latest} is available`;
+    } else {
+      delete badge.dataset.update;
+      badge.title = 'Check for updates';
+    }
+    if (banner.hidden) return;
+
+    const actions = $('updActions');
+    actions.textContent = '';
+    const hint = $('updHint');
+    hint.hidden = true;
+    const progress = $('updProgress');
+    progress.hidden = true;
+    $('updBar').classList.remove('indeterminate');
+    const seeReleases = () => updButton('See releases', () => shellUpdates.openPage('releases'), 'btn small ghost');
+    const latest = info?.latest ? `VidToTab ${info.latest}` : 'The new version';
+
+    if (upd.status === 'downloading' || upd.status === 'verifying') {
+      $('updTitle').textContent = upd.status === 'verifying' ? `Checking ${latest}…` : `Downloading ${latest}…`;
+      $('updText').textContent = '';
+      progress.hidden = false;
+      const total = upd.total || info?.asset?.size || 0;
+      if (upd.status === 'verifying' || !total) {
+        $('updBar').classList.add('indeterminate');
+        $('updProgressLabel').textContent = upd.status === 'verifying' ? 'Comparing it with the checksum GitHub published' : mb(upd.received);
+      } else {
+        $('updBarFill').style.width = `${Math.min(100, (upd.received / total) * 100).toFixed(1)}%`;
+        $('updProgressLabel').textContent = `${mb(upd.received)} of ${mb(total)}`;
+      }
+      if (upd.status === 'downloading') actions.appendChild(updButton('Cancel', () => shellUpdates.cancel(), 'btn small ghost'));
+      return;
+    }
+
+    if (upd.status === 'done') {
+      const p = platform();
+      const appImage = /\.AppImage$/i.test(upd.name);
+      $('updTitle').textContent = `${latest} is downloaded.`;
+      $('updText').textContent = upd.verified ? '' : 'GitHub published no checksum for this file, so it could not be verified.';
+      hint.hidden = false;
+      if (p === 'darwin') {
+        hint.textContent = upd.opened
+          ? 'In the window that opened, drag VidToTab into Applications and choose Replace. Quit this copy first — macOS will not replace an app that is open.'
+          : 'Open it, then drag VidToTab into Applications to replace this version.';
+        actions.appendChild(updButton(upd.opened ? 'Open again' : 'Open', openInstaller, 'btn small primary'));
+        if (upd.opened) actions.appendChild(updButton('Quit VidToTab', () => shellUpdates.quit()));
+      } else if (p === 'win32') {
+        hint.textContent = 'The installer replaces this version. VidToTab closes so it can.';
+        actions.appendChild(updButton('Install and close', openInstaller, 'btn small primary'));
+      } else if (appImage) {
+        hint.textContent = 'It is ready to run. Replace your current VidToTab AppImage with it, then start the new one.';
+      } else {
+        hint.textContent = 'Open it to install with your software centre, or run: sudo apt install ./' + upd.name;
+        actions.appendChild(updButton('Open', openInstaller, 'btn small primary'));
+      }
+      actions.appendChild(updButton(`Show in ${folderAppName()}`, () => shellUpdates.reveal()));
+      return;
+    }
+
+    if (upd.status === 'error') {
+      $('updTitle').textContent = 'The update could not be downloaded.';
+      $('updText').textContent = upd.error;
+      actions.appendChild(updButton('Try again', startDownload, 'btn small primary'));
+      actions.appendChild(seeReleases());
+      return;
+    }
+
+    // Available.
+    $('updTitle').textContent = `${latest} is available.`;
+    $('updText').textContent = `You have ${info.current}.`;
+    if (info.asset) {
+      actions.appendChild(updButton(`Download (${mb(info.asset.size)})`, startDownload, 'btn small primary'));
+    } else {
+      $('updText').textContent += ' There is no download for this computer on that release, but the releases page has the others.';
+    }
+    actions.appendChild(updButton('What’s new', () => shellUpdates.openPage('release'), 'btn small'));
+    actions.appendChild(seeReleases());
+  }
+
+  async function startDownload() {
+    upd.status = 'downloading';
+    upd.received = 0;
+    upd.total = upd.info?.asset?.size || 0;
+    upd.error = '';
+    upd.opened = false;
+    renderUpdate();
+    try {
+      await shellUpdates.download();
+    } catch (err) {
+      upd.status = 'error';
+      upd.error = shellMsg(err);
+      renderUpdate();
+    }
+  }
+
+  async function openInstaller() {
+    try {
+      await shellUpdates.open();
+      upd.opened = true;
+    } catch (err) {
+      upd.status = 'error';
+      upd.error = shellMsg(err);
+    }
+    renderUpdate();
+  }
+
+  $('updDismiss').addEventListener('click', () => { upd.dismissed = true; renderUpdate(); });
+
+  async function checkForUpdates(manual) {
+    if (!shellUpdates || upd.checking) return;
+    upd.checking = true;
+    upd.checkError = '';
+    renderAbout();
+    try {
+      const r = await shellUpdates.check(manual);
+      if (!r?.skipped) {
+        upd.info = r;
+        if (manual) upd.dismissed = false;
+      }
+    } catch (err) {
+      upd.checkError = shellMsg(err);
+    } finally {
+      upd.checking = false;
+      renderUpdate();
+      renderAbout();
+    }
+  }
+
+  function renderAbout() {
+    if (!shellUpdates) return;
+    const status = $('aboutStatus');
+    const info = upd.info;
+    $('aboutCheck').disabled = upd.checking;
+    if (upd.checking) status.textContent = 'Checking GitHub for a newer version…';
+    else if (upd.checkError) status.textContent = `Could not check: ${upd.checkError}`;
+    else if (!info) status.textContent = upd.auto ? 'Not checked yet.' : 'Automatic checks are off.';
+    else if (info.available) status.textContent = `VidToTab ${info.latest} is available — you have ${info.current}.`;
+    else if (!info.latest) status.textContent = 'No release has been published yet.';
+    else status.textContent = `You have the latest version (${info.current}).`;
+  }
+
+  if (shellUpdates) {
+    shellUpdates.onEvent((ev) => {
+      if (ev.type === 'progress') Object.assign(upd, { status: 'downloading', received: ev.received, total: ev.total });
+      else if (ev.type === 'verifying') upd.status = 'verifying';
+      else if (ev.type === 'done') Object.assign(upd, { status: 'done', file: ev.file, name: ev.name, verified: ev.verified !== false });
+      else if (ev.type === 'error') Object.assign(upd, { status: 'error', error: ev.message });
+      else if (ev.type === 'cancelled') upd.status = 'idle';
+      if (ev.type === 'done' || ev.type === 'error') upd.dismissed = false;
+      renderUpdate();
+    });
+
+    const badge = $('appVersion');
+    badge.disabled = false;
+    badge.title = 'Check for updates';
+    badge.addEventListener('click', async () => {
+      $('aboutVersion').textContent = `Version ${badge.textContent.replace(/^v/, '') || '?'}`;
+      try { upd.auto = await shellUpdates.getAuto(); } catch { /* keep the last known */ }
+      $('aboutAuto').checked = upd.auto;
+      renderAbout();
+      $('aboutDialog').showModal();
+      // Opening the dialog is asking; a result from this session is reused
+      // only if it is fresh.
+      if (!upd.info || upd.checkError) checkForUpdates(true);
+    });
+    $('aboutCheck').addEventListener('click', () => checkForUpdates(true));
+    $('aboutReleases').addEventListener('click', () => shellUpdates.openPage('releases'));
+    $('aboutAuto').addEventListener('change', async () => {
+      try { upd.auto = await shellUpdates.setAuto($('aboutAuto').checked); } catch { /* unchanged */ }
+      renderAbout();
+    });
+  }
+
+  // ---------- leaving ----------
+
+  // Edits wait a moment before they are saved. The desktop shell calls this
+  // before its window closes and waits for it; a browser gets no such wait, so
+  // a tab that goes into the background saves straight away instead.
+  window.vidtotabFlush = async () => {
+    await flushLibraryEdit();
+    await settleSave();
+  };
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'hidden') return;
+    flushLibraryEdit();
+    flushSave();
+  });
 
   // ---------- init ----------
 
@@ -2091,4 +2898,17 @@ import { createLoader } from '/brand/loaders.js';
   checkPreflight();
   connectSSE();
   renderStepper();
+
+  // A desktop app that ran 0.2 kept its songsheets in the browser store; they
+  // are copied into the folder once, and the originals are left alone.
+  if (libraryScreenAvailable()) {
+    migrateBrowserSheets().then((n) => {
+      if (!n) return;
+      showToast(`Moved ${n} songsheet${n === 1 ? '' : 's'} into your library folder`, false);
+      renderLibrary();
+    }).catch(() => { /* tried again next launch */ });
+  }
+  // After the opening animation, not during it: a banner dropping in under a
+  // splash is the one moment nobody reads it.
+  if (shellUpdates) setTimeout(() => checkForUpdates(false), 5000);
 })();

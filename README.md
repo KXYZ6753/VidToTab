@@ -16,7 +16,8 @@ One codebase behind all of them.
 | ffmpeg | bundled | install it yourself | in the image |
 | yt-dlp | fetched on first run, kept current | install it yourself | in the image |
 | Limits | none | none | off by default, on with `VIDTOTAB_PUBLIC=1` |
-| Songsheets | kept by the app | kept in the browser | kept in each visitor's browser |
+| Songsheets | a folder of files, `Documents/VidToTab` | kept in the browser | kept in each visitor's browser |
+| Updates | tells you, and downloads the installer | `git pull` | redeploy |
 
 ### Desktop app — macOS, Windows, Linux
 
@@ -31,6 +32,12 @@ npm run dist            # installers for this platform
 It carries its own ffmpeg (LGPL, pinned by checksum) and fetches yt-dlp into its data folder on first run, so it works on a machine that has neither — an app opened from Finder, the Dock or a .desktop file has no Homebrew on its PATH, which is the whole reason it brings its own.
 
 The macOS app is ad-hoc signed, which is what stops macOS calling it damaged, but it is not notarised: the first launch of a downloaded copy is stopped, and since macOS 15 the way through is **System Settings → Privacy & Security → Open Anyway** (right-click → Open no longer is). Windows SmartScreen wants **More info → Run anyway**. [Releasing](#releasing) explains what it would take to remove both.
+
+**Songsheets are files.** Each one is a folder in `Documents/VidToTab` — `sheet.json`, one `page-NNN.png` per page (and `page-NNN-original.png` where the video's own colours differ), and the video's thumbnail. The folder follows the songsheet's title, so it can be found in Finder or Explorer, copied to another machine, or backed up with everything else; the app goes by the id inside `sheet.json`, so renaming or moving a folder by hand loses nothing. Only files the app wrote are ever changed. A songsheet saved by 0.2, which kept them in the app's browser storage, is copied into the folder once on the first launch of a newer version, and the original is left where it was.
+
+The **Library** in the sidebar is the full view of that folder: search across titles, artists, channels and notes; sort by when a songsheet was added or edited, by title, artist or page count; select several and move them to the Trash (or Recycle Bin) together. Selecting one shows its details — edit the title, artist and notes in place, see its pages, open it, practise from it, or show its folder. *Change…* points the library at another folder and offers to move the songsheets there. On a Mac the first save to Documents asks for permission once; if it was refused, allow it under System Settings → Privacy & Security → Files and Folders, or choose another folder.
+
+**Updates.** On launch, and whenever you click the version in the top bar, the app asks GitHub which release is the newest. The request carries this app's version and platform and nothing else — no identifier, nothing about your songsheets. If there is a newer one, a banner offers **Download**, **What's new** and **See releases**. Download fetches the installer for this machine (the `.dmg`, the Windows installer, or the `.deb` or AppImage matching how it was installed), checks it against the SHA-256 GitHub publishes for it, and opens it: on a Mac, quit VidToTab and drag the new one into Applications; on Windows the installer takes over and the app closes. It is a notice and a download rather than a silent auto-update, because replacing a running macOS app in place needs a Developer ID signature this app does not have yet. The check can be turned off in the same dialog.
 
 The desktop app has no landing page. That view exists to explain the thing and offer the download, and inside the download both halves are pointless, so it opens straight into the working layout and the home toggle is not there — a preference remembered from a browser on the same machine does not follow it in.
 
@@ -74,7 +81,7 @@ docker run -p 3000:3000 -v vidtotab-data:/data -e VIDTOTAB_PUBLIC=1 vidtotab
 
 **Practice** opens one page at a time, full screen, for playing along. Arrow keys, space or PageUp/PageDown turn the page — the last pair is what most Bluetooth page-turner pedals send, so a pedal works without any setup. On a phone or tablet, tap the left or right edge. The screen is kept awake while you read, and Esc leaves.
 
-Every finished scan is saved to **your songsheets** on the home screen, because loading another video wipes the working folder. Pages are stored in the browser as images, so a saved songsheet still opens after the video is long gone. Export a PDF to keep a copy anywhere else.
+Every finished scan is saved to **your songsheets** on the home screen, because loading another video wipes the working folder, and changes made on the songsheet step — the title, a removed page, the look, the paper — are saved back as you make them. In a browser the pages are stored as images in the browser itself, so a saved songsheet still opens after the video is long gone; export a PDF to keep a copy anywhere else. The desktop app keeps them as files instead (above).
 
 There is a **home page** and an **app view**, swapped by the button in the bar. The home page is the front door; the app view drops the pitch and puts a sidebar beside the workspace with new scan, every saved songsheet and practice — so a songsheet is one click away instead of four steps back. The desktop build opens straight into the app view, since a downloaded app has no business showing a landing page every launch.
 
@@ -98,7 +105,8 @@ Everything runs locally: yt-dlp downloads, ffmpeg decodes, the analysis is plain
 ```sh
 npm test                      # pipeline self-checks + the browser-shared modules
 npm run test:server           # server behaviour: upload races, the guard, public limits, job ownership
-npm run test:app              # launches the desktop shell and checks it leaves nothing running
+npm run test:app              # launches the desktop shell: library folders, the Library screen, the
+                              # update check against a fake GitHub, and that it leaves nothing running
 npm run test:app:packaged     # the same against a built app
 npm run binaries              # fetch the pinned ffmpeg/ffprobe for this platform
 npm run icon                  # redraw build/icon.png from source
@@ -204,7 +212,7 @@ VIDTOTAB_FFPROBE=$PWD/build/bin/$(node -p "process.platform+'-'+process.arch")/f
 - Horizontally or vertically **scrolling** tabs aren't stitched; the app captures page flips. None of the 19 videos surveyed for this project scroll, so stitching was deliberately not built rather than shipped untested.
 - Two pages that differ only by a thin mark (an "x" strum mark, a single changed digit on a small, low-resolution tab) can be merged — use *More pages*.
 - Live video directly behind the notation can leave faint marks in the clean print; *Original* shows the video frame as-is.
-- Songsheets are stored in the browser. Clearing site data removes them; export a PDF to keep a copy.
+- In a browser, songsheets are stored in the browser. Clearing site data removes them; export a PDF to keep a copy. (The desktop app keeps them as files.)
 - A **hosted instance is one person at a time** — see [Hosted](#hosted). The limits keep visitors from disturbing each other; they do not make it multi-user.
 - **The downloads are not signed by a known developer.** macOS wants *Open Anyway* in Privacy & Security on first launch and Windows SmartScreen wants *Run anyway* — see [Releasing](#releasing) for what removing both would take.
 - Planned: AI transcription of captures into re-rendered tab (alphaTex / alphaTab).

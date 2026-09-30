@@ -316,6 +316,115 @@ body[data-view="app"] .source-card { margin: 14px 0 0; }
 /* Why, not just "no". A disabled button with no reason next to it is the same
    as a broken one to anyone who cannot guess the rule. */
 .side-why { font-size: 12.5px; color: var(--muted); margin-top: 6px; }
+/* ---------- desktop: updates, library ---------- */
+/* The version doubles as the way into the update check, so it keeps the look of
+   a label and only behaves like a button where it is one. */
+.version { background: none; border: none; padding: 2px 4px; border-radius: 6px; cursor: default; position: relative; }
+.version:not(:disabled) { cursor: pointer; }
+.version:not(:disabled):hover { color: var(--ink); background: var(--surface-2); }
+.version[data-update]::after { content: ''; position: absolute; top: 0; right: -2px; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+.banner.update { background: var(--accent-soft); color: var(--ink); }
+.banner.update .icon { color: var(--accent); }
+.upd-progress { display: flex; align-items: center; gap: 10px; margin-top: 8px; max-width: 460px; }
+.upd-progress .bar { flex: 1; margin: 0; }
+.upd-progress .quiet { font-variant-numeric: tabular-nums; white-space: nowrap; font-size: 13px; }
+.upd-hint { font-size: 13.5px; color: var(--muted); margin-top: 6px; }
+.upd-actions { margin-top: 8px; }
+.upd-actions:empty { display: none; }
+.btn.danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, var(--line-strong)); }
+.btn.danger:hover:not(:disabled) { background: var(--danger-soft); border-color: var(--danger); }
+
+.dialog { margin: auto; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); color: var(--ink); box-shadow: var(--shadow); padding: 0; width: min(430px, calc(100vw - 32px)); }
+.dialog::backdrop { background: rgba(10, 8, 6, .42); }
+.dialog-body { padding: 20px; display: flex; flex-direction: column; gap: 14px; }
+.dialog-foot { display: flex; justify-content: flex-end; }
+.about-head { display: flex; align-items: center; gap: 12px; }
+.about-mark { width: 40px; height: 40px; flex: none; }
+.about-head h2 { font-size: 18px; line-height: 1.2; }
+.about-status { font-size: 14.5px; min-height: 1.5em; }
+.about-note { font-size: 12.5px; }
+.check { display: flex; align-items: center; gap: 8px; font-size: 14px; cursor: pointer; }
+.check input { width: 16px; height: 16px; accent-color: var(--accent); }
+
+.side-lib { justify-content: flex-start; }
+.side-lib[aria-current="true"] { background: var(--accent-soft); border-color: var(--accent); }
+.side-lib-count { margin-left: auto; font-size: 12px; color: var(--faint); font-variant-numeric: tabular-nums; }
+
+.libview { animation: step-fwd .26s cubic-bezier(.2, .7, .2, 1) both; }
+.libview:focus { outline: none; }
+.lv-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 14px; }
+.lv-head h2 { font-size: 24px; letter-spacing: -.02em; line-height: 1.15; }
+.lv-folder { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.lv-path { max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lv-tools { display: flex; gap: 8px; align-items: center; margin-bottom: 14px; }
+.lv-search { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); padding: 0 10px; box-shadow: var(--shadow-sm); }
+.lv-search:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.lv-search svg { width: 16px; height: 16px; color: var(--faint); flex: none; }
+.lv-search input { flex: 1; min-width: 0; border: none; background: transparent; font: inherit; font-size: 14px; color: var(--ink); padding: 8px 0; outline: none; }
+.lv-search input::placeholder { color: var(--faint); }
+#lvSelect[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); }
+.lv-bulk { display: flex; align-items: center; gap: 8px; padding: 8px 10px 8px 14px; margin-bottom: 14px; border-radius: 11px; background: var(--surface-2); border: 1px solid var(--line); font-size: 14px; font-weight: 600; }
+.lv-bulk .spacer { flex: 1; }
+.lv-body.has-detail { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 18px; align-items: start; }
+.lv-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(196px, 1fr)); gap: 14px; }
+.lv-card { position: relative; display: flex; flex-direction: column; text-align: left; padding: 0; overflow: hidden; cursor: pointer; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-sm); transition: border-color .15s, box-shadow .15s; }
+.lv-card:hover { border-color: var(--line-strong); box-shadow: var(--shadow); }
+.lv-card[aria-current="true"], .lv-card[aria-pressed="true"] { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft), var(--shadow-sm); }
+.lv-card .lv-thumb { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; background: var(--paper); border-bottom: 1px solid var(--line); }
+.lv-card .lv-text { display: block; padding: 9px 11px 11px; min-width: 0; }
+.lv-card .lv-name { font-weight: 650; font-size: 14px; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.lv-card .lv-sub { display: block; font-size: 12.5px; color: var(--muted); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lv-card .lv-when { display: block; font-size: 12px; color: var(--faint); margin-top: 2px; font-variant-numeric: tabular-nums; }
+.lv-card .lv-open-tag { position: absolute; top: 8px; left: 8px; font-size: 11px; font-weight: 650; padding: 2px 7px; border-radius: 999px; background: var(--accent); color: var(--accent-ink); }
+.lv-card .lv-tick { position: absolute; top: 8px; right: 8px; width: 22px; height: 22px; border-radius: 7px; border: 1.5px solid #fff; background: rgba(0, 0, 0, .35); display: grid; place-items: center; color: #fff; }
+.lv-card .lv-tick svg { width: 14px; height: 14px; opacity: 0; }
+.lv-card[aria-pressed="true"] .lv-tick { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.lv-card[aria-pressed="true"] .lv-tick svg { opacity: 1; }
+.lv-detail { position: sticky; top: 76px; padding: 14px; display: flex; flex-direction: column; gap: 14px; max-height: calc(100vh - 96px); overflow-y: auto; }
+.lvd-close { position: absolute; top: 8px; right: 8px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; width: 28px; height: 28px; cursor: pointer; font-size: 17px; line-height: 1; color: var(--muted); z-index: 1; }
+.lvd-close:hover { color: var(--ink); }
+.lvd-thumb img { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 9px; background: var(--paper); border: 1px solid var(--line); }
+.lvd-fields { display: flex; flex-direction: column; gap: 10px; }
+.field { display: flex; flex-direction: column; gap: 4px; }
+.field > span { font-size: 11.5px; font-weight: 650; text-transform: uppercase; letter-spacing: .05em; color: var(--faint); }
+.field input, .field textarea { font: inherit; font-size: 14px; color: var(--ink); background: var(--surface-2); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); padding: 7px 10px; resize: vertical; }
+.field input:focus, .field textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); background: var(--surface); }
+.field textarea { min-height: 76px; line-height: 1.45; }
+.lvd-saved { font-size: 12.5px; color: var(--faint); min-height: 1.4em; margin-top: -4px; }
+.lvd-facts { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; font-size: 13px; }
+.lvd-facts dt { color: var(--faint); }
+.lvd-facts dd { min-width: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.lvd-pages { display: flex; flex-direction: column; gap: 6px; max-height: 260px; overflow-y: auto; padding: 6px; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--line); }
+.lvd-pages:empty { display: none; }
+.lvd-pages img { width: 100%; height: auto; border-radius: 5px; background: var(--paper); border: 1px solid var(--line); }
+.lvd-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.lvd-actions .primary { grid-column: 1 / -1; }
+.lv-empty { text-align: center; padding: 56px 20px; border: 1px dashed var(--line-strong); border-radius: var(--radius); }
+.lv-empty-title { font-weight: 650; font-size: 16px; margin-bottom: 4px; }
+#lvKeys { margin-top: 22px; }
+/* Too narrow for a column beside the grid: the details go above it, laid out
+   across rather than down, so the songsheets are not pushed a screen away. */
+@media (max-width: 1080px) {
+  .lv-body.has-detail { grid-template-columns: 1fr; }
+  .lv-detail {
+    position: relative; top: auto; max-height: none; order: -1;
+    display: grid; grid-template-columns: minmax(0, 260px) minmax(0, 1fr); gap: 14px 18px; align-items: start;
+    grid-template-areas: "thumb fields" "facts fields" "pages pages" "actions actions";
+  }
+  .lvd-thumb { grid-area: thumb; }
+  .lvd-fields { grid-area: fields; padding-right: 30px; }
+  .lvd-facts { grid-area: facts; }
+  .lvd-pages { grid-area: pages; flex-direction: row; overflow-x: auto; overflow-y: hidden; max-height: none; }
+  .lvd-pages img { width: auto; height: 84px; flex: none; }
+  .lvd-actions { grid-area: actions; display: flex; flex-wrap: wrap; }
+}
+@media (max-width: 640px) {
+  .lv-detail { grid-template-columns: 1fr; grid-template-areas: "thumb" "fields" "facts" "pages" "actions"; }
+  .lvd-fields { padding-right: 0; }
+  .lv-tools { flex-wrap: wrap; }
+  .lv-search { flex-basis: 100%; }
+}
+
 /* ---------- practice view ---------- */
 /* Above the drop veil: while reading, nothing else should show through. */
 .practice { position: fixed; inset: 0; z-index: 60; display: flex; flex-direction: column; background: #111113; color: #f2f2f4; }
@@ -577,7 +686,10 @@ button.chip { cursor: pointer; }
          both name the destination, so the button says where it goes rather than
          which mode you are in. -->
     <div class="topbar-end">
-      <span id="appVersion" class="version" hidden></span>
+      <!-- A button only inside the desktop app, where it opens the update check.
+           In a browser it stays disabled: the server there is updated by whoever
+           runs it, not from this page. -->
+      <button type="button" id="appVersion" class="version" hidden disabled></button>
       <button type="button" id="viewToggle" class="btn small view-toggle">
       <svg id="viewIconApp" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="3.5" width="15" height="13" rx="2.5"/><path d="M8 3.5v13"/></svg>
       <svg id="viewIconHome" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" hidden><path d="m2.8 9 7.2-6 7.2 6"/><path d="M4.6 8v8.5h10.8V8"/></svg>
@@ -597,6 +709,9 @@ button.chip { cursor: pointer; }
 <aside id="sidebar" class="sidebar" aria-label="Songsheets">
   <button type="button" class="btn primary" id="sideNew">
     <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M10 4.5v11M4.5 10h11"/></svg>New scan</button>
+  <!-- Desktop only: the full library screen, over the songsheet folder. -->
+  <button type="button" class="btn side-lib" id="sideLibrary" hidden>
+    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3.5" width="3.5" height="13" rx="1"/><rect x="8.25" y="3.5" width="3.5" height="13" rx="1"/><path d="m13.6 4.6 3.1-.8 2.4 11.9-3.1.8Z"/></svg>Library<span class="side-lib-count" id="sideLibraryCount"></span></button>
   <p class="side-label" id="sideListLabel" hidden>Your songsheets</p>
   <ul class="side-list" id="sideList"></ul>
   <p id="sideBusy" class="side-why" hidden>Scanning — songsheets can be opened when it finishes.</p>
@@ -609,6 +724,22 @@ button.chip { cursor: pointer; }
 </aside>
 
 <main>
+  <!-- Desktop only. Filled by app.js from what the shell found on GitHub; every
+       button asks the shell to act on that result, never on a URL from here. -->
+  <div id="updateBanner" class="banner update" role="status" hidden>
+    <svg class="icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10" cy="10" r="7.6"/><path d="M10 6v7m0 0 3-3m-3 3-3-3"/></svg>
+    <div class="body">
+      <p><strong id="updTitle"></strong> <span id="updText"></span></p>
+      <div id="updProgress" class="upd-progress" hidden>
+        <div class="bar" id="updBar"><div id="updBarFill"></div></div>
+        <span id="updProgressLabel" class="quiet"></span>
+      </div>
+      <p id="updHint" class="upd-hint" hidden></p>
+      <p class="row wrap upd-actions" id="updActions"></p>
+    </div>
+    <button type="button" id="updDismiss" class="x" aria-label="Dismiss">&times;</button>
+  </div>
+
   <div id="errorBanner" class="banner error" role="alert" hidden>
     <svg class="icon" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path d="M10 1.8a8.2 8.2 0 1 0 0 16.4 8.2 8.2 0 0 0 0-16.4Zm-.9 4.3h1.8v5.2H9.1V6.1Zm0 6.6h1.8v1.8H9.1v-1.8Z"/></svg>
     <div class="body">
@@ -662,7 +793,7 @@ button.chip { cursor: pointer; }
     <section id="librarySection" hidden>
       <div class="row spread" style="max-width:900px;margin:34px auto 12px">
         <h2 class="lib-title">Your songsheets</h2>
-        <span id="libCount" class="quiet"></span>
+        <span class="row"><span id="libCount" class="quiet"></span><button type="button" class="btn small" id="libOpenAll" hidden>Open library</button></span>
       </div>
       <div id="libraryGrid" class="lib-grid"></div>
       <p id="libNote" class="quiet" style="max-width:900px;margin:10px auto 0"></p>
@@ -818,8 +949,97 @@ button.chip { cursor: pointer; }
     </details>
     <p class="keyhint center"><kbd>j</kbd>/<kbd>k</kbd> select · <kbd>x</kbd> remove · <kbd>u</kbd> undo · <kbd>Enter</kbd> jump to the video · <kbd>p</kbd> practice</p>
   </section>
+
+  <!-- ============ library (desktop) ============
+       Not a step: it sits beside them, reached from the sidebar, and showStep()
+       hides it on the way to any of them. Every songsheet here is a folder on
+       disk, so what this screen shows is what is in that folder — including
+       folders copied in by hand. -->
+  <section id="libraryView" class="libview" tabindex="-1" hidden aria-labelledby="lvTitle">
+    <div class="lv-head">
+      <div>
+        <h2 id="lvTitle">Library</h2>
+        <p class="quiet" id="lvCount"></p>
+      </div>
+      <div class="lv-folder">
+        <span class="quiet">Saved in</span>
+        <code id="lvPath" class="lv-path"></code>
+        <button type="button" class="btn small" id="lvOpenFolder">Show folder</button>
+        <button type="button" class="btn small ghost" id="lvChange">Change…</button>
+      </div>
+    </div>
+    <div id="lvError" class="banner error" role="alert" hidden>
+      <svg class="icon" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path d="M10 1.8a8.2 8.2 0 1 0 0 16.4 8.2 8.2 0 0 0 0-16.4Zm-.9 4.3h1.8v5.2H9.1V6.1Zm0 6.6h1.8v1.8H9.1v-1.8Z"/></svg>
+      <div class="body"><p id="lvErrorMsg"></p></div>
+    </div>
+    <div class="lv-tools" id="lvTools">
+      <label class="lv-search">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="8.6" cy="8.6" r="5.4"/><path d="m12.8 12.8 4 4"/></svg>
+        <input id="lvSearch" type="search" placeholder="Search titles, artists and notes" aria-label="Search songsheets" autocomplete="off" spellcheck="false">
+      </label>
+      <select id="lvSort" class="select" aria-label="Sort songsheets">
+        <option value="edited">Recently edited</option>
+        <option value="added">Recently added</option>
+        <option value="title">Title A–Z</option>
+        <option value="artist">Artist A–Z</option>
+        <option value="pages">Most pages</option>
+      </select>
+      <button type="button" class="btn" id="lvSelect" aria-pressed="false">Select</button>
+    </div>
+    <div id="lvBulk" class="lv-bulk" hidden>
+      <span id="lvBulkCount"></span>
+      <span class="spacer"></span>
+      <button type="button" class="btn small ghost" id="lvSelectAll">Select all</button>
+      <button type="button" class="btn small danger" id="lvBulkTrash" disabled>Move to Trash</button>
+      <button type="button" class="btn small" id="lvBulkDone">Done</button>
+    </div>
+    <div class="lv-body" id="lvBody">
+      <div id="lvGrid" class="lv-grid"></div>
+      <aside id="lvDetail" class="lv-detail card" hidden aria-label="Songsheet details">
+        <button type="button" class="x lvd-close" id="lvdClose" aria-label="Close details">&times;</button>
+        <div class="lvd-thumb"><img id="lvdThumb" alt=""></div>
+        <div class="lvd-fields">
+          <label class="field"><span>Title</span><input id="lvdTitle" type="text" autocomplete="off" spellcheck="false"></label>
+          <label class="field"><span>Artist</span><input id="lvdArtist" type="text" autocomplete="off" spellcheck="false" placeholder="Who wrote or plays it"></label>
+          <label class="field"><span>Notes</span><textarea id="lvdNotes" rows="4" placeholder="Capo, tuning, the bars to practise…"></textarea></label>
+          <p id="lvdSaved" class="lvd-saved" aria-live="polite"></p>
+        </div>
+        <dl class="lvd-facts" id="lvdFacts"></dl>
+        <div class="lvd-pages" id="lvdPages" aria-label="Pages"></div>
+        <div class="lvd-actions">
+          <button type="button" class="btn primary" id="lvdOpen">Open songsheet</button>
+          <button type="button" class="btn" id="lvdPractice">Practice</button>
+          <button type="button" class="btn" id="lvdReveal">Show in folder</button>
+          <button type="button" class="btn danger" id="lvdTrash">Move to Trash</button>
+        </div>
+      </aside>
+    </div>
+    <div id="lvEmpty" class="lv-empty" hidden>
+      <p class="lv-empty-title" id="lvEmptyTitle"></p>
+      <p class="quiet" id="lvEmptyText"></p>
+    </div>
+    <p class="keyhint center" id="lvKeys"><kbd>/</kbd> search · <kbd>Enter</kbd> open · <kbd>Esc</kbd> close</p>
+  </section>
 </main>
 </div>
+
+<!-- Desktop only: opened from the version in the top bar. -->
+<dialog id="aboutDialog" class="dialog" aria-labelledby="aboutTitle">
+  <form method="dialog" class="dialog-body">
+    <div class="about-head">
+      <svg class="about-mark" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="9" fill="currentColor" style="color: var(--accent)"/><g stroke="#fff" stroke-width="1.75" stroke-linecap="round"><path d="M8.92 8.71h6.66M8.92 11.63h10.83M8.92 14.54h14.16M8.92 17.46h14.16M8.92 20.37h10.83M8.92 23.29h6.66"/></g></svg>
+      <div><h2 id="aboutTitle">VidToTab</h2><p class="quiet" id="aboutVersion"></p></div>
+    </div>
+    <p id="aboutStatus" class="about-status" role="status"></p>
+    <div class="row wrap">
+      <button type="button" class="btn primary" id="aboutCheck">Check for updates</button>
+      <button type="button" class="btn" id="aboutReleases">All releases</button>
+    </div>
+    <label class="check"><input type="checkbox" id="aboutAuto"> Check for updates when VidToTab starts</label>
+    <p class="quiet about-note">The check asks GitHub which version is the newest, and tells it only which version and platform this is. Nothing about you or your songsheets is sent.</p>
+    <div class="dialog-foot"><button class="btn ghost" value="close">Close</button></div>
+  </form>
+</dialog>
 
 <div id="toast" class="toast" role="status" hidden><span id="toastMsg"></span><button type="button" id="toastUndo">Undo</button></div>
 <!-- Full-screen reader for playing along. Arrows, space and PageUp/PageDown turn

@@ -10,20 +10,37 @@
 // thumbnail, so drawing the home screen never loads a single page image;
 // 'pages' holds the blobs, read only when a sheet is opened.
 //
-// Everything here is browser-side, which is what makes the desktop app and the
-// hosted web version behave identically with no server storage to manage.
+// In a browser that is the whole story. Inside the desktop app the same calls
+// go to a folder on disk instead (electron/library-fs.cjs, through the preload
+// bridge), so a songsheet there is an ordinary folder of PNGs you can open,
+// copy and back up. Callers never know which: every function below takes and
+// returns Blobs either way.
 
 const DB_NAME = 'vidtotab';
 const DB_VERSION = 1;
 const SHEETS = 'sheets';
 const PAGES = 'pages';
 
-export const hasStorage = () => typeof indexedDB !== 'undefined';
+// The desktop bridge, when this page is running inside the app and the shell
+// offers a library folder. Guarded: a browser that blocks the property read
+// must still get the IndexedDB library rather than an exception.
+function folder() {
+  try { return (typeof window !== 'undefined' && window.vidtotab?.library) || null; } catch { return null; }
+}
+export const usesFolder = () => Boolean(folder());
+const hasIdb = () => typeof indexedDB !== 'undefined';
+export const hasStorage = () => usesFolder() || hasIdb();
+
+// What ipcRenderer.invoke puts in front of every error it relays. The message
+// underneath was written for people; the prefix was not.
+const relayed = (e) => new Error(String(e?.message || e).replace(/^Error invoking remote method '[^']+':\s*(?:Error:\s*)?/, ''));
+const toBytes = async (blob) => (blob ? new Uint8Array(await blob.arrayBuffer()) : null);
+const toBlob = (bytes, type) => (bytes && bytes.byteLength ? new Blob([bytes], { type }) : null);
 
 let dbPromise = null;
 
 function openDb() {
-  if (!hasStorage()) return Promise.reject(new Error('This browser has no local storage for songsheets.'));
+  if (!hasIdb()) return Promise.reject(new Error('This browser has no local storage for songsheets.'));
   if (dbPromise) return dbPromise;
   dbPromise = new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
@@ -69,8 +86,12 @@ export function normaliseSheet(input = {}) {
   return {
     id: String(input.id || newId()),
     title: String(input.title || 'Untitled songsheet').slice(0, 300),
-    url: String(input.url || ''),
-    channel: String(input.channel || ''),
+    // Typed by hand in the library, never read from the video: the channel is
+    // who uploaded it, which is rarely who wrote the song.
+    artist: String(input.artist ?? '').slice(0, 200),
+    notes: String(input.notes ?? '').slice(0, 5000),
+    url: String(input.url || '').slice(0, 2000),
+    channel: String(input.channel || '').slice(0, 300),
     duration: Number(input.duration) || 0,
     pageCount: Math.max(0, Math.round(Number(input.pageCount) || 0)),
     recipe: {
@@ -80,7 +101,7 @@ export function normaliseSheet(input = {}) {
       startTime: Math.max(0, Number(input.recipe?.startTime) || 0),
       sensitivity: Math.min(1, Math.max(0, Number(input.recipe?.sensitivity ?? 0.5))),
     },
-    look: String(input.look || 'print'),
+    look: String(input.look || 'print').slice(0, 40),
     paper: input.paper === 'a4' ? 'a4' : 'letter',
     savedAt: Number(input.savedAt) || now,
     updatedAt: now,
@@ -91,17 +112,26 @@ export const pageKey = (sheetId, index) => `${sheetId}:${String(index).padStart(
 
 // ---------------------------------------------------------------- storage
 
+// Fields a save does not mention are kept from the stored copy, not reset: a
+// scan re-saved after an edit knows nothing of the notes typed in the library,
+// or of the thumbnail a songsheet opened from storage no longer has a URL for.
+const defined = (o) => Object.fromEntries(Object.entries(o || {}).filter(([, v]) => v !== undefined));
+
 // pages: [{ tStart, tEnd, alsoAt, w, h, clean: Blob, color: Blob|null }]
-export async function saveSheet(meta, pages = [], thumb = null) {
+async function idbSave(meta, pages, thumb) {
   const db = await openDb();
-  const sheet = normaliseSheet({ ...meta, pageCount: pages.length });
+  const id = String(meta.id || newId());
   const tx = db.transaction([SHEETS, PAGES], 'readwrite');
   const sheetStore = tx.objectStore(SHEETS);
   const pageStore = tx.objectStore(PAGES);
+  const prev = await reqValue(sheetStore.get(id)).catch(() => null);
+  const sheet = normaliseSheet({
+    artist: prev?.artist, notes: prev?.notes, savedAt: prev?.savedAt, ...defined(meta), id, pageCount: pages.length,
+  });
   // Replacing a sheet must not leave the previous run's pages behind.
   const stale = await reqValue(pageStore.index('sheetId').getAllKeys(IDBKeyRange.only(sheet.id))).catch(() => []);
   for (const key of stale || []) pageStore.delete(key);
-  sheetStore.put({ ...sheet, thumb: thumb || null });
+  sheetStore.put({ ...sheet, thumb: thumb || prev?.thumb || null });
   pages.forEach((p, i) => {
     pageStore.put({
       key: pageKey(sheet.id, i),
@@ -120,17 +150,15 @@ export async function saveSheet(meta, pages = [], thumb = null) {
   return sheet;
 }
 
-export async function listSheets(limit = 60) {
-  if (!hasStorage()) return [];
+async function idbList() {
+  if (!hasIdb()) return [];
   const db = await openDb();
   const tx = db.transaction(SHEETS, 'readonly');
   const all = await reqValue(tx.objectStore(SHEETS).getAll());
-  return (all || [])
-    .sort((a, b) => (b.updatedAt || b.savedAt || 0) - (a.updatedAt || a.savedAt || 0))
-    .slice(0, limit);
+  return (all || []).sort((a, b) => (b.updatedAt || b.savedAt || 0) - (a.updatedAt || a.savedAt || 0));
 }
 
-export async function getSheet(id) {
+async function idbGet(id) {
   const db = await openDb();
   const tx = db.transaction([SHEETS, PAGES], 'readonly');
   const sheet = await reqValue(tx.objectStore(SHEETS).get(id));
@@ -139,13 +167,156 @@ export async function getSheet(id) {
   return { ...sheet, pages: (pages || []).sort((a, b) => a.index - b.index) };
 }
 
-export async function deleteSheet(id) {
+async function idbUpdate(id, patch) {
+  const db = await openDb();
+  const tx = db.transaction(SHEETS, 'readwrite');
+  const store = tx.objectStore(SHEETS);
+  const prev = await reqValue(store.get(id));
+  if (!prev) throw new Error('That songsheet is no longer stored.');
+  const allowed = {};
+  for (const k of ['title', 'artist', 'notes', 'look', 'paper']) if (patch[k] !== undefined) allowed[k] = patch[k];
+  const sheet = { ...normaliseSheet({ ...prev, ...allowed }), thumb: prev.thumb || null };
+  store.put(sheet);
+  await done(tx);
+  return sheet;
+}
+
+async function idbDelete(id) {
   const db = await openDb();
   const tx = db.transaction([SHEETS, PAGES], 'readwrite');
   tx.objectStore(SHEETS).delete(id);
   const keys = await reqValue(tx.objectStore(PAGES).index('sheetId').getAllKeys(IDBKeyRange.only(id))).catch(() => []);
   for (const key of keys || []) tx.objectStore(PAGES).delete(key);
   await done(tx);
+}
+
+// The folder library speaks bytes over IPC; everything above it speaks Blobs.
+const fromFolder = (s) => (s ? { ...s, thumb: toBlob(s.thumb, 'image/jpeg') } : s);
+
+export async function saveSheet(meta, pages = [], thumb = null) {
+  const lib = folder();
+  if (!lib) return idbSave(meta, pages, thumb);
+  const id = String(meta.id || newId());
+  const bytes = [];
+  for (const p of pages) {
+    bytes.push({
+      tStart: p.tStart, tEnd: p.tEnd, alsoAt: p.alsoAt, w: p.w, h: p.h,
+      clean: await toBytes(p.clean), color: await toBytes(p.color),
+    });
+  }
+  try {
+    return fromFolder(await lib.save({ ...defined(meta), id }, bytes, await toBytes(thumb)));
+  } catch (e) { throw relayed(e); }
+}
+
+// limit: the home screen and the sidebar want the latest few; the library
+// screen passes Infinity and gets every one.
+export async function listSheets(limit = 60) {
+  const lib = folder();
+  if (!lib) return (await idbList()).slice(0, limit);
+  try {
+    return (await lib.list()).slice(0, limit).map(fromFolder);
+  } catch (e) { throw relayed(e); }
+}
+
+export async function getSheet(id) {
+  const lib = folder();
+  if (!lib) return idbGet(id);
+  let s;
+  try { s = await lib.get(id); } catch (e) { throw relayed(e); }
+  if (!s) return null;
+  return {
+    ...fromFolder(s),
+    pages: s.pages.map((p) => ({ ...p, clean: toBlob(p.clean, 'image/png'), color: toBlob(p.color, 'image/png') })),
+  };
+}
+
+// Title, artist, notes, look, paper: the edits that need no page rewritten.
+export async function updateSheet(id, patch = {}) {
+  const lib = folder();
+  if (!lib) return idbUpdate(id, patch);
+  try { return fromFolder(await lib.update(id, defined(patch))); } catch (e) { throw relayed(e); }
+}
+
+// Resolves to how many were removed. In the desktop app that is after the
+// shell has asked, natively, and moved them to the Trash — so it can be 0.
+export async function deleteSheets(ids) {
+  const list = [...new Set(ids)].map(String);
+  const lib = folder();
+  if (!lib) {
+    for (const id of list) await idbDelete(id);
+    return list.length;
+  }
+  try { return await lib.remove(list); } catch (e) { throw relayed(e); }
+}
+
+export const deleteSheet = (id) => deleteSheets([id]);
+
+// A desktop app that ran 0.2 kept its songsheets in IndexedDB. Copy each one
+// into the folder once, then leave the originals exactly where they were: a copy
+// that went wrong must not be able to cost anything. Every id copied is
+// remembered as it is copied — that, not a single done-flag, is what stops a
+// songsheet since moved to the Trash from coming back on the next launch after
+// a run that stopped half way.
+export async function migrateBrowserSheets() {
+  const lib = folder();
+  if (!lib || !hasIdb()) return 0;
+  let copiedIds;
+  try {
+    if (localStorage.getItem('vtt.libMigrated') === '1') return 0;
+    copiedIds = new Set(JSON.parse(localStorage.getItem('vtt.libMigratedIds') || '[]'));
+  } catch { return 0; }
+  const finish = () => { try { localStorage.setItem('vtt.libMigrated', '1'); } catch { /* storage unavailable */ } };
+  // Asking for the database by name would create it; look before opening.
+  try {
+    const dbs = await indexedDB.databases?.();
+    if (Array.isArray(dbs) && !dbs.some((d) => d.name === DB_NAME)) { finish(); return 0; }
+  } catch { /* databases() unsupported: open and see */ }
+  const stored = await idbList();
+  const have = new Set((await lib.list()).map((s) => s.id));
+  let copied = 0;
+  let failed = 0;
+  for (const s of stored) {
+    if (have.has(s.id) || copiedIds.has(s.id)) continue;
+    try {
+      const full = await idbGet(s.id);
+      if (!full?.pages?.length) continue;
+      const bytes = [];
+      for (const p of full.pages) {
+        bytes.push({
+          tStart: p.tStart, tEnd: p.tEnd, alsoAt: p.alsoAt, w: p.w, h: p.h,
+          clean: await toBytes(p.clean), color: await toBytes(p.color),
+        });
+      }
+      // importing: keep its edit date, so the library's "Recently edited"
+      // order is the order they were really edited in.
+      const meta = { ...defined(full), pages: undefined, thumb: undefined, importing: true };
+      await lib.save(meta, bytes, await toBytes(full.thumb));
+      copiedIds.add(s.id);
+      try { localStorage.setItem('vtt.libMigratedIds', JSON.stringify([...copiedIds])); } catch { /* storage unavailable */ }
+      copied++;
+    } catch {
+      failed++;
+    }
+  }
+  if (!failed) finish();
+  return copied;
+}
+
+// Desktop only: where the folder is, and the shell's own ways into it.
+export async function folderInfo() {
+  const lib = folder();
+  if (!lib) return null;
+  try { return await lib.info(); } catch (e) { throw relayed(e); }
+}
+export async function revealSheet(id) {
+  try { return await folder()?.reveal(id); } catch (e) { throw relayed(e); }
+}
+export async function openLibraryFolder() {
+  try { return await folder()?.openFolder(); } catch (e) { throw relayed(e); }
+}
+export async function chooseLibraryFolder() {
+  try { return await folder()?.chooseFolder(); } catch (e) { throw relayed(e); }
 }
 
 // Ask the browser to keep this data rather than evict it under pressure, and
@@ -200,6 +371,11 @@ export function selfCheck(assert) {
   assert.equal(s.paper, 'letter', 'an unknown paper falls back');
   assert.equal(s.look, 'dark');
   assert.ok(s.id && s.savedAt && s.updatedAt);
+  assert.equal(s.artist, '', 'no artist unless someone typed one');
+  assert.equal(normaliseSheet({ notes: 'n'.repeat(6000) }).notes.length, 5000, 'notes are bounded');
+  assert.deepEqual(defined({ a: 1, b: undefined, c: null }), { a: 1, c: null }, 'only undefined means "not mentioned"');
+  assert.equal(relayed(new Error("Error invoking remote method 'library:save': Error: Disk full")).message, 'Disk full');
+  assert.equal(usesFolder(), false, 'no window, no desktop bridge');
 
   // A sheet with no usable box still saves: it can be reopened and exported,
   // it just cannot be re-scanned without drawing the box again.

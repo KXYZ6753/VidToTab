@@ -21,6 +21,11 @@ const mods = [
   // runs here; the DOM helpers beside it need a document, and the browser
   // end-to-end test drives those.
   { name: 'motion', file: path.join(here, '..', 'public', 'brand', 'motion.js') },
+  // The desktop shell's two pure halves: the songsheet folder, checked against
+  // a real temporary directory, and the GitHub release check, against the
+  // asset names GitHub actually serves.
+  { name: 'library-fs', file: path.join(here, '..', 'electron', 'library-fs.cjs') },
+  { name: 'updates', file: path.join(here, '..', 'electron', 'updates.cjs') },
 ]
   .filter((m) => only.length === 0 || only.includes(m.name))
   .sort((a, b) => a.name.localeCompare(b.name));
@@ -31,6 +36,6 @@ for (const { name, file } of mods) {
   const r = spawnSync(process.execPath, [file], { stdio: ['ignore', 'inherit', 'inherit'] });
   const ok = r.status === 0;
   if (!ok) failed++;
-  console.log(`${ok ? 'ok  ' : 'FAIL'} ${`${name}.js`.padEnd(14)} ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+  console.log(`${ok ? 'ok  ' : 'FAIL'} ${path.basename(file).padEnd(16)} ${((Date.now() - t0) / 1000).toFixed(1)}s`);
 }
 process.exit(failed ? 1 : 0);
