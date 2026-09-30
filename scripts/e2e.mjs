@@ -305,7 +305,8 @@ try {
   await sleep(700);
   const pracOpen = await evalJs(`!document.getElementById('practice').hidden`);
   const pracFirst = await evalJs(`document.getElementById('practicePos').textContent`);
-  const pracLoaded = await evalJs(`(() => { const i = document.getElementById('practicePage'); return !!i && i.complete && i.naturalWidth > 0; })()`);
+  // The page being played is the current card, in either layout.
+  const pracLoaded = await evalJs(`(() => { const i = document.querySelector('#practice .pr-card[data-current] img'); return !!i && i.complete && i.naturalWidth > 0; })()`);
   log(`practice: open=${pracOpen}, "${pracFirst}", image decoded=${pracLoaded}`);
   if (!pracOpen) problems.push('the practice view did not open');
   if (!pracLoaded) problems.push('the practice view opened with no readable page');
@@ -318,6 +319,35 @@ try {
   log('practice after space ->', pracSecond);
   if (pracSecond === pracFirst) problems.push(`space did not turn the page (still "${pracSecond}")`);
   await shot('7-practice');
+
+  // Playing: the current card fills as its time passes and the next page comes
+  // up by itself. Count-in off and double speed, so this takes seconds; the
+  // settings are put back afterwards because they persist in the browser.
+  const card = `document.querySelector('#practice .pr-card[data-current]')`;
+  const fillNow = `parseFloat(${card}.querySelector('.pr-card-fill').style.width) || 0`;
+  const countWas = await evalJs(`document.getElementById('practiceCountIn').checked`);
+  if (countWas) await evalJs(`document.getElementById('practiceCountIn').click()`);
+  for (let i = 0; i < 20; i++) await evalJs(`document.dispatchEvent(new KeyboardEvent('keydown', { key: ']', bubbles: true, cancelable: true }))`);
+  const speedLabel = await evalJs(`document.getElementById('practiceSpeed').textContent`);
+  const pageBefore = await evalJs(`document.getElementById('practicePos').textContent.split('·')[0].trim()`);
+  await evalJs(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', bubbles: true, cancelable: true }))`);
+  await sleep(900);
+  const f1 = await evalJs(fillNow);
+  await sleep(900);
+  const f2 = await evalJs(fillNow);
+  log(`practice playing at ${speedLabel}: fill ${f1.toFixed(1)}% -> ${f2.toFixed(1)}%`);
+  if (!(f2 > f1 && f1 > 0)) problems.push(`playing did not fill the page card (${f1}% then ${f2}%)`);
+  let advanced = false;
+  for (let i = 0; i < 100 && !advanced; i++) {
+    await sleep(150);
+    advanced = (await evalJs(`document.getElementById('practicePos').textContent.split('·')[0].trim()`)) !== pageBefore;
+  }
+  log('practice turned the page by itself ->', advanced);
+  if (!advanced) problems.push('playing never moved on to the next page');
+  await shot('7b-practice-playing');
+  await evalJs(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', bubbles: true, cancelable: true }))`);
+  await evalJs(`document.dispatchEvent(new KeyboardEvent('keydown', { key: '0', bubbles: true, cancelable: true }))`);
+  if (countWas) await evalJs(`document.getElementById('practiceCountIn').click()`);
 
   await evalJs(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))`);
   await sleep(400);

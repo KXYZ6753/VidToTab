@@ -41,7 +41,7 @@ const PAGE_RE = /^page-\d{3,4}(?:-[0-9a-f]{8})?(?:-original)?\.png$/;
 const HASH_RE = /^[0-9a-f]{40}$/;
 // Windows refuses these as names whatever follows the dot.
 const RESERVED_RE = /^(con|prn|aux|nul|com\d|lpt\d)(\..*)?$/i;
-const EDITABLE = ['title', 'artist', 'notes', 'look', 'paper'];
+const EDITABLE = ['title', 'artist', 'notes', 'look', 'paper', 'practice'];
 
 function assertId(id) {
   if (typeof id !== 'string' || !ID_RE.test(id)) throw new Error('That is not a songsheet id.');
@@ -100,6 +100,10 @@ function cleanMeta(input = {}, previous = {}) {
     title: str(pick('title') || 'Untitled songsheet', 300),
     artist: str(pick('artist'), 200),
     notes: str(pick('notes'), 5000),
+    practice: {
+      speed: Math.min(2, Math.max(0.25, Math.round((Number(pick('practice')?.speed) || 1) * 100) / 100)),
+      songBpm: (() => { const b = Math.round(Number(pick('practice')?.songBpm) || 0); return b >= 20 && b <= 400 ? b : 0; })(),
+    },
     url: str(pick('url'), 2000),
     channel: str(pick('channel'), 300),
     duration: Number(pick('duration')) || 0,
@@ -228,6 +232,7 @@ function summary(rec, dir, extra = {}) {
     title: str(rec.title || 'Untitled songsheet', 300),
     artist: str(rec.artist, 200),
     notes: str(rec.notes, 5000),
+    practice: rec.practice && typeof rec.practice === 'object' ? rec.practice : { speed: 1, songBpm: 0 },
     url: str(rec.url, 2000),
     channel: str(rec.channel, 300),
     duration: Number(rec.duration) || 0,
@@ -513,7 +518,7 @@ async function selfCheck() {
 
     // Metadata-only edits: the notes stick, the folder follows the title, pages
     // are untouched.
-    await update(lib, 'abc-00000001', { notes: 'capo 2', artist: 'Someone', pages: 'ignored' });
+    await update(lib, 'abc-00000001', { notes: 'capo 2', artist: 'Someone', pages: 'ignored', practice: { speed: 0.6, songBpm: 88 } });
     const renamed = await update(lib, 'abc-00000001', { title: 'Renamed Song' });
     assert.equal(renamed.folder, 'Renamed Song');
     assert.equal(renamed.notes, 'capo 2', 'an edit to one field keeps the others');
@@ -525,6 +530,7 @@ async function selfCheck() {
     const before = (await get(lib, 'abc-00000001')).savedAt;
     const again = await save(lib, { id: 'abc-00000001', title: 'Renamed Song' }, [page(1)], null);
     assert.equal(again.notes, 'capo 2');
+    assert.deepEqual(again.practice, { speed: 0.6, songBpm: 88 }, 'a page save keeps the practice pace');
     assert.equal(again.savedAt, before);
     const after = (await fsp.readdir(path.join(lib, 'Renamed Song'))).sort();
     assert.equal(after.length, 3, 'stale pages removed, thumbnail kept');
@@ -586,13 +592,13 @@ async function selfCheck() {
     const input = {
       id: 'abc-00000009', title: 'x'.repeat(400), url: 'https://example.test/v', channel: 'c', duration: '212',
       recipe: { rect: { x: 1.4, y: 2.6, w: 10, h: 20 }, startTime: -5, sensitivity: 9 }, paper: 'weird', look: 'dark',
-      artist: 'a', notes: 'n', savedAt: 5,
+      artist: 'a', notes: 'n', savedAt: 5, practice: { speed: 0.7, songBpm: 96.4 },
     };
     assert.equal(cleanMeta({ ...input, importing: true, updatedAt: 77 }).updatedAt, 77, 'an import keeps its edit date');
     assert.notEqual(cleanMeta({ ...input, updatedAt: 77 }).updatedAt, 77, 'an ordinary save is stamped now');
     const web = normaliseSheet(input);
     const desk = cleanMeta(input);
-    for (const k of ['id', 'title', 'artist', 'notes', 'url', 'channel', 'duration', 'recipe', 'look', 'paper', 'savedAt']) {
+    for (const k of ['id', 'title', 'artist', 'notes', 'practice', 'url', 'channel', 'duration', 'recipe', 'look', 'paper', 'savedAt']) {
       assert.deepEqual(desk[k], web[k], `desktop and browser disagree about ${k}`);
     }
   } finally {

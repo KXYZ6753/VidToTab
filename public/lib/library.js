@@ -90,6 +90,12 @@ export function normaliseSheet(input = {}) {
     // who uploaded it, which is rarely who wrote the song.
     artist: String(input.artist ?? '').slice(0, 200),
     notes: String(input.notes ?? '').slice(0, 5000),
+    // Play-along pace, set in the practice view: a speed against the video's
+    // own timing, and the song's tempo if someone entered it.
+    practice: {
+      speed: Math.min(2, Math.max(0.25, Math.round((Number(input.practice?.speed) || 1) * 100) / 100)),
+      songBpm: (() => { const b = Math.round(Number(input.practice?.songBpm) || 0); return b >= 20 && b <= 400 ? b : 0; })(),
+    },
     url: String(input.url || '').slice(0, 2000),
     channel: String(input.channel || '').slice(0, 300),
     duration: Number(input.duration) || 0,
@@ -126,7 +132,7 @@ async function idbSave(meta, pages, thumb) {
   const pageStore = tx.objectStore(PAGES);
   const prev = await reqValue(sheetStore.get(id)).catch(() => null);
   const sheet = normaliseSheet({
-    artist: prev?.artist, notes: prev?.notes, savedAt: prev?.savedAt, ...defined(meta), id, pageCount: pages.length,
+    artist: prev?.artist, notes: prev?.notes, practice: prev?.practice, savedAt: prev?.savedAt, ...defined(meta), id, pageCount: pages.length,
   });
   // Replacing a sheet must not leave the previous run's pages behind.
   const stale = await reqValue(pageStore.index('sheetId').getAllKeys(IDBKeyRange.only(sheet.id))).catch(() => []);
@@ -174,7 +180,7 @@ async function idbUpdate(id, patch) {
   const prev = await reqValue(store.get(id));
   if (!prev) throw new Error('That songsheet is no longer stored.');
   const allowed = {};
-  for (const k of ['title', 'artist', 'notes', 'look', 'paper']) if (patch[k] !== undefined) allowed[k] = patch[k];
+  for (const k of ['title', 'artist', 'notes', 'look', 'paper', 'practice']) if (patch[k] !== undefined) allowed[k] = patch[k];
   const sheet = { ...normaliseSheet({ ...prev, ...allowed }), thumb: prev.thumb || null };
   store.put(sheet);
   await done(tx);
@@ -231,7 +237,8 @@ export async function getSheet(id) {
   };
 }
 
-// Title, artist, notes, look, paper: the edits that need no page rewritten.
+// Title, artist, notes, look, paper, practice pace: the edits that need no
+// page rewritten.
 export async function updateSheet(id, patch = {}) {
   const lib = folder();
   if (!lib) return idbUpdate(id, patch);
@@ -372,6 +379,8 @@ export function selfCheck(assert) {
   assert.equal(s.look, 'dark');
   assert.ok(s.id && s.savedAt && s.updatedAt);
   assert.equal(s.artist, '', 'no artist unless someone typed one');
+  assert.deepEqual(s.practice, { speed: 1, songBpm: 0 }, 'real speed, no tempo, until someone sets them');
+  assert.deepEqual(normaliseSheet({ practice: { speed: 9, songBpm: 1000 } }).practice, { speed: 2, songBpm: 0 });
   assert.equal(normaliseSheet({ notes: 'n'.repeat(6000) }).notes.length, 5000, 'notes are bounded');
   assert.deepEqual(defined({ a: 1, b: undefined, c: null }), { a: 1, c: null }, 'only undefined means "not mentioned"');
   assert.equal(relayed(new Error("Error invoking remote method 'library:save': Error: Disk full")).message, 'Disk full');

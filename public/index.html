@@ -426,11 +426,77 @@ body[data-view="app"] .source-card { margin: 14px 0 0; }
 }
 
 /* ---------- practice view ---------- */
-/* Above the drop veil: while reading, nothing else should show through. */
-.practice { position: fixed; inset: 0; z-index: 60; display: flex; flex-direction: column; background: #111113; color: #f2f2f4; }
+/* Above the drop veil: while reading, nothing else should show through. Dark
+   whatever the theme — it is a music stand, and the pages are the light. */
+.practice { position: fixed; inset: 0; z-index: 60; display: flex; flex-direction: column; background: #111113; color: #f2f2f4; --pr-accent: #ff8a3d; }
 .practice-page { flex: 1; min-height: 0; display: grid; place-items: center; padding: 12px; }
-.practice-page img { max-width: 100%; max-height: 100%; object-fit: contain; }
-.practice-bar { display: flex; align-items: center; gap: 14px; padding: 10px 16px; background: rgba(255, 255, 255, .06); font-size: 14px; }
+.practice[data-layout="scroll"] .practice-page,
+.practice[data-layout="page"] .practice-scroll,
+.practice[data-layout="scroll"] .practice-tap { display: none; }
+/* A page is a card, as on the songsheet step: number, time, and — while it
+   plays — how long until the next. The card is the timer: it fills left to
+   right, frame and paper together, over the time the page lasts. */
+.pr-card { position: relative; isolation: isolate; width: min(100%, 1500px); padding: 10px; border-radius: 14px; background: #1b1c20; border: 1px solid #2d2e34; overflow: hidden; color: #f2f2f4; text-align: left; opacity: .78; transition: opacity .25s, border-color .2s, box-shadow .2s; }
+.pr-card-fill { position: absolute; top: 0; bottom: 0; left: 0; width: 0; z-index: -1; background: color-mix(in srgb, var(--pr-accent) 22%, transparent); }
+.pr-card-head { display: flex; align-items: center; gap: 8px; margin: 0 2px 8px; font-size: 13px; }
+.pr-num { font-weight: 700; color: #98938b; min-width: 22px; font-variant-numeric: tabular-nums; }
+.pr-chip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px; border-radius: 999px; border: 1px solid #3b3c43; background: #222328; font-weight: 600; font-variant-numeric: tabular-nums; }
+.pr-chip svg { width: 12px; height: 12px; color: var(--pr-accent); }
+.pr-chip.repeat { border-style: dashed; font-weight: 500; color: #a7a198; }
+.pr-left { font: 600 13px var(--mono); color: var(--pr-accent); font-variant-numeric: tabular-nums; }
+.pr-card .spacer { flex: 1; }
+/* The paper keeps the look's own colour; the fill reaches it by blending, so
+   white paper is tinted and dark paper lifted while the ink stays the ink. */
+.pr-paper { position: relative; line-height: 0; border-radius: 6px; overflow: hidden; border: 1px solid #2d2e34; }
+.pr-paper img { display: block; width: 100%; height: auto; }
+.pr-paper-fill { position: absolute; top: 0; bottom: 0; left: 0; width: 0; pointer-events: none; }
+.pr-paper.light .pr-paper-fill { background: color-mix(in srgb, var(--pr-accent) 42%, white); mix-blend-mode: multiply; }
+.pr-paper.dark .pr-paper-fill { background: color-mix(in srgb, var(--pr-accent) 38%, black); mix-blend-mode: screen; }
+.pr-card[data-current] { opacity: 1; border-color: var(--pr-accent); box-shadow: 0 0 0 1px var(--pr-accent), 0 12px 40px -12px rgba(0, 0, 0, .8); }
+.pr-marks { position: absolute; inset: 0; pointer-events: none; }
+.pr-fill { position: absolute; background: color-mix(in srgb, var(--pr-accent) 24%, transparent); border-radius: 2px; }
+.pr-head { position: absolute; width: 3px; margin-left: -1.5px; background: var(--pr-accent); border-radius: 2px; box-shadow: 0 0 10px color-mix(in srgb, var(--pr-accent) 70%, transparent); }
+.practice-page .pr-card { width: auto; max-width: calc(100vw - 24px); }
+.practice-page .pr-paper img { width: auto; max-width: calc(100vw - 48px); max-height: calc(100vh - 150px); }
+.practice-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 12vh 24px 45vh; display: flex; flex-direction: column; align-items: center; gap: 14px; }
+/* flex: none, or the column squeezes every card to a sliver: a card clips its
+   fill, and overflow: hidden lets a flex item shrink below its content. */
+.pr-row { cursor: pointer; flex: none; }
+/* Played pages step back; the next one is as readable as the current, since
+   reading ahead is the point of seeing it. */
+.pr-row[data-next] { opacity: 1; }
+.pr-row[data-past] { opacity: .35; }
+.pr-exp { font-style: normal; font-size: 11px; color: #8d8d96; border: 1px solid #3b3c43; border-radius: 999px; padding: 0 6px; margin-left: 4px; }
+.pr-count { position: absolute; inset: 0 0 56px; display: grid; place-items: center; font: 750 min(30vw, 220px)/1 var(--font); color: var(--pr-accent); text-shadow: 0 6px 40px rgba(0, 0, 0, .7); pointer-events: none; }
+.pr-progress { height: 3px; background: rgba(255, 255, 255, .08); }
+.pr-progress > div { height: 100%; width: 0; background: var(--pr-accent); }
+.practice-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 14px; padding: 10px 16px; background: rgba(255, 255, 255, .06); font-size: 14px; }
+.pr-transport, .pr-pace { display: flex; align-items: center; gap: 4px; }
+.practice-bar .pr-icon { width: 36px; height: 34px; padding: 0; display: grid; place-items: center; font-size: 19px; line-height: 1; }
+.pr-icon svg, .pr-play svg { width: 18px; height: 18px; }
+.practice-bar .pr-play { width: 46px; height: 40px; padding: 0; display: grid; place-items: center; background: var(--pr-accent); color: #1d1206; border-radius: 12px; }
+.practice-bar .pr-play:hover { background: #ff9d5c; }
+.practice-bar .pr-speed { min-width: 112px; font-variant-numeric: tabular-nums; }
+.pr-pos { font-variant-numeric: tabular-nums; }
+.pr-settings { position: absolute; right: 12px; bottom: 64px; z-index: 2; width: min(360px, calc(100vw - 24px)); padding: 16px; border-radius: 14px; background: #1e1f24; border: 1px solid rgba(255, 255, 255, .1); box-shadow: 0 20px 50px -10px rgba(0, 0, 0, .8); display: flex; flex-direction: column; gap: 14px; font-size: 14px; }
+.pr-field { display: grid; grid-template-columns: 96px 1fr auto; align-items: center; gap: 4px 10px; }
+.pr-field > span { color: #a9a9b2; font-size: 13px; }
+.pr-field small { grid-column: 2 / -1; color: #8d8d96; font-size: 12px; }
+.pr-field input[type="range"] { width: 100%; accent-color: var(--pr-accent); }
+.pr-field output { font-variant-numeric: tabular-nums; min-width: 4.5em; text-align: right; }
+.pr-field input[type="number"] { width: 90px; font: inherit; color: inherit; background: rgba(255, 255, 255, .08); border: 1px solid rgba(255, 255, 255, .16); border-radius: 8px; padding: 5px 8px; }
+.pr-seg { display: inline-flex; gap: 2px; padding: 3px; border-radius: 10px; background: rgba(255, 255, 255, .06); }
+.pr-seg button { border: none; background: none; color: #a9a9b2; font: inherit; font-weight: 600; padding: 5px 12px; border-radius: 7px; cursor: pointer; }
+.pr-seg button[aria-pressed="true"] { background: rgba(255, 255, 255, .14); color: #f2f2f4; }
+.pr-check { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.pr-check input { width: 16px; height: 16px; accent-color: var(--pr-accent); }
+.pr-keys { color: #8d8d96; font-size: 12px; line-height: 1.8; }
+.pr-keys kbd { font: 11px var(--mono); padding: 1px 5px; border-radius: 4px; background: rgba(255, 255, 255, .1); }
+#practiceSettingsBtn[aria-expanded="true"] { background: rgba(255, 255, 255, .22); }
+@media (max-width: 640px) {
+  .pr-pos { order: 5; width: 100%; }
+  .practice-scroll { padding: 10vh 10px 40vh; }
+}
 .practice-bar .spacer { flex: 1; }
 .practice-bar button { background: rgba(255, 255, 255, .12); border: none; color: inherit; font: inherit; font-weight: 600; padding: 7px 14px; border-radius: 9px; cursor: pointer; }
 .practice-bar button:hover { background: rgba(255, 255, 255, .2); }
@@ -1044,15 +1110,53 @@ button.chip { cursor: pointer; }
 <div id="toast" class="toast" role="status" hidden><span id="toastMsg"></span><button type="button" id="toastUndo">Undo</button></div>
 <!-- Full-screen reader for playing along. Arrows, space and PageUp/PageDown turn
      pages, which is also what a Bluetooth page-turner pedal sends. -->
-<div id="practice" class="practice" hidden>
-  <div class="practice-page"><img id="practicePage" alt=""></div>
+<!-- Play along: each page is a card that fills across over the time it lasts
+     at the pace you set — the video's own timing, slower, faster, or a tempo in
+     BPM once the song's is known — and the next page comes up when it is full.
+     Scroll shows the pages coming; One page shows one at a time. The cards are
+     built by app.js. -->
+<div id="practice" class="practice" hidden data-layout="scroll">
+  <div class="practice-page" id="practiceSingle"></div>
+  <div class="practice-scroll" id="practiceScroll"></div>
+  <div class="pr-count" id="practiceCount" aria-live="assertive" hidden></div>
   <button type="button" id="practicePrev" class="practice-tap prev" aria-label="Previous page"></button>
   <button type="button" id="practiceNext" class="practice-tap next" aria-label="Next page"></button>
+  <div class="pr-progress" aria-hidden="true"><div id="practiceProgress"></div></div>
   <div class="practice-bar">
     <button type="button" id="practiceBack">Back</button>
-    <span id="practicePos" class="quiet" role="status"></span>
+    <div class="pr-transport" role="group" aria-label="Playback">
+      <button type="button" id="practiceRestart" class="pr-icon" aria-label="Back to the first page" title="Back to the first page (Home)">
+        <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><rect x="4" y="4.5" width="2.2" height="11" rx="1"/><path d="M16 5.2v9.6a.8.8 0 0 1-1.2.7L7.6 10.7a.8.8 0 0 1 0-1.4l7.2-4.8a.8.8 0 0 1 1.2.7Z"/></svg></button>
+      <button type="button" id="practicePlay" class="pr-play" aria-label="Play" title="Play (K)">
+        <svg class="pr-i-play" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path d="M6 4.3v11.4a.9.9 0 0 0 1.4.8l8.9-5.7a.9.9 0 0 0 0-1.6L7.4 3.5A.9.9 0 0 0 6 4.3Z"/></svg>
+        <svg class="pr-i-pause" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true" hidden><rect x="5" y="4" width="3.4" height="12" rx="1"/><rect x="11.6" y="4" width="3.4" height="12" rx="1"/></svg>
+      </button>
+    </div>
+    <div class="pr-pace" role="group" aria-label="Speed">
+      <button type="button" id="practiceSlower" class="pr-icon" aria-label="Slower" title="Slower ( [ )">−</button>
+      <button type="button" id="practiceSpeed" class="pr-speed" title="Back to real speed (0)"></button>
+      <button type="button" id="practiceFaster" class="pr-icon" aria-label="Faster" title="Faster ( ] )">+</button>
+    </div>
+    <span id="practicePos" class="quiet pr-pos" role="status"></span>
     <span class="spacer"></span>
-    <span class="quiet">← → or space to turn · Esc to leave</span>
+    <button type="button" id="practiceSettingsBtn" aria-expanded="false" aria-controls="practiceSettings">Settings</button>
+  </div>
+  <div class="pr-settings" id="practiceSettings" hidden>
+    <label class="pr-field"><span>Speed</span>
+      <input type="range" id="practiceRange" min="25" max="200" step="5" aria-label="Speed, percent of the video">
+      <output id="practiceRangeOut"></output></label>
+    <label class="pr-field"><span>Song tempo</span>
+      <input type="number" id="practiceSongBpm" min="20" max="400" step="1" inputmode="numeric" placeholder="BPM">
+      <small>With it, speed is shown and set in BPM.</small></label>
+    <div class="pr-field"><span>Layout</span>
+      <div class="pr-seg" role="group" aria-label="Layout">
+        <button type="button" data-layout="scroll">Scroll</button>
+        <button type="button" data-layout="page">One page</button>
+      </div></div>
+    <label class="pr-check"><input type="checkbox" id="practiceCountIn"> Count in before playing</label>
+    <label class="pr-check"><input type="checkbox" id="practiceRepeats"> Play repeats where the video repeats them</label>
+    <label class="pr-check"><input type="checkbox" id="practicePlayhead"> Also show a playhead over the notes <em class="pr-exp">experimental</em></label>
+    <p class="pr-keys"><kbd>K</kbd> play · <kbd>[</kbd> <kbd>]</kbd> speed · <kbd>0</kbd> real speed · <kbd>←</kbd> <kbd>→</kbd> or space to turn · <kbd>Home</kbd> start · <kbd>Esc</kbd> leave</p>
   </div>
 </div>
 

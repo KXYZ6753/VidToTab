@@ -9,6 +9,7 @@ import {
   openLibraryFolder, requestPersistence, revealSheet, saveSheet, updateSheet, usesFolder,
 } from '/lib/library.js';
 import { createLoader } from '/brand/loaders.js';
+import { analysePage, buildSequence, cleanBpm, clampSpeed, sweepAt } from '/shared/practice.js';
 
 (() => {
 
@@ -173,7 +174,8 @@ import { createLoader } from '/brand/loaders.js';
     paper: store.get('vtt.paper', defaultPaper) === 'a4' ? 'a4' : 'letter',
     title: '',
     sheetId: null,          // library record this scan belongs to
-    practice: -1,           // page shown in the full-screen reader, -1 = closed
+    practice: -1,           // entry playing in the practice view, -1 = closed
+    pace: { speed: 1, songBpm: 0 }, // practice pace, saved with the songsheet
     fromLibrary: false,     // opened from storage: no video, so no steps 2-3
     snapshotApplied: false,
     serverBoot: null,       // which server process the job ids belong to
@@ -475,6 +477,7 @@ import { createLoader } from '/brand/loaders.js';
       // previous song's "Fewer pages" silently merged pages in the next one,
       // from a control hidden inside a collapsed section.
       sensitivity: 0.5, warnings: [], jobId: null, sheetId: null, fromLibrary: false, saveOff: false,
+      pace: { speed: 1, songBpm: 0 },
     });
     $('librarySection').hidden = true;
     updateSensSeg();
@@ -1836,9 +1839,15 @@ import { createLoader } from '/brand/loaders.js';
 
   // ---------- practice view ----------
 
-  // A full-screen page at a time, for playing along. Arrows, space and
-  // PageUp/PageDown turn pages — the last pair is what most Bluetooth
-  // page-turner pedals send, so a pedal works without any extra support.
+  // Play along. Each page is a card that fills from left to right over the
+  // time that page lasts, then the next one comes up: a timer for
+  // "when does it turn", at the video's own timing (every page knows when it
+  // was on screen), a slower or faster speed, or a tempo in BPM once the
+  // song's tempo is entered. It deliberately does not claim to follow the
+  // notes — they are not evenly spaced in time — though a playhead over them
+  // is still there as an option. Arrows, space and PageUp/PageDown still turn
+  // pages by hand — the last pair is what most Bluetooth page-turner pedals
+  // send — and while playing, a turn jumps and carries on from there.
   let wakeLock = null;
 
   async function holdScreenAwake() {
@@ -1849,36 +1858,443 @@ import { createLoader } from '/brand/loaders.js';
     wakeLock = null;
   }
 
-  function showPracticePage(i) {
-    const pages = visibleItems();
-    if (!pages.length) return;
-    const n = clamp(i, 0, pages.length - 1);
-    state.practice = n;
-    const it = pages[n];
-    const img = $('practicePage');
-    img.src = isOriginal(lookById(state.look)) ? it.srcColor : it.src;
-    img.alt = `Page ${n + 1} of ${pages.length}, ${fmtTime(it.tStart)} to ${fmtTime(it.tEnd)}`;
-    $('practicePos').textContent = `Page ${n + 1} of ${pages.length}  ·  ${fmtTime(it.tStart)}`;
+  // Pace belongs to a songsheet and is saved with it; how the practice view is
+  // laid out belongs to the person, and is remembered in this browser.
+  const prefs = {
+    get layout() { return store.get('vtt.prLayout', 'scroll') === 'page' ? 'page' : 'scroll'; },
+    set layout(v) { store.set('vtt.prLayout', v); },
+    get countIn() { return store.get('vtt.prCountIn', '1') !== '0'; },
+    set countIn(v) { store.set('vtt.prCountIn', v ? '1' : '0'); },
+    get repeats() { return store.get('vtt.prRepeats', '1') !== '0'; },
+    set repeats(v) { store.set('vtt.prRepeats', v ? '1' : '0'); },
+    get playhead() { return store.get('vtt.prPlayhead', '0') === '1'; },
+    set playhead(v) { store.set('vtt.prPlayhead', v ? '1' : '0'); },
+  };
+
+  const player = {
+    seq: [],          // what plays, in order: buildSequence() over the visible pages
+    t: 0,             // seconds of video time into the current entry
+    playing: false,
+    counting: 0,      // count-in beats still to come
+    raf: 0,
+    last: 0,
+    rows: [],         // scroll layout: one element per entry
+    pages: new Map(), // src -> { systems, w, h } | Promise, the analysed geometry of each page
+    looks: new Map(), // look|src -> object URL of that page recoloured
+    single: null,     // the one card of the one-page layout
+  };
+
+  // The page in the songsheet's look, exactly as the songsheet step shows it:
+  // Print and Original are the stored pixels, Dark and Sepia are recoloured by
+  // the same maths the preview and both exports use.
+  function lookSrc(it, img) {
+    const look = lookById(state.look);
+    if (isOriginal(look)) { img.src = it.srcColor; return; }
+    img.src = it.src;
+    if (isIdentity(look)) return;
+    const key = `${look.id}|${it.src}`;
+    const have = player.looks.get(key);
+    if (typeof have === 'string') { img.src = have; return; }
+    const job = have || recolouredCanvas(it.src, look)
+      .then((c) => new Promise((r) => c.toBlob(r, 'image/png')))
+      .then((b) => { const u = URL.createObjectURL(b); player.looks.set(key, u); return u; });
+    player.looks.set(key, job);
+    job.then((u) => { if (img.isConnected || img.id) img.src = u; }).catch(() => { /* keep the print render */ });
+  }
+  // Whether the paper is light or dark decides how the fill reaches it: tinting
+  // white paper and lifting dark paper, both leaving the ink as it is.
+  const paperIsLight = () => {
+    const look = lookById(state.look);
+    if (isOriginal(look)) return false;
+    const [r, g, b] = paperRgb(look);
+    return r * 0.299 + g * 0.587 + b * 0.114 > 128;
+  };
+  const bpmNow = () => (state.pace.songBpm ? Math.round(state.pace.songBpm * state.pace.speed) : 0);
+
+  // Where the notes are on a page, found once per page and kept: the clean
+  // render is what is measured, whatever look is showing, because it is the
+  // one guaranteed to be ink on paper.
+  function pageGeometry(it) {
+    const key = it.src;
+    const have = player.pages.get(key);
+    if (have) return have instanceof Promise ? null : have;
+    const job = loadImage(it.src).then((img) => {
+      const w = img.naturalWidth;
+      const h = img.naturalHeight;
+      const c = document.createElement('canvas');
+      c.width = w;
+      c.height = h;
+      const ctx = c.getContext('2d', { willReadFrequently: true });
+      ctx.drawImage(img, 0, 0);
+      const geo = { ...analysePage(ctx.getImageData(0, 0, w, h)), w, h };
+      player.pages.set(key, geo);
+      renderSweep();
+      return geo;
+    }).catch(() => {
+      const geo = { systems: [{ top: 0, bottom: 1, x0: 0, x1: 1 }], w: 1, h: 1, found: false };
+      player.pages.set(key, geo);
+      return geo;
+    });
+    player.pages.set(key, job);
+    return null;
   }
 
+  // One page as a card, as on the songsheet step: its number, when it is in
+  // the video, and — while it plays — how long until the next one. The fill
+  // runs across the whole card, frame and paper alike.
+  function cardEl(e, i) {
+    const card = el('div', 'pr-card');
+    card.appendChild(el('div', 'pr-card-fill'));
+    const head = el('div', 'pr-card-head');
+    head.appendChild(el('span', 'pr-num', String(e.index + 1)));
+    const time = el('span', 'pr-chip');
+    time.appendChild(icon(ICON.clock));
+    time.appendChild(document.createTextNode(`${fmtTime(e.start)} – ${fmtTime(e.start + e.dur)}`));
+    head.appendChild(time);
+    if (e.repeat) head.appendChild(el('span', 'pr-chip repeat', 'repeat'));
+    head.appendChild(el('span', 'spacer'));
+    head.appendChild(el('span', 'pr-left'));
+    card.appendChild(head);
+    const paper = el('div', `pr-paper ${paperIsLight() ? 'light' : 'dark'}`);
+    const look = lookById(state.look);
+    paper.style.background = isOriginal(look) ? '#0b0b0c' : rgbCss(paperRgb(look));
+    const img = el('img');
+    img.alt = `Page ${e.index + 1}${e.repeat ? ', repeated' : ''}, from ${fmtTime(e.start)} in the video`;
+    img.draggable = false;
+    if (e.item.w && e.item.h) { img.width = e.item.w; img.height = e.item.h; }
+    lookSrc(e.item, img);
+    paper.appendChild(img);
+    paper.appendChild(el('div', 'pr-paper-fill'));
+    paper.appendChild(el('div', 'pr-marks'));
+    card.appendChild(paper);
+    card.dataset.entry = String(i);
+    return card;
+  }
+
+  // How far through its time a card is, 0..1, drawn as the fill; the
+  // countdown says it in seconds at the current pace.
+  function fillCard(card, f, remaining) {
+    const pct = `${Math.min(1, Math.max(0, f)) * 100}%`;
+    for (const x of card.querySelectorAll('.pr-card-fill, .pr-paper-fill')) x.style.width = pct;
+    const left = card.querySelector('.pr-left');
+    if (left) left.textContent = remaining == null ? '' : remaining;
+  }
+
+  // The fill and the playhead for one page at fraction f of its time; f < 0
+  // clears it. Positions are percentages of the picture, so they follow it at
+  // any size without being recomputed.
+  function drawMarks(marks, it, f) {
+    marks.textContent = '';
+    if (f < 0) return;
+    const geo = pageGeometry(it);
+    const systems = geo ? geo.systems : [{ top: 0, bottom: 1, x0: 0, x1: 1 }];
+    const W = geo ? geo.w : 1;
+    const H = geo ? geo.h : 1;
+    const at = sweepAt(systems, f);
+    const pct = (v, of) => `${(v / of) * 100}%`;
+    systems.forEach((sys, i) => {
+      if (i > at.system) return;
+      const x = i < at.system ? sys.x1 : at.x;
+      const top = pct(sys.top, H);
+      const height = pct(sys.bottom - sys.top + 1, H);
+      const fill = el('div', 'pr-fill');
+      Object.assign(fill.style, { left: pct(sys.x0, W), width: pct(Math.max(0, x - sys.x0), W), top, height });
+      marks.appendChild(fill);
+      if (i === at.system) {
+        const head = el('div', 'pr-head');
+        Object.assign(head.style, { left: pct(x, W), top, height });
+        marks.appendChild(head);
+      }
+    });
+  }
+
+  function currentCard() {
+    return prefs.layout === 'page' ? player.single : player.rows[state.practice];
+  }
+
+  function renderSweep() {
+    if (state.practice < 0 || !player.seq.length) return;
+    const e = player.seq[state.practice];
+    const f = Math.min(1, player.t / e.dur);
+    const card = currentCard();
+    if (card) {
+      const secs = Math.max(0, Math.ceil((e.dur - player.t) / state.pace.speed));
+      const last = state.practice === player.seq.length - 1;
+      fillCard(card, f, `${last ? 'ends' : 'next'} in ${fmtTime(secs)}`);
+      if (prefs.playhead) drawMarks(card.querySelector('.pr-marks'), e.item, f);
+    }
+    // Overall progress, in the time it will take at this pace.
+    const before = player.seq.slice(0, state.practice).reduce((a, x) => a + x.dur, 0);
+    const total = player.seq.reduce((a, x) => a + x.dur, 0);
+    $('practiceProgress').style.width = `${total ? ((before + Math.min(player.t, e.dur)) / total) * 100 : 0}%`;
+    const sp = state.pace.speed;
+    $('practicePos').textContent = `Page ${state.practice + 1} of ${player.seq.length}  ·  ${fmtTime((before + player.t) / sp)} / ${fmtTime(total / sp)}`;
+  }
+
+  function buildStage() {
+    const layout = prefs.layout;
+    $('practice').dataset.layout = layout;
+    const host = $('practiceScroll');
+    host.textContent = '';
+    $('practiceSingle').textContent = '';
+    player.rows = [];
+    player.single = null;
+    if (layout === 'scroll') {
+      player.seq.forEach((e, i) => {
+        const card = cardEl(e, i);
+        card.classList.add('pr-row');
+        card.setAttribute('role', 'button');
+        card.tabIndex = -1;
+        // A click on a later or earlier page goes there, playing or not.
+        card.addEventListener('click', () => goTo(i));
+        host.appendChild(card);
+        player.rows.push(card);
+      });
+    }
+    showEntry(state.practice, { scroll: 'instant' });
+  }
+
+  function showEntry(i, { scroll = 'smooth' } = {}) {
+    const n = clamp(i, 0, player.seq.length - 1);
+    state.practice = n;
+    const e = player.seq[n];
+    if (prefs.layout === 'page') {
+      const card = cardEl(e, n);
+      card.dataset.current = '';
+      // The id the rest of the app and its tests know the page by.
+      card.querySelector('img').id = 'practicePage';
+      $('practiceSingle').replaceChildren(card);
+      player.single = card;
+    } else {
+      player.rows.forEach((row, k) => {
+        row.toggleAttribute('data-current', k === n);
+        row.toggleAttribute('data-next', k === n + 1);
+        row.toggleAttribute('data-past', k < n);
+        // Played pages stay full, pages to come stay empty.
+        if (k !== n) {
+          fillCard(row, k < n ? 1 : 0, null);
+          drawMarks(row.querySelector('.pr-marks'), player.seq[k].item, -1);
+        }
+      });
+      const row = player.rows[n];
+      if (row) {
+        const host = $('practiceScroll');
+        // The page being played near the top, the ones coming up below it.
+        const top = row.offsetTop - host.clientHeight * 0.12;
+        host.scrollTo({ top: Math.max(0, top), behavior: scroll });
+      }
+    }
+    // Geometry for this page and the next, before either is needed.
+    if (prefs.playhead) {
+      pageGeometry(e.item);
+      if (player.seq[n + 1]) pageGeometry(player.seq[n + 1].item);
+    }
+    renderSweep();
+  }
+
+  function goTo(i) {
+    player.t = 0;
+    player.counting = 0;
+    $('practiceCount').hidden = true;
+    showEntry(i);
+  }
+
+  // ---- pace
+
+  function renderPace() {
+    const pct = Math.round(state.pace.speed * 100);
+    const bpm = bpmNow();
+    $('practiceSpeed').textContent = bpm ? `${bpm} BPM · ${pct}%` : pct === 100 ? 'Real speed' : `${pct}%`;
+    $('practiceSpeed').setAttribute('aria-label', bpm ? `${bpm} beats per minute, ${pct} percent of the video` : `${pct} percent of the video's speed`);
+    $('practiceRange').value = String(pct);
+    $('practiceRangeOut').textContent = bpm ? `${pct}% · ${bpm}` : `${pct}%`;
+    if (document.activeElement !== $('practiceSongBpm')) $('practiceSongBpm').value = state.pace.songBpm ? String(state.pace.songBpm) : '';
+    renderSweep();
+  }
+
+  // Saved with the songsheet a moment after the last change, so the next
+  // practice of this song starts where this one left off.
+  let paceTimer = 0;
+  function setPace(patch) {
+    state.pace = { ...state.pace, ...patch };
+    state.pace.speed = clampSpeed(state.pace.speed);
+    state.pace.songBpm = cleanBpm(state.pace.songBpm);
+    renderPace();
+    clearTimeout(paceTimer);
+    const id = state.sheetId;
+    if (!id || state.saveOff) return;
+    const pace = { ...state.pace };
+    paceTimer = setTimeout(() => { updateSheet(id, { practice: pace }).catch(() => { /* kept on screen; saved with the next edit */ }); }, 800);
+  }
+
+  // A step is 2 BPM when the tempo is known — what a metronome moves by — and
+  // 5% of the video's speed when it is not.
+  function nudge(dir) {
+    if (state.pace.songBpm) setPace({ speed: (bpmNow() + dir * 2) / state.pace.songBpm });
+    else setPace({ speed: Math.round((state.pace.speed + dir * 0.05) * 20) / 20 });
+  }
+
+  // ---- playback
+
+  let audio = null;
+  function tick(accent) {
+    try {
+      audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+      const o = audio.createOscillator();
+      const g = audio.createGain();
+      o.frequency.value = accent ? 1320 : 880;
+      g.gain.setValueAtTime(0.0001, audio.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.25, audio.currentTime + 0.005);
+      g.gain.exponentialRampToValueAtTime(0.0001, audio.currentTime + 0.09);
+      o.connect(g).connect(audio.destination);
+      o.start();
+      o.stop(audio.currentTime + 0.1);
+    } catch { /* no audio: the numbers still count */ }
+  }
+
+  // Four beats at the practice tempo when the tempo is known, otherwise three
+  // one-second counts — enough to get both hands on the guitar.
+  const beatSec = () => (bpmNow() ? 60 / bpmNow() : 1);
+
+  function setPlaying(on) {
+    player.playing = on;
+    $('practicePlay').setAttribute('aria-label', on ? 'Pause' : 'Play');
+    $('practicePlay').title = on ? 'Pause (K)' : 'Play (K)';
+    // An <svg> has no hidden property — setting one does nothing — so the
+    // attribute is what is toggled.
+    $('practicePlay').querySelector('.pr-i-play').toggleAttribute('hidden', on);
+    $('practicePlay').querySelector('.pr-i-pause').toggleAttribute('hidden', !on);
+    cancelAnimationFrame(player.raf);
+    clearInterval(player.beat);
+    if (!on) { player.counting = 0; $('practiceCount').hidden = true; return; }
+    // Played to the end: play means from the top.
+    const e = player.seq[state.practice];
+    if (state.practice === player.seq.length - 1 && player.t >= e.dur) goTo(0);
+    player.counting = prefs.countIn && player.t === 0 ? (bpmNow() ? 4 : 3) : 0;
+    player.countAt = 0;
+    player.last = performance.now();
+    if (player.counting) { showCount(); }
+    // Two drivers, one clock. Frames draw the fill smoothly while the window
+    // is on screen; the interval keeps time and turns pages even when frames
+    // stop coming — a window behind another one gets few or none — so the
+    // song never falls behind the clock.
+    player.raf = requestAnimationFrame(frame);
+    player.beat = setInterval(() => step(performance.now()), 100);
+  }
+
+  function showCount() {
+    $('practiceCount').hidden = false;
+    $('practiceCount').textContent = String(player.counting);
+    tick(player.counting === (bpmNow() ? 4 : 3));
+  }
+
+  function frame(now) {
+    if (!player.playing) return;
+    step(now);
+    if (player.playing) player.raf = requestAnimationFrame(frame);
+  }
+
+  function step(now) {
+    if (!player.playing) return;
+    // The clock, not the frame count: a window behind another one gets frames
+    // far less often, and counting them ran the song slow. A hidden page pauses
+    // instead (below), so the only long gap left is a stall, and a second is
+    // the most one of those may skip.
+    const dt = Math.min(1, Math.max(0, (now - player.last) / 1000));
+    player.last = now;
+    if (player.counting) {
+      player.countAt += dt;
+      if (player.countAt >= beatSec()) {
+        player.countAt -= beatSec();
+        player.counting--;
+        if (player.counting) showCount();
+        else $('practiceCount').hidden = true;
+      }
+      return;
+    }
+    player.t += dt * state.pace.speed;
+    const e = player.seq[state.practice];
+    if (player.t >= e.dur) {
+      if (state.practice >= player.seq.length - 1) {
+        player.t = e.dur;
+        renderSweep();
+        setPlaying(false);
+        $('practicePos').textContent += '  ·  the end';
+        return;
+      }
+      const carry = player.t - e.dur;
+      player.t = carry;
+      showEntry(state.practice + 1);
+    } else {
+      renderSweep();
+    }
+  }
+
+  function togglePlay() { setPlaying(!player.playing); }
+
+  // ---- open and close
+
   function openPractice() {
-    const pages = visibleItems();
-    if (!pages.length) return;
+    const vis = visibleItems();
+    if (!vis.length) return;
+    player.seq = buildSequence(vis, { repeats: prefs.repeats });
+    // From the page selected on the songsheet, or the top.
+    const sel = state.selected >= 0 ? state.items[state.selected] : null;
+    const start = Math.max(0, player.seq.findIndex((e) => e.item === sel));
+    state.practice = start;
+    player.t = 0;
     $('practice').hidden = false;
-    showPracticePage(state.selected >= 0 ? visibleIndices().indexOf(state.selected) : 0);
+    $('practiceSettings').hidden = true;
+    $('practiceSettingsBtn').setAttribute('aria-expanded', 'false');
+    $('practiceCountIn').checked = prefs.countIn;
+    $('practiceRepeats').checked = prefs.repeats;
+    for (const b of document.querySelectorAll('#practiceSettings [data-layout]')) b.setAttribute('aria-pressed', String(b.dataset.layout === prefs.layout));
+    $('practicePlayhead').checked = prefs.playhead;
+    renderPace();
+    buildStage();
+    setPlaying(false);
     holdScreenAwake();
   }
 
   function closePractice() {
+    setPlaying(false);
     state.practice = -1;
     $('practice').hidden = true;
+    $('practiceScroll').textContent = '';
+    player.rows = [];
+    // Measured and recoloured again next time: cheap, and the pages or the
+    // look may have changed by then.
+    player.pages.clear();
+    for (const u of player.looks.values()) if (typeof u === 'string') URL.revokeObjectURL(u);
+    player.looks.clear();
+    $('practiceSingle').textContent = '';
+    player.single = null;
     releaseScreen();
     $('practiceBtn').focus();
   }
 
+  // Rebuilt in place when the layout or the repeats change, keeping the page
+  // and, if it is still in the sequence, the place on it.
+  function rebuild() {
+    const cur = player.seq[state.practice];
+    const was = { item: cur?.item, start: cur?.start };
+    player.seq = buildSequence(visibleItems(), { repeats: prefs.repeats });
+    let i = player.seq.findIndex((e) => e.item === was.item && e.start === was.start);
+    if (i < 0) { i = Math.max(0, player.seq.findIndex((e) => e.item === was.item)); player.t = 0; }
+    state.practice = i;
+    buildStage();
+  }
+
   function practiceKeys(e) {
     const k = e.key;
-    if (k === 'Escape') { e.preventDefault(); closePractice(); return; }
+    if (k === 'Escape') {
+      e.preventDefault();
+      if (!$('practiceSettings').hidden) toggleSettings(false);
+      else closePractice();
+      return;
+    }
+    // Typing a tempo is not a page turn.
+    if (e.target instanceof Element && e.target.matches('input')) return;
     // Backspace is deliberately not a page-turn key: it deletes a page in the
     // review list one Esc away, and a key that means two different things
     // depending on an invisible mode is a mistake waiting to happen.
@@ -1886,17 +2302,58 @@ import { createLoader } from '/brand/loaders.js';
     const back = k === 'ArrowLeft' || k === 'ArrowUp' || k === 'PageUp';
     if (forward || back) {
       e.preventDefault();
-      showPracticePage(state.practice + (forward ? 1 : -1));
+      goTo(state.practice + (forward ? 1 : -1));
+      return;
     }
+    const lower = k.length === 1 ? k.toLowerCase() : k;
+    if (lower === 'k' || lower === 'p') { e.preventDefault(); togglePlay(); }
+    else if (k === '[' || k === '-') { e.preventDefault(); nudge(-1); }
+    else if (k === ']' || k === '=' || k === '+') { e.preventDefault(); nudge(1); }
+    else if (k === '0') { e.preventDefault(); setPace({ speed: 1 }); }
+    else if (k === 'Home') { e.preventDefault(); goTo(0); }
+  }
+
+  function toggleSettings(open) {
+    $('practiceSettings').hidden = !open;
+    $('practiceSettingsBtn').setAttribute('aria-expanded', String(open));
   }
 
   $('practiceBtn').addEventListener('click', openPractice);
   $('practiceBack').addEventListener('click', closePractice);
-  $('practiceNext').addEventListener('click', () => showPracticePage(state.practice + 1));
-  $('practicePrev').addEventListener('click', () => showPracticePage(state.practice - 1));
+  $('practiceNext').addEventListener('click', () => goTo(state.practice + 1));
+  $('practicePrev').addEventListener('click', () => goTo(state.practice - 1));
+  $('practicePlay').addEventListener('click', togglePlay);
+  $('practiceRestart').addEventListener('click', () => goTo(0));
+  $('practiceSlower').addEventListener('click', () => nudge(-1));
+  $('practiceFaster').addEventListener('click', () => nudge(1));
+  $('practiceSpeed').addEventListener('click', () => setPace({ speed: 1 }));
+  $('practiceSettingsBtn').addEventListener('click', () => toggleSettings($('practiceSettings').hidden));
+  $('practiceRange').addEventListener('input', () => setPace({ speed: Number($('practiceRange').value) / 100 }));
+  $('practiceSongBpm').addEventListener('change', () => setPace({ songBpm: $('practiceSongBpm').value }));
+  $('practiceCountIn').addEventListener('change', () => { prefs.countIn = $('practiceCountIn').checked; });
+  $('practiceRepeats').addEventListener('change', () => { prefs.repeats = $('practiceRepeats').checked; rebuild(); });
+  $('practicePlayhead').addEventListener('change', () => {
+    prefs.playhead = $('practicePlayhead').checked;
+    // Off clears what is drawn; on measures the pages it needs.
+    for (const m of document.querySelectorAll('#practice .pr-marks')) m.textContent = '';
+    showEntry(state.practice, { scroll: 'instant' });
+  });
+  for (const b of document.querySelectorAll('#practiceSettings [data-layout]')) {
+    b.addEventListener('click', () => {
+      prefs.layout = b.dataset.layout;
+      for (const x of document.querySelectorAll('#practiceSettings [data-layout]')) x.setAttribute('aria-pressed', String(x === b));
+      rebuild();
+    });
+  }
+  // A window resized mid-song keeps the page being played in view.
+  window.addEventListener('resize', () => { if (state.practice >= 0 && prefs.layout === 'scroll') showEntry(state.practice, { scroll: 'instant' }); });
   // A phone that locks its screen drops the wake lock; take it again on return.
+  // Hidden while playing — another app, a locked screen — pauses rather than
+  // carrying on unseen and coming back pages later.
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible' && state.practice >= 0) holdScreenAwake();
+    if (state.practice < 0) return;
+    if (document.visibilityState === 'visible') holdScreenAwake();
+    else if (player.playing) setPlaying(false);
   });
 
   // ---------- songsheet library ----------
@@ -2201,6 +2658,7 @@ import { createLoader } from '/brand/loaders.js';
     // No video is loaded for a saved sheet, so the source is metadata only.
     state.meta = { title: sheet.title, url: sheet.url, channel: sheet.channel, duration: sheet.duration, thumb: false, ready: false, width: 0, height: 0, fps: 0 };
     state.title = sheet.title;
+    state.pace = { speed: clampSpeed(sheet.practice?.speed ?? 1), songBpm: cleanBpm(sheet.practice?.songBpm) };
     state.look = lookById(sheet.look).id;
     state.paper = sheet.paper === 'a4' ? 'a4' : 'letter';
     state.lastAnalyze = sheet.recipe?.rect ? sheet.recipe : null;

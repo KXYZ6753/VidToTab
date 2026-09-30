@@ -14,6 +14,9 @@ const mods = [
   // Shared with the browser so it lives outside pipeline/, but it decides what
   // every exported page looks like, so it is checked with everything else.
   { name: 'look', file: path.join(here, '..', 'public', 'shared', 'look.js') },
+  // Play-along: the sequence with repeats, the pace, and finding the notes on
+  // a page so the sweep crosses them rather than empty staff.
+  { name: 'practice', file: path.join(here, '..', 'public', 'shared', 'practice.js') },
   // Only its pure parts run here — IndexedDB does not exist in Node, and the
   // storage paths are covered by the browser end-to-end test instead.
   { name: 'library', file: path.join(here, '..', 'public', 'lib', 'library.js') },
