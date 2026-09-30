@@ -47,4 +47,13 @@ contextBridge.exposeInMainWorld('vidtotab', Object.freeze({
     openFolder: () => call('library:open-folder'),
     chooseFolder: () => call('library:choose-folder'),
   }),
+
+  // The microphone itself is plain getUserMedia (public/listen-audio.js). This
+  // is only what the page cannot see from inside: whether the system lets the
+  // app use it at all ('granted', 'denied', 'not-determined', 'restricted' or
+  // 'unknown'), and a way to the system setting that changes that.
+  mic: Object.freeze({
+    status: () => call('mic:status'),
+    openSettings: () => call('mic:open-settings'),
+  }),
 }));

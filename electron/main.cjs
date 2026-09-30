@@ -5,7 +5,7 @@
 // pixel loops are synchronous — running them here would freeze the window for
 // the entire length of a scan.
 
-const { app, BrowserWindow, dialog, ipcMain, net, session, shell } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, net, session, shell, systemPreferences } = require('electron');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -21,6 +21,17 @@ const updates = require('./updates.cjs');
 if (process.env.VIDTOTAB_USER_DATA) app.setPath('userData', path.resolve(process.env.VIDTOTAB_USER_DATA));
 const cdpPort = Number(process.env.VIDTOTAB_CDP_PORT);
 if (Number.isInteger(cdpPort) && cdpPort > 0) app.commandLine.appendSwitch('remote-debugging-port', String(cdpPort));
+// A microphone that plays a WAV file, so the test can listen without a real
+// one. Only the capture device is faked: there is deliberately no
+// use-fake-ui-for-media-stream, so the permission handler below still decides
+// whether the page gets it. The audio service reads the file itself, and on
+// macOS and Windows it is sandboxed away from the disk unless told otherwise.
+const fakeMic = process.env.VIDTOTAB_FAKE_MIC ? path.resolve(process.env.VIDTOTAB_FAKE_MIC) : null;
+if (fakeMic) {
+  app.commandLine.appendSwitch('use-fake-device-for-media-stream');
+  app.commandLine.appendSwitch('use-file-for-fake-audio-capture', `${fakeMic}%noloop`);
+  if (process.platform !== 'linux') app.commandLine.appendSwitch('disable-features', 'AudioServiceSandbox');
+}
 
 // Shown while the server boots. Inline rather than a file because it has to be
 // on screen before anything is being served.
@@ -163,6 +174,71 @@ function assertOurs(e) {
 const handle = (channel, fn) => ipcMain.handle(channel, async (e, ...args) => {
   assertOurs(e);
   return fn(e, ...args);
+});
+
+// ---------------------------------------------------------------- permissions
+
+// With no handler Electron grants every web permission to every page. The page
+// leans on some of them (clipboard, the screen wake lock while playing along,
+// persistent storage), so our own origin keeps them all; nothing else — the
+// "Starting…" page, anything that ever slipped past will-navigate — gets any.
+// The microphone is the one with a second gate: it goes only to our origin,
+// never together with the camera, and on macOS only once the system has said
+// yes too.
+const isOurs = (url) => {
+  if (!server || !url) return false;
+  try { return new URL(url).origin === `http://127.0.0.1:${server.port}`; } catch { return false; }
+};
+
+// macOS keeps its own answer per app. Asking while it is undecided shows the
+// system prompt (in the words of NSMicrophoneUsageDescription); asking after a
+// no shows nothing, so a no is final here and the page points at Settings
+// instead. Under the fake test microphone the system is not consulted at all:
+// a test must never sit waiting on a prompt nobody will answer.
+const micBlockedBySystem = () => process.platform === 'darwin' && !fakeMic
+  && ['denied', 'restricted'].includes(systemPreferences.getMediaAccessStatus('microphone'));
+async function systemAllowsMic() {
+  if (process.platform !== 'darwin' || fakeMic) return true;
+  const status = systemPreferences.getMediaAccessStatus('microphone');
+  if (status === 'not-determined') return systemPreferences.askForMediaAccess('microphone').catch(() => false);
+  return status === 'granted';
+}
+
+function guardPermissions() {
+  const ses = session.defaultSession;
+  ses.setPermissionRequestHandler((wc, permission, callback, details = {}) => {
+    if (!isOurs(details.requestingUrl || wc?.getURL())) return callback(false);
+    if (permission !== 'media') return callback(true);
+    if (details.securityOrigin && !isOurs(details.securityOrigin)) return callback(false);
+    if ((details.mediaTypes || []).includes('video')) return callback(false);
+    systemAllowsMic().then((ok) => callback(Boolean(ok)), () => callback(false));
+  });
+  ses.setPermissionCheckHandler((_wc, permission, origin, details = {}) => {
+    if (!isOurs(origin || details.requestingUrl)) return false;
+    if (permission !== 'media') return true;
+    if (details.securityOrigin && !isOurs(details.securityOrigin)) return false;
+    return details.mediaType !== 'video' && !micBlockedBySystem();
+  });
+}
+
+// ---------------------------------------------------------------- microphone
+
+// What the system thinks of this app using the microphone, so the page can
+// tell "you said no in VidToTab" from "macOS or Windows is blocking it".
+// Linux has no such switch.
+handle('mic:status', () => (process.platform === 'darwin' || process.platform === 'win32'
+  ? systemPreferences.getMediaAccessStatus('microphone')
+  : 'granted'));
+// Fixed addresses, one per platform — never one from the page.
+const MIC_SETTINGS = {
+  darwin: 'x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone',
+  win32: 'ms-settings:privacy-microphone',
+};
+handle('mic:open-settings', async () => {
+  const url = MIC_SETTINGS[process.platform];
+  if (!url) return false;
+  await shell.openExternal(url);
+  return true;
 });
 
 // ---------------------------------------------------------------- library
@@ -451,6 +527,7 @@ if (!app.requestSingleInstanceLock()) {
     win.focus();
   });
   app.whenReady().then(() => {
+    guardPermissions();
     watchDownloads();
     return boot();
   });

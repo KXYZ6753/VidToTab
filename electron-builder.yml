@@ -59,6 +59,12 @@ mac:
   identity: '-'
   entitlements: electron/entitlements.mac.plist
   entitlementsInherit: electron/entitlements.mac.plist
+  # The sentence macOS puts in its microphone prompt. The prompt is not shown
+  # at all without one, so following along would never get to hear anything;
+  # the entitlement that lets the hardened runtime use the microphone is in
+  # the plist above.
+  extendInfo:
+    NSMicrophoneUsageDescription: "VidToTab listens while you play so it can follow the tab. Nothing is recorded or sent anywhere."
   target:
     - target: dmg
       arch: [arm64]

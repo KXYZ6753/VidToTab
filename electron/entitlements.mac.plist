@@ -11,8 +11,13 @@
   into this one — but it would the moment anything here links against something
   it ships.
 
-  The other three are what Electron itself needs: V8 compiles JavaScript at
+  The next three are what Electron itself needs: V8 compiles JavaScript at
   runtime, which means writing memory and then executing it.
+
+  device.audio-input is the microphone, for following along while someone
+  plays. Without it the hardened runtime refuses the microphone without a
+  word: macOS never shows its prompt and the app simply hears nothing. The
+  prompt's wording is NSMicrophoneUsageDescription in electron-builder.yml.
 
   This file is also what a notarised build would need, so keeping the hardened
   runtime on now means turning notarisation on later is a credential change
@@ -27,6 +32,8 @@
   <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
   <true/>
   <key>com.apple.security.cs.allow-dyld-environment-variables</key>
+  <true/>
+  <key>com.apple.security.device.audio-input</key>
   <true/>
 </dict>
 </plist>

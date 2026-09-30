@@ -9,9 +9,11 @@
 // In between, it drives the window over the DevTools protocol and checks what
 // only the real shell can do: the songsheet library writing actual folders
 // through the preload bridge, the library screen showing them, an edit on the
-// songsheet step saving itself back to disk, and the update check finding a
-// newer release and downloading it — against a fake GitHub on loopback, so
-// nothing here depends on the network or on what is really published. The app
+// songsheet step saving itself back to disk, the microphone reaching the
+// listening worker past the shell's permission handler (a fake capture device
+// playing a generated WAV), and the update check finding a newer release and
+// downloading it — against a fake GitHub on loopback, so nothing here depends
+// on the network, a real microphone or what is really published. The app
 // runs on a profile, library and downloads folder of its own, so none of this
 // touches a real install.
 
@@ -21,7 +23,7 @@ import http from 'node:http';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -100,6 +102,42 @@ const LIBRARY = path.join(scratch, 'library');
 const DOWNLOADS = path.join(scratch, 'downloads');
 const cdpPort = await freePort();
 
+// ---------------------------------------------------------------- fake microphone
+
+// What the shell's fake microphone plays: a second of silence, then two of an
+// open A string (110 Hz), as 48 kHz 16-bit mono. A sawtooth rather than a sine
+// because a string is all harmonics; the short fades keep the edges from
+// clicking. The silence first means a meter reading above zero can only have
+// come from the file, not from a device that makes up its own noise.
+function toneWav(file, rate = 48000) {
+  const silent = rate;
+  const tone = 2 * rate;
+  const n = silent + tone;
+  const buf = Buffer.alloc(44 + n * 2);
+  buf.write('RIFF', 0, 'ascii');
+  buf.writeUInt32LE(36 + n * 2, 4);
+  buf.write('WAVE', 8, 'ascii');
+  buf.write('fmt ', 12, 'ascii');
+  buf.writeUInt32LE(16, 16);        // fmt chunk size
+  buf.writeUInt16LE(1, 20);         // PCM
+  buf.writeUInt16LE(1, 22);         // mono
+  buf.writeUInt32LE(rate, 24);
+  buf.writeUInt32LE(rate * 2, 28);  // byte rate
+  buf.writeUInt16LE(2, 32);         // block align
+  buf.writeUInt16LE(16, 34);        // bits per sample
+  buf.write('data', 36, 'ascii');
+  buf.writeUInt32LE(n * 2, 40);
+  const fade = Math.round(rate * 0.01);
+  for (let i = 0; i < tone; i++) {
+    const phase = (110 * i / rate) % 1;
+    const env = Math.min(1, i / fade, (tone - 1 - i) / fade);
+    buf.writeInt16LE(Math.round((2 * phase - 1) * 0.5 * env * 32767), 44 + (silent + i) * 2);
+  }
+  writeFileSync(file, buf);
+  return file;
+}
+const FAKE_MIC = toneWav(path.join(scratch, 'fake-mic.wav'));
+
 const child = spawn(BIN, ARGS, {
   cwd: ROOT,
   stdio: ['ignore', 'pipe', 'pipe'],
@@ -112,6 +150,7 @@ const child = spawn(BIN, ARGS, {
     // The launch check is timer-driven; the test asks when it is ready to.
     VIDTOTAB_NO_UPDATE_CHECK: '1',
     VIDTOTAB_CDP_PORT: String(cdpPort),
+    VIDTOTAB_FAKE_MIC: FAKE_MIC,
   },
 });
 let out = '';
@@ -291,6 +330,66 @@ try {
   }
   check('an edit on the songsheet step is saved back to the folder', saved);
   check('…without losing what the library knew about it', saved && sheetJson('Edited On Step Four').notes === 'capo 2');
+
+  // The microphone, for following along. The shell plays the WAV above as a
+  // fake capture device but does not fake the permission prompt, so these go
+  // through the real permission handler: our page may have the microphone,
+  // nobody may have the camera, and what the microphone hears reaches the
+  // listening worker as a level above zero.
+  //
+  // A named fake device, never the "default" entry: Chromium resolves that one
+  // against the computer's real default microphone even with fake devices on,
+  // and on a Mac that can sit in CoreAudio indefinitely (waiting on the system
+  // for whatever launched the test). Every step is also bounded in the page, so
+  // a microphone that never answers fails a check instead of hanging the run.
+  const within = (ms, what) => `new Promise((_, no) => setTimeout(() => no(new Error('${what}: no answer in ${ms / 1000}s')), ${ms}))`;
+  const fakeId = await js(`navigator.mediaDevices.enumerateDevices().then((all) => {
+    const d = all.find((x) => x.kind === 'audioinput' && /^Fake Audio Input \\d/.test(x.label));
+    return d ? d.deviceId : null;
+  })`);
+  check('the page sees the (fake) microphones by name', typeof fakeId === 'string' && fakeId.length > 0);
+  const deviceArg = JSON.stringify(fakeId ? { exact: fakeId } : undefined);
+  const mic = await js(`Promise.race([navigator.mediaDevices.getUserMedia({ audio: { deviceId: ${deviceArg} } }), ${within(10000, 'getUserMedia')}]).then((s) => {
+    const t = s.getAudioTracks()[0];
+    const r = { live: t?.readyState === 'live', label: t?.label || '' };
+    s.getTracks().forEach((x) => x.stop());
+    return r;
+  }, (e) => ({ error: e.name + ': ' + e.message }))`);
+  check(`the page can open the microphone (${mic.error || mic.label || 'no label'})`, mic.live === true);
+  const cam = await js(`Promise.race([navigator.mediaDevices.getUserMedia({ video: true }), ${within(10000, 'getUserMedia')}])
+    .then((s) => { s.getTracks().forEach((t) => t.stop()); return 'granted'; }, (e) => e.name)`);
+  check(`…but not the camera (${cam})`, cam === 'NotAllowedError');
+  const micStatus = await js(`window.vidtotab.mic.status()`);
+  check(`the shell reports what the system allows (${micStatus})`, typeof micStatus === 'string' && micStatus.length > 0);
+  const heard = await js(`(async () => {
+    try {
+      const { openMic } = await import('/listen-audio.js');
+      const s = await Promise.race([openMic({ deviceId: ${JSON.stringify(fakeId)} }), ${within(10000, 'openMic')}]);
+      window.__vttTestMic = s;
+      const ready = await Promise.race([s.ready, new Promise((r) => setTimeout(() => r(null), 5000))]);
+      const level = await new Promise((resolve) => {
+        const timer = setTimeout(() => { off(); resolve(null); }, 5000);
+        const off = s.on('level', (m) => { if (m.rms > 0) { clearTimeout(timer); off(); resolve(m); } });
+      });
+      return { level, rate: s.sampleRate, engine: ready ? ready.engine : null };
+    } catch (e) {
+      return { error: (e.code ? e.code + ': ' : '') + e.message };
+    }
+  })()`);
+  check(`the listening worker hears the microphone (${heard.error
+    || `rms ${heard.level ? heard.level.rms.toFixed(3) : 'none'} at ${heard.rate} Hz, engine ${heard.engine ? 'loaded' : 'not loaded'}`})`,
+  !heard.error && heard.level?.rms > 0);
+  const afterClose = await js(`(async () => {
+    const s = window.__vttTestMic;
+    if (!s) return 'never opened';
+    await Promise.race([s.close(), ${within(5000, 'close')}]);
+    delete window.__vttTestMic;
+    return s.track.readyState;
+  })().catch((e) => e.message)`);
+  check(`closing it stops the microphone (${afterClose})`, afterClose === 'ended');
+  const wake = await js(`Promise.race([navigator.wakeLock.request('screen'), ${within(5000, 'wakeLock')}])
+    .then(async (l) => { const held = !l.released; await l.release(); return held ? 'held' : 'released'; }, (e) => e.name + ': ' + e.message)`);
+  check(`the screen wake lock is still granted (${wake})`, wake === 'held');
 
   // Updates: the version in the top bar opens the check, the check finds
   // 99.0.0, and Download fetches this platform's installer and verifies it.
