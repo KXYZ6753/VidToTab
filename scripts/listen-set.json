@@ -1,0 +1,63 @@
+{
+  "about": "How each eval video's guitar is tuned, read from the labels on screen, for the real-audio follow-along benchmark (scripts/eval-listen.mjs). Frets in the tab count from the capo. backing: the soundtrack has other instruments or vocals, so it is reported but left out of the median. floor: the benchmark's progress may not fall below this (raise after a fix, never lower).",
+  "videos": {
+    "yT9gKKwBeVw": {
+      "capo": 5,
+      "tuning": [
+        64,
+        59,
+        55,
+        50,
+        45,
+        41
+      ],
+      "notes": "Strings labelled e B G D A F: the 6th string is tuned up to F. CAPO FRET 5.",
+      "floor": 0.82
+    },
+    "0YXjZDR5V-4": {
+      "capo": 3,
+      "notes": "CAPO FRET 3, strings e B G D A E",
+      "floor": 0.6
+    },
+    "Fv3pCR1Btjk": {
+      "capo": 3,
+      "notes": "CAPO FRET 3",
+      "floor": 0.67
+    },
+    "MENRbBUBYd4": {
+      "capo": 3,
+      "notes": "CAPO FRET 3",
+      "floor": 0.75
+    },
+    "73HxHE5e2yY": {
+      "capo": 3,
+      "notes": "Capo.3 (Haruguitar)",
+      "floor": 0.76
+    },
+    "9E9lOx6LfTk": {
+      "capo": 4,
+      "notes": "Tuning: Standard | Capo 4th Fret",
+      "floor": 0.55
+    },
+    "yUka8hbTivY": {
+      "capo": 4,
+      "notes": "CAPO FRET 4",
+      "floor": 0.77
+    },
+    "eNhFKmm413U": {
+      "capo": 0,
+      "notes": "Standard tuning no capo",
+      "floor": 0.76
+    },
+    "tabsheet-styx": {
+      "capo": 0,
+      "backing": true,
+      "notes": "No label; standard assumed. The soundtrack is the original song, not a guitar."
+    },
+    "pyDajEy7__E": {
+      "capo": 0,
+      "backing": true,
+      "notes": "No label; standard assumed. The soundtrack is the original song, not a guitar."
+    }
+  }
+}

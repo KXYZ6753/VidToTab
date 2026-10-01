@@ -23,6 +23,8 @@ const mods = [
   { name: 'follow', file: path.join(here, '..', 'public', 'shared', 'follow.js') },
   { name: 'sha1', file: path.join(here, '..', 'public', 'shared', 'sha1.js') },
   { name: 'transcript', file: path.join(here, '..', 'public', 'shared', 'transcript.js') },
+  { name: 'tabread', file: path.join(here, '..', 'public', 'shared', 'tabread.js') },
+  { name: 'listen', file: path.join(here, '..', 'public', 'shared', 'listen.js') },
   { name: 'tabread-truth', file: path.join(here, 'tabread-truth.mjs') },
   // Only its pure parts run here — IndexedDB does not exist in Node, and the
   // storage paths are covered by the browser end-to-end test instead.

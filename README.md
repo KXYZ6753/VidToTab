@@ -83,6 +83,12 @@ docker run -p 3000:3000 -v vidtotab-data:/data -e VIDTOTAB_PUBLIC=1 vidtotab
 
 Arrow keys, space or PageUp/PageDown still turn the page by hand, playing or not — the last pair is what most Bluetooth page-turner pedals send, so a pedal works without any setup. On a phone or tablet, tap the left or right edge in *One page*. The screen is kept awake while you read, playback pauses if the app is hidden, and Esc leaves. Settings also has an experimental playhead over the notes, off by default.
 
+**Listen** (L, or the switch beside Back) follows the tab by ear instead of by the clock. The notes are read off each page on your own computer — every fret number, which string it is on, and which are played together — and the microphone is compared with them. In *Wait for me* it holds each note or chord until you play it, lights it up, and turns the page after the last one; a wrong note is named ("Heard G3, expected A3"), and one that keeps coming back offers to skip it (N) or fix the tab (E). *Play along* runs the clock as above and scores each note as heard or missed, with a summary at the end. Chords count when all but one of their notes are heard (big chords) — *Strict* asks for every note. The microphone panel (T) has the device, a level meter, a tuner, the guitar's tuning and capo, and *Stay quiet 3 s*, which measures the room. Nothing it hears leaves the computer. Six-string guitar only; an acoustic guitar in front of a laptop microphone is the case it is built for. If the video is playing on speakers, wear headphones — the microphone hears the speakers too.
+
+**Notes** (E, on the songsheet step or in practice) shows what was read as boxes over each page. Amber ones are notes the reader was unsure of; click one, or press Enter on it, to say it is right, type the fret, move it to another string (↑ ↓), toggle a technique, split it out of a chord or join it to the previous one, or delete it; click empty staff to add a note the reader missed. Fixes are saved with the songsheet and come back when it is opened; a new scan of the video starts fresh.
+
+*Record a test clip* (in the microphone panel) saves what the microphone hears from the highlighted note on, plus the notes it should match. Put both files in `scripts/listen-clips/` and `npm run eval:clips` replays them through the listener — that is how a real guitar in a real room becomes a regression test.
+
 Every finished scan is saved to **your songsheets** on the home screen, because loading another video wipes the working folder, and changes made on the songsheet step — the title, a removed page, the look, the paper — are saved back as you make them. In a browser the pages are stored as images in the browser itself, so a saved songsheet still opens after the video is long gone; export a PDF to keep a copy anywhere else. The desktop app keeps them as files instead (above).
 
 There is a **home page** and an **app view**, swapped by the button in the bar. The home page is the front door; the app view drops the pitch and puts a sidebar beside the workspace with new scan, every saved songsheet and practice — so a songsheet is one click away instead of four steps back. The desktop build opens straight into the app view, since a downloaded app has no business showing a landing page every launch.
@@ -118,7 +124,14 @@ npm run eval -- --only yT9gKKwBeVw --sens 0.5,0.75,1
 npm run eval -- --detect-only
 npm run eval -- --label       # frame grids for labelling a new video
 npm run eval -- --rescore     # re-score saved captures against current labels
+npm run eval:tabs             # the tab reader against hand-checked pages (scripts/tabread-truth/)
+npm run eval:listen           # the listener against the eval videos' own guitar audio
+npm run test:listen           # the listener against a synthetic guitar: chords, techniques, noise
+npm run e2e:listen            # Listen mode in a real browser with a fake microphone, and the note editor
+npm run eval:clips            # replays recorded test clips (scripts/listen-clips/)
 ```
+
+The tab reader's model is generated, not hand-written. To retrain it: `node scripts/tabread-synth.mjs` renders and cuts up a few thousand synthetic tab pages, `node scripts/tabread-harvest.mjs` adds glyphs from the development videos (it needs a model, so a fresh clone trains once with `node scripts/tabread-train.mjs --no-real` first), and `node scripts/tabread-train.mjs` writes `public/shared/tabread-model.js`. `npm run eval:tabs -- --lovo` retrains leaving each video out in turn for an honest number; hold-out videos are never trained on or looked at.
 
 `scripts/eval-set.json` holds hand-labelled page sequences (`"t:id"` page starts, repeats reuse the id). The harness downloads videos into `.cache/eval/`, scores recall/precision of page starts, repeat folding, crop IoU and leftover highlight colour, and writes contact sheets to inspect.
 
@@ -217,4 +230,7 @@ VIDTOTAB_FFPROBE=$PWD/build/bin/$(node -p "process.platform+'-'+process.arch")/f
 - In a browser, songsheets are stored in the browser. Clearing site data removes them; export a PDF to keep a copy. (The desktop app keeps them as files.)
 - A **hosted instance is one person at a time** — see [Hosted](#hosted). The limits keep visitors from disturbing each other; they do not make it multi-user.
 - **The downloads are not signed by a known developer.** macOS wants *Open Anyway* in Privacy & Security on first launch and Windows SmartScreen wants *Run anyway* — see [Releasing](#releasing) for what removing both would take.
+- **Listen** is tuned on synthetic guitar and the eval videos' own recordings, not yet on many real guitars in real rooms — recorded test clips are the way to change that. Very fast passages, and a note repeated while it is still ringing, are the hardest cases.
+- **The microphone on a hosted instance needs https** — browsers only offer it to secure pages (or to `localhost`). On macOS, an ad-hoc signed build counts as a new app to the system, so it asks for the microphone again after each update.
+- The tab reader handles standard six-line tab. Standard notation, rhythm above the staff and chord diagrams are ignored, and Play along spreads each page's notes evenly over its time — tab spacing is not rhythm.
 - Planned: AI transcription of captures into re-rendered tab (alphaTex / alphaTab).

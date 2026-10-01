@@ -146,7 +146,17 @@ export function createListen(ctx) {
     mic.on('accept', onAccept);
     mic.on('heard', onHeard);
     mic.on('wrong', onWrong);
-    mic.on('drift', (m) => { $('lsDrift').textContent = Math.abs(m.cents) >= 30 ? `The guitar reads ${m.cents > 0 ? 'sharp' : 'flat'} by about ${Math.abs(Math.round(m.cents))} cents — worth retuning.` : ''; });
+    // A whole guitar a little sharp or flat still plays the tab; past about
+    // 30 cents it is offered once: retune, or have the listener follow it.
+    let driftOffered = false;
+    mic.on('drift', (m) => {
+      const far = Math.abs(m.cents) >= 30;
+      const said = `The guitar reads ${m.cents > 0 ? 'sharp' : 'flat'} by about ${Math.abs(Math.round(m.cents))} cents`;
+      $('lsDrift').textContent = far ? `${said} — worth retuning.` : '';
+      if (!far || driftOffered || !ls.active) return;
+      driftOffered = true;
+      message(`${said}.`, { actions: [['Follow my tuning', () => { mic.call('setOffsetCents', m.cents); message(''); }], ['I’ll retune', () => message('')]] });
+    });
     mic.on('calib', () => { $('lsQuiet').disabled = false; $('lsQuiet').textContent = 'Stay quiet 3 s'; $('lsQuietDone').hidden = false; });
     mic.on('ended', () => { if (ls.mic === mic && ls.active) message('The microphone stopped — it may have been unplugged.', { actions: [['Reconnect', () => startMic()]] }); });
     mic.on('error', (m) => { if (ls.mic === mic && ls.active) message(`Listening failed: ${m.message}`); });
@@ -247,9 +257,15 @@ export function createListen(ctx) {
     ls.mic.call('arm', ls.cur);
   }
 
+  // An accept a little further on: the engine heard the next event played in
+  // full while this one never came (missed, or a note the reader added that
+  // nobody plays). The ones passed over count as missed.
   function onAccept({ index }) {
-    if (!ls.active || idle() || index !== ls.cur) return;
+    if (!ls.active || idle() || index < ls.cur || index > ls.cur + 2) return;
+    for (let i = ls.cur; i < index; i++) ls.status.set(i, 'missed');
+    ls.cur = index;
     ls.status.set(index, 'heard');
+    if (ls.mode === 'wait' && ls.flat[index].entry > ctx.current()) ctx.showEntry(ls.flat[index].entry);
     ls.partial.delete(index);
     advance();
   }
