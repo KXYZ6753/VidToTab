@@ -64,7 +64,7 @@ mac:
   # the entitlement that lets the hardened runtime use the microphone is in
   # the plist above.
   extendInfo:
-    NSMicrophoneUsageDescription: "VidToTab listens while you play so it can follow the tab. Nothing is recorded or sent anywhere."
+    NSMicrophoneUsageDescription: "VidToTab listens while you play so it can follow the tab. What it hears stays on this computer."
   target:
     - target: dmg
       arch: [arm64]
