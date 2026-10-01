@@ -98,6 +98,7 @@ export function normaliseSheet(input = {}) {
     },
     listen: cleanListen(input.listen),
     transcript: cleanTranscript(input.transcript),
+    timing: cleanTiming(input.timing),
     url: String(input.url || '').slice(0, 2000),
     channel: String(input.channel || '').slice(0, 300),
     duration: Number(input.duration) || 0,
@@ -173,6 +174,41 @@ export function cleanTranscript(t) {
   return Object.keys(pages).length ? { v: 1, pages } : null;
 }
 
+// When each page's notes sound in its video, heard from the video's own
+// recording at scan time (shared/timing.js), and the unsure digits that
+// recording settled — keyed like the corrections by the SHA-1 of the page's
+// clean image. An event is [system, x, t]: t seconds from when the page
+// appeared, to 0.01, and often negative (notes sound before the page is
+// shown). A fix is [system, x, string, fret]. Bounded to 300 pages, 800 events
+// and 100 fixes a page and about half a megabyte; the oldest pages go first.
+// Mirrored in library-fs.cjs.
+const num = (v) => typeof v === 'number' && Number.isFinite(v);
+const sysOk = (s) => Number.isInteger(s) && s >= 0 && s < 8;
+export function cleanTiming(t) {
+  if (!t || typeof t !== 'object' || !t.pages || typeof t.pages !== 'object') return null;
+  const entries = Object.entries(t.pages)
+    .filter(([hash, pg]) => /^[0-9a-f]{40}$/.test(hash) && pg && Array.isArray(pg.events))
+    .sort((a, b) => (Number(b[1].at) || 0) - (Number(a[1].at) || 0))
+    .slice(0, 300);
+  const pages = {};
+  let size = 0;
+  for (const [hash, pg] of entries) {
+    const clean = {
+      at: Number(pg.at) || 0,
+      events: pg.events.filter((e) => Array.isArray(e) && sysOk(e[0]) && num(e[1]) && num(e[2]) && Math.abs(e[2]) <= 3600)
+        .slice(0, 800).map((e) => [e[0], r1(e[1]), Math.round(e[2] * 100) / 100]),
+      fixes: (Array.isArray(pg.fixes) ? pg.fixes : [])
+        .filter((f) => Array.isArray(f) && sysOk(f[0]) && num(f[1]) && Number.isInteger(f[2]) && f[2] >= 1 && f[2] <= 6
+          && Number.isInteger(f[3]) && f[3] >= 0 && f[3] <= 24)
+        .slice(0, 100).map((f) => [f[0], r1(f[1]), f[2], f[3]]),
+    };
+    size += JSON.stringify(clean).length;
+    if (size > 500_000) break;
+    pages[hash] = clean;
+  }
+  return Object.keys(pages).length ? { v: 1, pages } : null;
+}
+
 export const pageKey = (sheetId, index) => `${sheetId}:${String(index).padStart(4, '0')}`;
 
 // ---------------------------------------------------------------- storage
@@ -192,7 +228,7 @@ async function idbSave(meta, pages, thumb) {
   const prev = await reqValue(sheetStore.get(id)).catch(() => null);
   const sheet = normaliseSheet({
     artist: prev?.artist, notes: prev?.notes, practice: prev?.practice, listen: prev?.listen, transcript: prev?.transcript,
-    savedAt: prev?.savedAt, ...defined(meta), id, pageCount: pages.length,
+    timing: prev?.timing, savedAt: prev?.savedAt, ...defined(meta), id, pageCount: pages.length,
   });
   // Replacing a sheet must not leave the previous run's pages behind.
   const stale = await reqValue(pageStore.index('sheetId').getAllKeys(IDBKeyRange.only(sheet.id))).catch(() => []);
@@ -240,7 +276,7 @@ async function idbUpdate(id, patch) {
   const prev = await reqValue(store.get(id));
   if (!prev) throw new Error('That songsheet is no longer stored.');
   const allowed = {};
-  for (const k of ['title', 'artist', 'notes', 'look', 'paper', 'practice', 'listen', 'transcript']) if (patch[k] !== undefined) allowed[k] = patch[k];
+  for (const k of ['title', 'artist', 'notes', 'look', 'paper', 'practice', 'listen', 'transcript', 'timing']) if (patch[k] !== undefined) allowed[k] = patch[k];
   const sheet = { ...normaliseSheet({ ...prev, ...allowed }), thumb: prev.thumb || null };
   store.put(sheet);
   await done(tx);
@@ -298,7 +334,7 @@ export async function getSheet(id) {
 }
 
 // Title, artist, notes, look, paper, practice pace, follow-along settings,
-// corrected readings: the edits that need no page rewritten.
+// corrected readings, the notes' times: the edits that need no page rewritten.
 export async function updateSheet(id, patch = {}) {
   const lib = folder();
   if (!lib) return idbUpdate(id, patch);
@@ -456,6 +492,17 @@ export function selfCheck(assert) {
   assert.deepEqual(tr.pages[hash].systems[0].events, [{ x: 12.3, n: [[1, 3, 'h', 10, 5, 8, 12, 1], [6, null, 'x', 1, 1, 1, 1, 1]] }],
     'bad strings and frets dropped, empty events dropped, flags bounded');
   assert.equal(cleanTranscript({ pages: {} }), null);
+  assert.equal(s.timing, null, 'no times until a scan has heard them');
+  const tm = cleanTiming({ pages: {
+    [hash]: { at: 7, events: [[0, 12.34, -1.234], [1, 20, 3.456], [9, 1, 1], [0, 'x', 1], [0, 5, null], [0, 5, 9999]],
+      fixes: [[0, 12.34, 3, 2], [0, 12, 7, 2], [0, 12, 3, 25], [0, 12, 3.5, 2]] },
+    [hash.replace(/a/g, 'c')]: { at: 3, fixes: [] },
+    'not-a-hash': { events: [] },
+  } });
+  assert.deepEqual(tm, { v: 1, pages: { [hash]: { at: 7, events: [[0, 12.3, -1.23], [1, 20, 3.46]], fixes: [[0, 12.3, 3, 2]] } } },
+    'times to 0.01, places to 0.1; bad systems, strings, frets and times dropped; a page needs events');
+  assert.equal(cleanTiming({ pages: {} }), null);
+  assert.equal(cleanTiming('no'), null);
   assert.equal(normaliseSheet({ notes: 'n'.repeat(6000) }).notes.length, 5000, 'notes are bounded');
   assert.deepEqual(defined({ a: 1, b: undefined, c: null }), { a: 1, c: null }, 'only undefined means "not mentioned"');
   assert.equal(relayed(new Error("Error invoking remote method 'library:save': Error: Disk full")).message, 'Disk full');

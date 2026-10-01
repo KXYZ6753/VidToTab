@@ -41,7 +41,7 @@ const PAGE_RE = /^page-\d{3,4}(?:-[0-9a-f]{8})?(?:-original)?\.png$/;
 const HASH_RE = /^[0-9a-f]{40}$/;
 // Windows refuses these as names whatever follows the dot.
 const RESERVED_RE = /^(con|prn|aux|nul|com\d|lpt\d)(\..*)?$/i;
-const EDITABLE = ['title', 'artist', 'notes', 'look', 'paper', 'practice', 'listen', 'transcript'];
+const EDITABLE = ['title', 'artist', 'notes', 'look', 'paper', 'practice', 'listen', 'transcript', 'timing'];
 
 function assertId(id) {
   if (typeof id !== 'string' || !ID_RE.test(id)) throw new Error('That is not a songsheet id.');
@@ -71,7 +71,7 @@ function childFile(dir, name) {
 
 const str = (v, max) => String(v ?? '').slice(0, max);
 
-// cleanListen and cleanTranscript in public/lib/library.js, mirrored: this
+// cleanListen, cleanTranscript and cleanTiming in public/lib/library.js, mirrored: this
 // file is packed inside the app and cannot import the browser's module, so
 // the self-check below runs both on the same input instead.
 const TUNING_IDS = ['standard', 'dropD', 'halfDown', 'wholeDown', 'dadgad', 'openG', 'openD', 'custom'];
@@ -119,6 +119,32 @@ function cleanTranscript(t) {
   }
   return Object.keys(pages).length ? { v: 1, pages } : null;
 }
+const num = (v) => typeof v === 'number' && Number.isFinite(v);
+const sysOk = (s) => Number.isInteger(s) && s >= 0 && s < 8;
+function cleanTiming(t) {
+  if (!t || typeof t !== 'object' || !t.pages || typeof t.pages !== 'object') return null;
+  const entries = Object.entries(t.pages)
+    .filter(([hash, pg]) => /^[0-9a-f]{40}$/.test(hash) && pg && Array.isArray(pg.events))
+    .sort((a, b) => (Number(b[1].at) || 0) - (Number(a[1].at) || 0))
+    .slice(0, 300);
+  const pages = {};
+  let size = 0;
+  for (const [hash, pg] of entries) {
+    const clean = {
+      at: Number(pg.at) || 0,
+      events: pg.events.filter((e) => Array.isArray(e) && sysOk(e[0]) && num(e[1]) && num(e[2]) && Math.abs(e[2]) <= 3600)
+        .slice(0, 800).map((e) => [e[0], r1(e[1]), Math.round(e[2] * 100) / 100]),
+      fixes: (Array.isArray(pg.fixes) ? pg.fixes : [])
+        .filter((f) => Array.isArray(f) && sysOk(f[0]) && num(f[1]) && Number.isInteger(f[2]) && f[2] >= 1 && f[2] <= 6
+          && Number.isInteger(f[3]) && f[3] >= 0 && f[3] <= 24)
+        .slice(0, 100).map((f) => [f[0], r1(f[1]), f[2], f[3]]),
+    };
+    size += JSON.stringify(clean).length;
+    if (size > 500_000) break;
+    pages[hash] = clean;
+  }
+  return Object.keys(pages).length ? { v: 1, pages } : null;
+}
 const sha1 = (buf) => require('node:crypto').createHash('sha1').update(buf).digest('hex');
 
 // Windows refuses to rename a folder while anything holds a file inside it —
@@ -155,6 +181,7 @@ function cleanMeta(input = {}, previous = {}) {
     },
     listen: cleanListen(pick('listen')),
     transcript: cleanTranscript(pick('transcript')),
+    timing: cleanTiming(pick('timing')),
     url: str(pick('url'), 2000),
     channel: str(pick('channel'), 300),
     duration: Number(pick('duration')) || 0,
@@ -360,9 +387,16 @@ async function get(root, id) {
       color,
     });
   }
-  // The corrected readings travel only with the full songsheet, not in the
-  // list the library screen draws from.
-  return { ...summary(rec, dir, { thumb: await readThumb(dir, rec) }), transcript: cleanTranscript(rec.transcript), pageCount: pages.length, missing, pages };
+  // The corrected readings and the notes' times travel only with the full
+  // songsheet, not in the list the library screen draws from.
+  return {
+    ...summary(rec, dir, { thumb: await readThumb(dir, rec) }),
+    transcript: cleanTranscript(rec.transcript),
+    timing: cleanTiming(rec.timing),
+    pageCount: pages.length,
+    missing,
+    pages,
+  };
 }
 
 // pages: [{ tStart, tEnd, alsoAt, w, h, clean: bytes, color: bytes|null }]
@@ -650,13 +684,32 @@ async function selfCheck() {
     };
     assert.equal(cleanMeta({ ...input, importing: true, updatedAt: 77 }).updatedAt, 77, 'an import keeps its edit date');
     assert.notEqual(cleanMeta({ ...input, updatedAt: 77 }).updatedAt, 77, 'an ordinary save is stamped now');
-    const web = normaliseSheet(input);
-    const desk = cleanMeta(input);
     input.listen = { tuningId: 'custom', tuning: [62, 57, 55, 50, 45, 38], capo: 3.6, strictness: 'bass', mode: 'x' };
     input.transcript = { pages: { ['b'.repeat(40)]: { at: 9, model: 'm', w: 9.4, h: 3, systems: [{ lines: [1.26], events: [{ x: 3.33, n: [[2, 12, 'hx!', 1, 2, 3, 4, 3], [9, 1, '', 0, 0, 0, 0, 0]] }] }] }, bad: {} } };
-    for (const k of ['id', 'title', 'artist', 'notes', 'practice', 'listen', 'transcript', 'url', 'channel', 'duration', 'recipe', 'look', 'paper', 'savedAt']) {
+    input.timing = { pages: {
+      ['b'.repeat(40)]: { at: 9, events: [[0, 3.33, -1.234], [8, 1, 1], [0, 2, 'x'], [1, 7.07, 4005]], fixes: [[0, 3.33, 2, 7], [0, 3, 0, 7], [0, 3, 2, 30]] },
+      ['c'.repeat(40)]: { at: 4, events: [] },
+      bad: { events: [[0, 1, 1]] },
+    } };
+    // Compared after every field is set: listen and transcript used to be set
+    // only after the comparison had run, so both sides were null and agreed.
+    const web = normaliseSheet(input);
+    const desk = cleanMeta(input);
+    assert.ok(web.listen && web.transcript && web.timing, 'the comparison has something to compare');
+    for (const k of ['id', 'title', 'artist', 'notes', 'practice', 'listen', 'transcript', 'timing', 'url', 'channel', 'duration', 'recipe', 'look', 'paper', 'savedAt']) {
       assert.deepEqual(desk[k], web[k], `desktop and browser disagree about ${k}`);
     }
+    // The times are the full songsheet's, like the corrections: saved and
+    // updated, read back by get(), never in the list.
+    await save(lib, { id: 'abc-0000000a', title: 'Timed', timing: input.timing }, [page(1)]);
+    assert.deepEqual((await get(lib, 'abc-0000000a')).timing, web.timing);
+    assert.equal((await list(lib)).find((x) => x.id === 'abc-0000000a').timing, undefined, 'not in the list');
+    await update(lib, 'abc-0000000a', { timing: { pages: { ['d'.repeat(40)]: { at: 1, events: [[0, 1, 2]] } } } });
+    assert.deepEqual((await get(lib, 'abc-0000000a')).timing.pages['d'.repeat(40)].events, [[0, 1, 2]]);
+    await save(lib, { id: 'abc-0000000a', title: 'Timed again' }, [page(1)]);
+    assert.ok((await get(lib, 'abc-0000000a')).timing, 'a re-save that does not mention the times keeps them');
+    await update(lib, 'abc-0000000a', { timing: null });
+    assert.equal((await get(lib, 'abc-0000000a')).timing, null, 'and null clears them');
   } finally {
     await fsp.rm(root, { recursive: true, force: true });
   }

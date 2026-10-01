@@ -25,6 +25,9 @@ const mods = [
   { name: 'transcript', file: path.join(here, '..', 'public', 'shared', 'transcript.js') },
   { name: 'tabread', file: path.join(here, '..', 'public', 'shared', 'tabread.js') },
   { name: 'listen', file: path.join(here, '..', 'public', 'shared', 'listen.js') },
+  // Timing a page's notes from the video's own recording, and checking the
+  // reader's unsure digits against it, on a synthesized string.
+  { name: 'timing', file: path.join(here, '..', 'public', 'shared', 'timing.js') },
   { name: 'tabread-truth', file: path.join(here, 'tabread-truth.mjs') },
   // Only its pure parts run here — IndexedDB does not exist in Node, and the
   // storage paths are covered by the browser end-to-end test instead.

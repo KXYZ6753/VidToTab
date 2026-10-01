@@ -208,11 +208,12 @@ export function createListen(ctx) {
     const byEntry = [];
     for (let k = 0; k < seq.length; k++) {
       let reading = null;
+      let hash = null;
       let error = null;
-      try { ({ reading } = await ctx.readings.readingFor(seq[k].item)); } catch (err) { error = err.message; }
+      try { ({ reading, hash } = await ctx.readings.readingFor(seq[k].item)); } catch (err) { error = err.message; }
       if (token !== ls.building) return;
       const events = reading ? buildEvents(reading, s, { page: k }) : [];
-      byEntry.push({ first: flat.length, count: events.length, reading, error, events });
+      byEntry.push({ first: flat.length, count: events.length, reading, error, events, hash });
       for (let i = 0; i < events.length; i++) flat.push({ entry: k, event: i, ev: events[i] });
       message(`Reading the tab… ${k + 1} of ${seq.length} pages`);
     }
@@ -358,17 +359,19 @@ export function createListen(ctx) {
   }
 
   // Called on every tick of the practice clock: t seconds into entry k (video
-  // time). An event is due at its place along the page (playTimes) and is
-  // missed once it is later than that by the gap to the next one, or half a
-  // second of real time, whichever is more. Tab spacing is not rhythm, so the
-  // window is wide; being early is never a miss.
+  // time). An event is due when the video's recording played it, where that
+  // was heard when the songsheet was scanned, and otherwise at its place along
+  // the page (playTimes) — looked up the first time the entry is played, so a
+  // page timed since practice opened gets its times. It is missed once it is
+  // later than that by the gap to the next one, or half a second of real
+  // time, whichever is more; being early is never a miss.
   function onClock(k, t, dur, speed) {
     if (!ls.active || ls.mode !== 'play' || idle()) return;
     const b = ls.byEntry[k];
     if (!b) return;
     while (ls.cur < Math.min(b.first, ls.flat.length)) miss();
     if (!b.count) return;
-    if (!ls.times.has(k)) ls.times.set(k, playTimes(b.events, dur));
+    if (!ls.times.has(k)) ls.times.set(k, playTimes(b.events, dur, b.hash ? ctx.readings.timingFor(b.hash)?.events : null));
     const times = ls.times.get(k);
     while (ls.cur >= b.first && ls.cur < b.first + b.count) {
       const i = ls.cur - b.first;

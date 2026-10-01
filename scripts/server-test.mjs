@@ -53,6 +53,25 @@ function tinyVideo() {
   return makeClip(SMALL, ['-c:v', 'libvpx-vp9', '-b:v', '0', '-crf', '40', '-pix_fmt', 'yuv420p']);
 }
 
+// The same clip with a sound track: 440 Hz through its first second, 880 Hz
+// through its second, so a window's pitch says which part of the video it
+// came from. Same VP9, plus AAC — both in the server's playable set.
+const TONED = path.join(os.tmpdir(), 'vidtotab-server-test-tone.mp4');
+const TONE_RATE = 48000;
+function toneVideo() {
+  const raw = path.join(os.tmpdir(), 'vidtotab-server-test-tone.f32');
+  const n = Math.round((TONE_RATE * CLIP.frames) / CLIP.fps);
+  const pcm = new Float32Array(n);
+  for (let i = 0; i < n; i++) pcm[i] = 0.3 * Math.sin((2 * Math.PI * (i < TONE_RATE ? 440 : 880) * i) / TONE_RATE);
+  fs.writeFileSync(raw, Buffer.from(pcm.buffer));
+  try {
+    return makeClip(TONED, ['-f', 'f32le', '-ar', String(TONE_RATE), '-ac', '1', '-i', raw,
+      '-c:v', 'libvpx-vp9', '-b:v', '0', '-crf', '40', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '128k']);
+  } finally {
+    fs.rmSync(raw, { force: true });
+  }
+}
+
 async function startServer(port, env = {}) {
   const srv = spawn('node', [ENTRY], { cwd: ROOT, env: { ...process.env, PORT: String(port), ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
   let log = '';
@@ -462,7 +481,9 @@ async function publicJobIsPrivate() {
     const thumb = await get(port, '/thumb.jpg');
     const cap = await get(port, '/captures/page-1.png');
     const cancel = await post(port, '/api/cancel');
+    const sound = await get(port, '/api/audio?from=0&to=1');
     check('owner: a stranger cannot read the video', meta.status === 403, `${meta.status} ${meta.body}`);
+    check('owner: a stranger cannot hear the video', sound.status === 403, `${sound.status} ${sound.body}`);
     check('owner: a stranger cannot fetch the thumbnail', thumb.status === 403, String(thumb.status));
     check('owner: a stranger cannot fetch the scanned pages', cap.status === 403, String(cap.status));
     check('owner: a stranger cannot cancel the scan', cancel.status === 403, String(cancel.status));
@@ -711,6 +732,60 @@ async function stalledUploadDoesNotLockTheInstance() {
   }
 }
 
+// ---- the video's sound, for timing each page's notes (GET /api/audio).
+// Raw float samples at 48 kHz from exactly the window asked for; a start
+// before the video is clamped to it, a window past the end gives what there
+// is, a video with no sound track says so rather than answering with nothing.
+async function audioWindow() {
+  const port = await freePort();
+  const { srv } = await startServer(port);
+  const sound = async (q) => {
+    const r = await fetch(`http://127.0.0.1:${port}/api/audio?${q}`).catch(() => null);
+    const buf = r ? Buffer.from(await r.arrayBuffer()) : Buffer.alloc(0);
+    const pcm = new Float32Array(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.length - (buf.length % 4)));
+    return { status: r?.status ?? 0, type: r?.headers.get('content-type') || '', pcm, text: buf.toString('utf8', 0, Math.min(200, buf.length)) };
+  };
+  // Zero crossings: plenty to tell 440 Hz from 880 Hz.
+  const hz = (pcm) => { let z = 0; for (let i = 1; i < pcm.length; i++) if ((pcm[i - 1] < 0) !== (pcm[i] < 0)) z++; return z / 2 / (pcm.length / TONE_RATE); };
+  const readyWith = async (name) => {
+    for (let i = 0; i < 150; i++) {
+      const r = await fetch(`http://127.0.0.1:${port}/api/meta`).catch(() => null);
+      if (r?.ok) { const m = await r.json(); if (m.ready && m.title?.includes(name)) return m; }
+      await sleep(100);
+    }
+    return null;
+  };
+  try {
+    const none = await sound('from=0&to=1');
+    check('audio: no video, nothing to hear (404)', none.status === 404, `${none.status} ${none.text}`);
+
+    await put(port, 'silent-clip.mp4', (req) => fs.createReadStream(tinyVideo()).pipe(req));
+    await readyWith('silent-clip');
+    const silent = await sound('from=0&to=1');
+    check('audio: a video without a sound track is a 404, not an empty 200', silent.status === 404 && /no sound/.test(silent.text), `${silent.status} ${silent.text}`);
+
+    await put(port, 'tone-clip.mp4', (req) => fs.createReadStream(toneVideo()).pipe(req));
+    check('audio: the toned clip is ready', Boolean(await readyWith('tone-clip')));
+    const a = await sound('from=0.2&to=0.7');
+    check('audio: raw 32-bit float samples, 48 kHz mono, for the window asked',
+      a.status === 200 && /octet-stream/.test(a.type) && Math.abs(a.pcm.length - 24000) <= 480, `${a.status} ${a.type} ${a.pcm.length} samples`);
+    check('audio: they are the video\'s sound (440 Hz in its first second)', Math.abs(hz(a.pcm) - 440) < 10, `${hz(a.pcm).toFixed(1)} Hz`);
+    const b = await sound('from=1.2&to=1.7');
+    check('audio: from where it was asked (880 Hz in its second)', Math.abs(hz(b.pcm) - 880) < 15, `${hz(b.pcm).toFixed(1)} Hz`);
+    const early = await sound('from=-3&to=0.5');
+    check('audio: a start before the video is clamped to 0', early.status === 200 && Math.abs(early.pcm.length - 24000) <= 480, `${early.status} ${early.pcm.length}`);
+    const long = await sound('from=0&to=100000');
+    check('audio: a window past the end gives what there is', long.status === 200 && Math.abs(long.pcm.length - 2 * TONE_RATE) <= 2400, `${long.status} ${long.pcm.length}`);
+    const bad = [await sound('from=2&to=1'), await sound('from=x&to=1'), await sound('from=1')].map((r) => r.status);
+    check('audio: a window that is not one is refused', bad.every((c) => c === 400), bad.join(','));
+  } finally {
+    srv.kill('SIGKILL');
+    fs.rmSync(SMALL, { force: true });
+    fs.rmSync(TONED, { force: true });
+  }
+}
+
+await audioWindow();
 await stalledUploadDoesNotLockTheInstance();
 await heldOpenStartDoesNotLockTheInstance();
 await failedStartReleasesTheInstance();

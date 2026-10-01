@@ -2,6 +2,7 @@
 //
 //   node scripts/tabread-eval.mjs [--video id] [--lovo] [--show-holdout]
 //                                 [--model file] [--no-adapt] [--dev-only] [--synth]
+//                                 [--audio] [--audio-stress]
 //
 //   Staff: findStaves on every cached page against the calibration's lines.
 //   Notes: every truth page (scripts/tabread-truth/<video>/<page>.json) read
@@ -14,6 +15,14 @@
 //   --lovo retrains without each dev video's real glyphs in turn and reads that
 //   video with the model that never saw it (honest per-video numbers);
 //   --lovo-par n trainings at once (3), --lovo-epochs (15).
+//   --audio puts the reader's unsure digits (confidence under 0.5) to each
+//   video's own recording (shared/timing.js) and reports note F1 before and
+//   after, per dev video and for the hold-outs together; with how much of each
+//   page the recording times, at the tuning and capo in listen-set.json and as
+//   a fresh scan does it, from the default settings and the shift its probe
+//   finds. --audio-stress also misreads a fifth of the notes by a fret
+//   (unsure) and marks another fifth unsure, and counts what the check does
+//   to each — the mechanism tested where the reader gives it nothing to do.
 //   A table goes to stdout and everything to .cache/tabread/eval-<time>.json.
 
 import { execFileSync } from 'node:child_process';
@@ -284,6 +293,152 @@ async function readVideo(video, classify, { adapt = true } = {}) {
   return { raw, adapted, found: tps.map((t) => results.get(t.page.sha1).found) };
 }
 
+// ---------------------------------------------------------------- --audio
+
+const SR = 48000;
+function audioOf(video) {
+  const file = path.join(ROOT, '.cache', 'eval', video, 'audio-48k.f32');
+  if (!fs.existsSync(file)) {
+    execFileSync(FFMPEG, ['-v', 'error', '-y', '-i', path.join(ROOT, '.cache', 'eval', video, 'video.mp4'), '-vn', '-ac', '1', '-ar', String(SR), '-f', 'f32le', file]);
+  }
+  const buf = fs.readFileSync(file);
+  return new Float32Array(buf.buffer, buf.byteOffset, buf.length / 4);
+}
+
+// A deterministic misreading for --audio-stress: of the notes the reader got
+// right, a fifth read a fret off (and unsure), another fifth unsure as read.
+function perturb(reading, seed) {
+  let x = seed >>> 0 || 1;
+  const rand = () => { x ^= x << 13; x >>>= 0; x ^= x >>> 17; x ^= x << 5; x >>>= 0; return x / 4294967296; };
+  const marks = [];
+  const out = { ...reading, systems: reading.systems.map((sys, si) => ({ ...sys, events: sys.events.map((ev, ei) => ({ ...ev, notes: ev.notes.map((n) => {
+    if (!Number.isInteger(n.fret) || (n.tech || []).includes('harm')) return { ...n };
+    const r = rand();
+    if (r < 0.2) {
+      const fret = n.fret === 0 || (n.fret < 24 && rand() < 0.5) ? n.fret + 1 : n.fret - 1;
+      marks.push({ si, x: ev.xc, string: n.string, kind: 'misread', truth: n.fret, read: fret });
+      return { ...n, fret, conf: 0.3, alt: undefined };
+    }
+    if (r < 0.4) {
+      marks.push({ si, x: ev.xc, string: n.string, kind: 'unsure', truth: n.fret, read: n.fret });
+      return { ...n, conf: 0.3, alt: undefined };
+    }
+    return { ...n };
+  }) })) })) };
+  return { reading: out, marks };
+}
+
+async function audioCheck(videos, model, { hold, showHold, stress }) {
+  const { createEngine } = await import('../public/shared/listen.js');
+  const { timePage, applyFixes, pageWindow, probeShift } = await import('../public/shared/timing.js');
+  const { buildEvents, normaliseListen } = await import('../public/shared/follow.js');
+  const SET = JSON.parse(fs.readFileSync(path.join(ROOT, 'scripts', 'listen-set.json'), 'utf8')).videos;
+  const make = createEngine;
+  const rows = [];
+  const agg = { dev: { b: [], a: [] }, hold: { b: [], a: [] } };
+  const stressAgg = { misread: 0, fixed: 0, otherFret: 0, kept: 0, unsure: 0, broken: 0, untouched: 0 };
+  const t0 = Date.now();
+  for (const video of videos) {
+    const tps = truthPages(video);
+    const conf = SET[video];
+    if (!tps.length || !conf) continue;
+    const isHold = hold.includes(video);
+    const settings = normaliseListen({ tuningId: conf.tuning ? 'custom' : 'standard', tuning: conf.tuning, capo: conf.capo });
+    const plain = normaliseListen({});
+    const audio = audioOf(video);
+    const windowOf = (p) => {
+      const { from, to } = pageWindow(p.tStart, p.tEnd);
+      return { pcm: audio.subarray(Math.floor(from * SR), Math.min(audio.length, Math.ceil(to * SR))), offset: from - p.tStart };
+    };
+    // As a fresh scan does it (public/video-timing.js): the first six pages
+    // with four or more events, followed at each shift from the default
+    // settings.
+    const probePages = [];
+    for (const p of [...pagesOf(video)].sort((a, b) => a.tStart - b.tStart)) {
+      if (probePages.length >= 6) break;
+      const events = buildEvents(readPage(decodePage(p), { classify: model.classify }), plain);
+      if (events.length >= 4) probePages.push({ ...windowOf(p), events });
+    }
+    const probe = probeShift(probePages, { make });
+    const expectShift = settings.tuning[1] + settings.capo - plain.tuning[1];
+    const expectLow = settings.tuning[5] + settings.capo - plain.tuning[5] - expectShift;
+    const row = { video, holdout: isHold, backing: Boolean(conf.backing), pages: 0, events: 0, timed: 0, timedPlain: 0, timedProbe: 0,
+      shift: probe.shift, expectShift, low: probe.low, expectLow, unsure: 0, fixes: 0, before: [], after: [] };
+    let seed = 1;
+    for (const t of tps) {
+      const reading = readPage(decodePage(t.page), { classify: model.classify });
+      const { pcm, offset } = windowOf(t.page);
+      const events = buildEvents(reading, settings);
+      const out = timePage({ pcm, events, offset, digits: true, make });
+      const fixed = applyFixes(reading, out.fixes);
+      row.pages++;
+      row.events += out.total;
+      row.timed += out.events.length;
+      const plainEvents = buildEvents(reading, plain);
+      row.timedPlain += timePage({ pcm, events: plainEvents, offset, make }).events.length;
+      row.timedProbe += timePage({ pcm, events: plainEvents, offset, shift: probe.shift, low: probe.low, make }).events.length;
+      row.unsure += events.flatMap((e) => e.notes).filter((n) => (n.conf ?? 1) < 0.5 && Number.isInteger(n.fret)).length;
+      row.fixes += out.fixes.length;
+      row.before.push(scorePage(reading, t.truth));
+      row.after.push(scorePage(fixed, t.truth));
+      if (stress && !conf.backing) {
+        const { reading: shaky, marks } = perturb(reading, (seed++ * 2654435761) ^ video.length);
+        const sev = buildEvents(shaky, settings);
+        const sout = timePage({ pcm, events: sev, offset, digits: true, make });
+        const settled = applyFixes(shaky, sout.fixes);
+        for (const m of marks) {
+          const sys = settled.systems[m.si];
+          const ev = sys.events.reduce((a, e) => (Math.abs(e.xc - m.x) < Math.abs(a.xc - m.x) ? e : a));
+          const n = ev.notes.find((q) => q.string === m.string);
+          const now = n ? n.fret : null;
+          if (m.kind === 'misread') {
+            stressAgg.misread++;
+            if (now === m.truth) stressAgg.fixed++;
+            else if (now !== m.read) stressAgg.otherFret++;
+            else stressAgg.kept++;
+          } else {
+            stressAgg.unsure++;
+            if (now === m.truth) stressAgg.untouched++;
+            else stressAgg.broken++;
+          }
+        }
+      }
+    }
+    rows.push(row);
+    if (!row.backing) {
+      (isHold ? agg.hold : agg.dev).b.push(...row.before);
+      (isHold ? agg.hold : agg.dev).a.push(...row.after);
+    }
+  }
+  console.log(`\nthe recording against the reader (${((Date.now() - t0) / 1000).toFixed(0)} s): unsure digits checked, and how much of each page is timed`);
+  console.log(['video'.padEnd(16), 'pgs', 'unsure', 'fixed', 'F1 before', ' after', '  timed', ' default', ' probed', '  shift'].join(' '));
+  const pct1 = (a, b) => (b ? `${(100 * a / b).toFixed(0)}%` : '—');
+  for (const r of rows) {
+    const name = r.holdout && !showHold ? `hold-out ${rows.filter((x) => x.holdout).indexOf(r) + 1}` : r.video;
+    console.log([name.padEnd(16), String(r.pages).padStart(3), String(r.unsure).padStart(6), String(r.fixes).padStart(5),
+      pct(sum(r.before).F1).padStart(9), pct(sum(r.after).F1).padStart(6),
+      pct1(r.timed, r.events).padStart(7), pct1(r.timedPlain, r.events).padStart(8), pct1(r.timedProbe, r.events).padStart(7),
+      `${r.shift === r.expectShift && r.low === r.expectLow ? '' : '≠'}${r.shift}${r.low ? `${r.low > 0 ? '+' : ''}${r.low}` : ''}/${r.expectShift}${r.expectLow ? `${r.expectLow > 0 ? '+' : ''}${r.expectLow}` : ''}`.padStart(7) + (r.backing ? '  (backing)' : '')].join(' '));
+  }
+  const summary = {};
+  for (const [k, v] of Object.entries(agg)) {
+    if (!v.b.length) continue;
+    summary[k] = { before: sum(v.b).F1, after: sum(v.a).F1 };
+    console.log(`${k === 'dev' ? 'DEV' : 'HOLD-OUT'} (solo guitar): F1 ${pct(summary[k].before)} → ${pct(summary[k].after)}`);
+  }
+  const solo = rows.filter((r) => !r.backing);
+  const median = (xs) => { const q = [...xs].sort((a, b) => a - b); return q[Math.floor(q.length / 2)]; };
+  console.log(`timed (solo guitar, median of videos): ${pct(median(solo.map((r) => r.timed / r.events)))}% at the video's tuning and capo, `
+    + `${pct(median(solo.map((r) => r.timedPlain / r.events)))}% at the defaults, ${pct(median(solo.map((r) => r.timedProbe / r.events)))}% at the probed shift `
+    + `(right shift on ${solo.filter((r) => r.shift === r.expectShift && r.low === r.expectLow).length} of ${solo.length})`);
+  if (stress) {
+    const s = stressAgg;
+    console.log(`stress: of ${s.misread} notes misread a fret off, ${s.fixed} put right, ${s.otherFret} moved to another wrong fret, ${s.kept} left; `
+      + `of ${s.unsure} right but unsure, ${s.untouched} left right, ${s.broken} made wrong`);
+  }
+  return { rows: rows.map(({ before, after, ...r }) => ({ ...r, F1before: sum(before).F1, F1after: sum(after).F1 })), summary, stress: stress ? stressAgg : null };
+}
+
 const pct = (x) => `${(100 * x).toFixed(1)}`;
 function row(name, t) {
   const f = t.flags;
@@ -421,6 +576,11 @@ async function main() {
     report.lovo = { dev: sum(per), devA: perA.length ? sum(perA) : null };
     console.log(row('DEV (lovo)', report.lovo.dev));
     if (report.lovo.devA) console.log(row('DEV (lovo) +adapt', report.lovo.devA));
+  }
+
+  if (flag('--audio') || flag('--audio-stress')) {
+    report.audio = await audioCheck(videos, model, { hold, showHold, stress: flag('--audio-stress') });
+    if (!showHold) report.audio.rows = report.audio.rows.map((r) => (r.holdout ? { holdout: true, timed: r.timed, events: r.events } : r));
   }
 
   const f = report.summary.dev?.flags;

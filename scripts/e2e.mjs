@@ -137,9 +137,12 @@ const shot = async (name, full = false) => {
 };
 
 const problems = [];
+const timingNotes = [];
 listeners.push((m) => {
   if (m.method === 'Runtime.exceptionThrown') problems.push('exception: ' + (m.params.exceptionDetails.exception?.description || m.params.exceptionDetails.text));
   if (m.method === 'Runtime.consoleAPICalled' && m.params.type === 'error') problems.push('console.error: ' + m.params.args.map((a) => a.value ?? a.description).join(' '));
+  // What timing the notes from the video said (public/video-timing.js); checked after the scan.
+  if (m.method === 'Runtime.consoleAPICalled' && m.params.type === 'info' && /^Tim/.test(m.params.args[0]?.value || '')) { timingNotes.push(m.params.args[0].value); log('page:', m.params.args[0].value); }
   if (m.method === 'Log.entryAdded' && m.params.entry.level === 'error') problems.push('log: ' + m.params.entry.text + ' ' + (m.params.entry.url || ''));
 });
 
@@ -297,6 +300,45 @@ try {
   await shot('4-review-light');
   await shot('4-review-light-full', true);
 
+  // Once a scan is done its notes are timed from the video in the background
+  // (public/video-timing.js): a quiet line counts the pages and goes, and the
+  // songsheet then carries the times Play mode scores against (sheet.timing).
+  // This video is played with a capo and a retuned low string that the
+  // default Listen settings know nothing of, so the probe has to find both.
+  const sawTiming = await evalJs(`!document.getElementById('timingLine').hidden`);
+  await waitFor(`document.getElementById('timingLine').hidden`, 300000, 'the notes timed from the video');
+  // Most of them, at the pitch the probe found: at the default settings'
+  // pitch only about a tenth would be.
+  const said = timingNotes.map((t) => /^Timed (\d+) of (\d+) notes/.exec(t)).find(Boolean);
+  if (!sawTiming) problems.push('the timing line never showed after the scan');
+  if (!said || Number(said[1]) < 0.5 * Number(said[2])) problems.push(`under half the notes were timed from the video (${timingNotes.join(' | ') || 'nothing said'})`);
+  // …and all of them stored with the songsheet (the last write lands a
+  // moment after the line goes).
+  const storedTiming = `(async () => {
+    const lib = await import('/lib/library.js');
+    const [newest] = await lib.listSheets();
+    const s = newest && await lib.getSheet(newest.id);
+    return Object.values(s?.timing?.pages || {}).reduce((n, p) => n + p.events.length, 0);
+  })()`;
+  const timedNow = said ? Number(said[1]) : 1;
+  await waitFor(`${storedTiming}.then((n) => n >= ${timedNow})`, 15000, 'the times stored').catch(() => {});
+  const stored = await evalJs(storedTiming);
+  log(`timing: line shown=${sawTiming}, ${stored} event time(s) stored`);
+  // The pitch the probe heard becomes the songsheet's Listen settings, so
+  // following along works without knowing about the capo: capo 5, the low
+  // string up to F.
+  const listenAt = `(async () => {
+    const lib = await import('/lib/library.js');
+    const [newest] = await lib.listSheets();
+    const s = newest && await lib.getSheet(newest.id);
+    return s?.listen ? s.listen.capo + ' ' + s.listen.tuning.join(',') : '';
+  })()`;
+  await waitFor(`${listenAt}.then((v) => v !== '')`, 15000, 'Listen settings stored').catch(() => {});
+  const listenNow = await evalJs(listenAt);
+  log(`listen settings from the video: ${listenNow || 'none'}`);
+  if (listenNow !== '5 64,59,55,50,45,41') problems.push(`the Listen settings were not set from the video's pitch (${listenNow || 'none stored'})`);
+  if (stored < timedNow) problems.push(`${timedNow} notes were timed but ${stored} stored`);
+
   // Practice mode is wiring again: it could open showing a blank image, or the
   // key interception could swallow every key without turning a page, and a
   // screenshot would look right either way. Check the page actually resolves
@@ -331,12 +373,18 @@ try {
   const speedLabel = await evalJs(`document.getElementById('practiceSpeed').textContent`);
   const pageBefore = await evalJs(`document.getElementById('practicePos').textContent.split('·')[0].trim()`);
   await evalJs(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', bubbles: true, cancelable: true }))`);
+  // A page lasts barely longer than the gap between two looks at double
+  // speed, so the second look may land on the next page: that is the card
+  // filling and the page turning, not a failure.
+  const pageNow = `document.getElementById('practicePos').textContent.split('·')[0].trim()`;
   await sleep(900);
   const f1 = await evalJs(fillNow);
+  const p1 = await evalJs(pageNow);
   await sleep(900);
   const f2 = await evalJs(fillNow);
-  log(`practice playing at ${speedLabel}: fill ${f1.toFixed(1)}% -> ${f2.toFixed(1)}%`);
-  if (!(f2 > f1 && f1 > 0)) problems.push(`playing did not fill the page card (${f1}% then ${f2}%)`);
+  const p2 = await evalJs(pageNow);
+  log(`practice playing at ${speedLabel}: fill ${f1.toFixed(1)}% (${p1}) -> ${f2.toFixed(1)}% (${p2})`);
+  if (!(f1 > 0 && (f2 > f1 || p2 !== p1))) problems.push(`playing did not fill the page card (${f1}% then ${f2}%, ${p1} then ${p2})`);
   let advanced = false;
   for (let i = 0; i < 100 && !advanced; i++) {
     await sleep(150);

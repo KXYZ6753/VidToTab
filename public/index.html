@@ -100,6 +100,7 @@ a { color: var(--accent); text-underline-offset: 2px; }
 button { font: inherit; color: inherit; }
 img { display: block; }
 .quiet { color: var(--muted); font-size: 14px; }
+.timing-line { font-size: 13px; margin-top: 2px; font-variant-numeric: tabular-nums; }
 .center { text-align: center; }
 .row { display: flex; gap: 8px; align-items: center; }
 .spread { justify-content: space-between; }
@@ -1041,6 +1042,7 @@ button.chip { cursor: pointer; }
       <div class="review-title">
         <input id="titleInput" class="title-input" type="text" aria-label="Songsheet title" placeholder="Song title" autocomplete="off">
         <p class="quiet"><span id="rvCount"></span><span id="rvDot" hidden> · </span><a id="rvSource" target="_blank" rel="noopener" hidden>Source video</a></p>
+        <p id="timingLine" class="quiet timing-line" role="status" hidden></p>
       </div>
       <div class="review-controls">
         <button type="button" class="btn" id="practiceBtn" title="Full-screen pages for playing along (P)">

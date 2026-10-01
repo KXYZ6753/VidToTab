@@ -848,6 +848,23 @@ function readString(glyphs, sys) {
   // missed — the note next to it may be short of one.
   const OTHER = CLASSES.indexOf('other');
   const digitish = (g) => g && g.label === 'other' && g.probs && 1 - g.probs[OTHER] >= 0.25;
+  // The classifier's runner-up for a number: the likeliest other digit in
+  // one of its places (CLASSES starts with the ten digits). Never read as
+  // the note — only offered to the recording as a fret worth trying
+  // (shared/timing.js) when the reading is unsure.
+  const runnerUp = (digits, text) => {
+    let best = null;
+    digits.forEach((dg, k) => {
+      if (!dg.probs) return;
+      for (let d = 0; d < 10; d++) {
+        if (String(d) === dg.label) continue;
+        const s = text.slice(0, k) + d + text.slice(k + 1);
+        if ((s.length > 1 && s[0] === '0') || Number(s) > 24) continue;
+        if (!best || dg.probs[d] > best.p) best = { fret: Number(s), p: dg.probs[d] };
+      }
+    });
+    return best && best.p >= 0.01 ? best.fret : null;
+  };
   let pending = []; // technique marks waiting for the next note
   let i = 0;
   while (i < glyphs.length) {
@@ -859,6 +876,7 @@ function readString(glyphs, sys) {
       let x1 = g.x1;
       let y0 = g.y0;
       let y1 = g.y1;
+      const digits = [g];
       const prevG = glyphs[i - 1];
       const next = glyphs[i + 1];
       if (next && isDigit(next.label) && (c === '1' || (c === '2' && next.label <= '4'))) {
@@ -866,6 +884,7 @@ function readString(glyphs, sys) {
         if (!lineBetween && borderline(g, next)) conf *= 0.88;
         if (together(g, next) && !lineBetween) {
           text += next.label;
+          digits.push(next);
           conf = Math.min(conf, next.conf);
           x1 = next.x1;
           y0 = Math.min(y0, next.y0);
@@ -882,7 +901,10 @@ function readString(glyphs, sys) {
       const grace = sys.medH && (y1 - y0 + 1) < 0.72 * sys.medH;
       if (grace) { tech.push('grace'); conf *= 0.9; }
       else if (sys.medH && (y1 - y0 + 1) > 1.25 * sys.medH) conf *= 0.88;
-      notes.push({ string: g.string, fret: Number(text), tech, conf, box: { x: g.x0, y: y0, w: x1 - g.x0 + 1, h: y1 - y0 + 1 }, edge: g.edge });
+      const note = { string: g.string, fret: Number(text), tech, conf, box: { x: g.x0, y: y0, w: x1 - g.x0 + 1, h: y1 - y0 + 1 }, edge: g.edge };
+      const alt = runnerUp(digits, text);
+      if (alt !== null) note.alt = alt;
+      notes.push(note);
     } else if (c === 'x') {
       notes.push({ string: g.string, fret: null, tech: ['x', ...pending], conf: g.conf, box: { x: g.x0, y: g.y0, w: g.w, h: g.h }, edge: g.edge });
       pending = [];
@@ -1339,6 +1361,24 @@ export function selfCheck(assert) {
     classify: (g, sys) => (g.x0 >= 395 ? { label: g.x0 === 413 ? '5' : 'other', conf: 0.6 } : stubClassify(g, sys)),
   });
   assert.deepEqual(events(r), ['5:7'], 'a run of letters is text');
+
+  // A number carries the classifier's runner-up as `alt` — a fret for the
+  // recording to try when the reading is unsure — in whichever of its places
+  // the runner-up is likelier. A classifier without probabilities gives none.
+  const withProbs = (second) => (g, sys) => {
+    const r = stubClassify(g, sys);
+    const probs = new Float32Array(CLASSES.length);
+    probs[CLASSES.indexOf(r.label)] = 0.6;
+    if (second[r.label] !== undefined) probs[CLASSES.indexOf(second[r.label])] = 0.3;
+    return { ...r, probs };
+  };
+  r = readPage(drawTab({ notes: [{ string: 2, fret: 3, x: 120 }] }), { classify: withProbs({ 3: '8' }) });
+  assert.equal(r.systems[0].events[0].notes[0].fret, 3);
+  assert.equal(r.systems[0].events[0].notes[0].alt, 8, 'a 3 that might be an 8');
+  r = readPage(drawTab({ notes: [{ string: 2, fret: 12, x: 100, gap: 2 }] }), { classify: withProbs({ 2: '7' }) });
+  assert.equal(r.systems[0].events[0].notes[0].fret, 12);
+  assert.equal(r.systems[0].events[0].notes[0].alt, 17, '12 that might be 17');
+  assert.equal(read(drawTab({ notes: [{ string: 2, fret: 3, x: 120 }] })).systems[0].events[0].notes[0].alt, undefined);
 
   // A trained model plugs in through makeClassifier: here one layer whose
   // biases alone pick "7".

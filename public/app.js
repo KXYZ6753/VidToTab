@@ -10,8 +10,9 @@ import {
 } from '/lib/library.js';
 import { createLoader } from '/brand/loaders.js';
 import { analysePage, buildSequence, cleanBpm, clampSpeed, sweepAt } from '/shared/practice.js';
-import { normaliseListen } from '/shared/follow.js';
+import { normaliseListen, settingsForShift, tuningById } from '/shared/follow.js';
 import { createReadings } from '/readings.js';
+import { createVideoTiming } from '/video-timing.js';
 import { createEditor } from '/tabedit.js';
 import { createListen } from '/follow-ui.js';
 
@@ -181,6 +182,7 @@ import { createListen } from '/follow-ui.js';
     practice: -1,           // entry playing in the practice view, -1 = closed
     pace: { speed: 1, songBpm: 0 }, // practice pace, saved with the songsheet
     listen: normaliseListen(),      // tuning, capo, chord strictness: saved with the songsheet
+    listenSet: false,               // chosen by someone (or stored), rather than the defaults
     fromLibrary: false,     // opened from storage: no video, so no steps 2-3
     snapshotApplied: false,
     serverBoot: null,       // which server process the job ids belong to
@@ -475,6 +477,9 @@ import { createListen } from '/follow-ui.js';
   const settleSave = () => { flushSave(); return sheetSave ? sheetSave.catch(() => {}) : Promise.resolve(); };
 
   function resetForNewSource(label) {
+    // The last scan's notes stop being timed; what was timed is written to it.
+    videoTiming.cancel();
+    flushTranscript();
     Object.assign(state, {
       captures: [], items: [], undoStack: [], deletedStamps: [], lastAnalyze: null, suggestion: null,
       seekedToTab: false, rect: null, rectSource: null, startMode: 'auto', meta: null, videoSet: false,
@@ -1097,7 +1102,10 @@ import { createListen } from '/follow-ui.js';
       readingsJob = state.jobId;
       transcriptOf = null;
       transcriptDirty = false;
+      timingDirty = false;
       state.listen = normaliseListen();
+      state.listenSet = false;
+      listenDirty = false;
       bindSheet(state.sheetId);
     }
     releaseHeldUrls();
@@ -1694,6 +1702,8 @@ import { createListen } from '/follow-ui.js';
     const run = saveCurrentSheet().catch(() => { /* reported inside */ });
     sheetSave = run;
     run.finally(() => { if (sheetSave === run) sheetSave = null; });
+    // Then, while the video is still here, when each page's notes sound in it.
+    startTiming();
   }
 
   function backToSource() {
@@ -2411,10 +2421,10 @@ import { createListen } from '/follow-ui.js';
     if (!id || transcriptOf === id) return;
     getSheet(id).then((sheet) => {
       if (!sheet || state.sheetId !== id || transcriptOf === id) return;
-      readings.adopt(sheet.transcript);
-      if (sheet.listen) state.listen = normaliseListen(sheet.listen);
+      readings.adopt(sheet.transcript, sheet.timing);
+      if (sheet.listen) { state.listen = normaliseListen(sheet.listen); state.listenSet = true; listenDirty = false; }
       transcriptOf = id;
-      if (transcriptDirty) syncTranscript();
+      if (transcriptDirty || timingDirty || listenDirty) syncTranscript();
     }).catch(() => { /* not stored yet: bound after its first save */ });
   }
 
@@ -2425,26 +2435,67 @@ import { createListen } from '/follow-ui.js';
     transcriptTimer = setTimeout(flushTranscript, 600);
   }
   // Now rather than in a moment: before another songsheet replaces these.
+  // The notes' times (sheet.timing) go the same way, under the same binding.
   function flushTranscript() {
     clearTimeout(transcriptTimer);
     transcriptTimer = 0;
     const id = state.sheetId;
-    if (!transcriptDirty || !id || state.saveOff || transcriptOf !== id) return transcriptJob;
-    const t = readings.transcript;
+    if (!(transcriptDirty || timingDirty || listenDirty) || !id || state.saveOff || transcriptOf !== id) return transcriptJob;
+    const patch = {};
+    if (listenDirty) patch.listen = state.listen;
+    listenDirty = false;
+    if (transcriptDirty) { const t = readings.transcript; patch.transcript = Object.keys(t.pages).length ? t : null; }
+    if (timingDirty) { const t = readings.timing; patch.timing = Object.keys(t.pages).length ? t : null; }
     transcriptDirty = false;
-    transcriptJob = transcriptJob.then(() => updateSheet(id, { transcript: Object.keys(t.pages).length ? t : null }))
-      .catch(() => { if (transcriptOf === id) transcriptDirty = true; /* kept in memory; written with the next fix */ });
+    timingDirty = false;
+    transcriptJob = transcriptJob.then(() => updateSheet(id, patch))
+      .catch(() => {
+        if (transcriptOf !== id) return;
+        if ('transcript' in patch) transcriptDirty = true; // kept in memory; written with the next fix
+        if ('timing' in patch) timingDirty = true;
+        if ('listen' in patch) listenDirty = true;
+      });
     return transcriptJob;
   }
 
-  let listenTimer = 0;
+  // A fresh scan's notes, timed from its video in the background
+  // (public/video-timing.js): a quiet line on the songsheet step while it
+  // runs, the times kept in readings and written as above.
+  let timingDirty = false;
+  const videoTiming = createVideoTiming({
+    readings,
+    onProgress: (done, total) => {
+      $('timingLine').hidden = done === null;
+      if (done !== null) $('timingLine').textContent = `Timing the notes from the video…${done ? ` ${done} of ${total}` : ''}`;
+    },
+    onTimed: (save) => { timingDirty = true; if (save) syncTranscript(); },
+    // The pitch the video is played at, heard by the probe: it becomes the
+    // Listen settings, unless someone has already set them for this songsheet.
+    onPitch: (base, shift, low) => {
+      if (state.listenSet || (!shift && !low)) return;
+      const found = settingsForShift(base, shift, low);
+      saveListen(found);
+      const tuning = found.tuningId === 'standard' ? '' : found.tuningId === 'custom' ? 'a retuned guitar' : tuningById(found.tuningId).label;
+      showToast(`Heard in the video: ${[found.capo ? `capo ${found.capo}` : '', tuning].filter(Boolean).join(', ')}. Listen is set to it.`, false);
+    },
+  });
+  function startTiming() {
+    if (state.fromLibrary || !state.videoSet || !state.items.length) return;
+    const job = state.jobId;
+    videoTiming.start(state.items, {
+      settings: () => state.listen,
+      still: () => state.jobId === job && !state.fromLibrary && state.videoSet,
+    });
+  }
+
+  // Written with the corrections (flushTranscript), so they share the
+  // binding: a scan's settings wait for its songsheet to be stored.
+  let listenDirty = false;
   function saveListen(patch) {
     state.listen = normaliseListen({ ...state.listen, ...patch });
-    clearTimeout(listenTimer);
-    const id = state.sheetId;
-    if (!id || state.saveOff) return;
-    const listenNow = state.listen;
-    listenTimer = setTimeout(() => { updateSheet(id, { listen: listenNow }).catch(() => { /* kept on screen */ }); }, 800);
+    state.listenSet = true;
+    listenDirty = true;
+    syncTranscript();
   }
 
   // The editor, over whatever pages are being practised (or the songsheet's).
@@ -2801,6 +2852,8 @@ import { createListen } from '/follow-ui.js';
     // The songsheet being left may have an edit waiting; it is written from
     // the screen as it is now, and finished before reading — reopening the
     // same songsheet would otherwise read the copy from before the edit.
+    // Its notes stop being timed; what was timed is written with the rest.
+    videoTiming.cancel();
     await settleSave();
     await flushTranscript();
     let sheet = null;
@@ -2824,9 +2877,12 @@ import { createListen } from '/follow-ui.js';
     state.title = sheet.title;
     state.pace = { speed: clampSpeed(sheet.practice?.speed ?? 1), songBpm: cleanBpm(sheet.practice?.songBpm) };
     state.listen = normaliseListen(sheet.listen || {});
-    readings.reset(sheet.transcript);
+    state.listenSet = Boolean(sheet.listen);
+    listenDirty = false;
+    readings.reset(sheet.transcript, sheet.timing);
     transcriptOf = sheet.id;
     transcriptDirty = false;
+    timingDirty = false;
     readingsJob = null;
     state.look = lookById(sheet.look).id;
     state.paper = sheet.paper === 'a4' ? 'a4' : 'letter';

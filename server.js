@@ -1089,6 +1089,65 @@ function winAnsi(s) {
     .trim();
 }
 
+// ---------------------------------------------------------------- audio
+
+// The current video's sound as the listening engine takes it: raw 32-bit
+// float, mono, 48 kHz, from `from` to `to` seconds. Once a scan is done the
+// songsheet step times each page's notes from it (public/video-timing.js), a
+// page's window — a few seconds — at a time. At most 90 s a request, and two
+// decodes at once, so a page that asks too much cannot pile up ffmpegs. The
+// headers wait for the first samples: a video with no sound is a 404 then,
+// not a 200 with nothing in it.
+const AUDIO_MAX_SEC = 90;
+const AUDIO_RATE = 48000;
+let audioDecodes = 0;
+
+function serveAudio(req, res, u) {
+  const from = Math.max(0, Number(u.searchParams.get('from')));
+  const to = Number(u.searchParams.get('to'));
+  if (!Number.isFinite(from) || !Number.isFinite(to) || to <= from) {
+    return sendJson(res, 400, { error: 'from and to are seconds into the video, to after from.' });
+  }
+  if (!job.meta?.ready || !fs.existsSync(VIDEO)) return sendJson(res, 404, { error: 'no video' });
+  if (audioDecodes >= 2) {
+    res.setHeader('Retry-After', '1');
+    return sendJson(res, 503, { error: 'Already reading the video’s sound — try again in a moment.' });
+  }
+  const dur = Math.min(AUDIO_MAX_SEC, to - from);
+  audioDecodes++;
+  let p;
+  try {
+    p = spawn(toolPath('ffmpeg'), ['-v', 'error', '-nostdin', '-ss', from.toFixed(3), '-t', dur.toFixed(3), '-i', VIDEO,
+      '-vn', '-ac', '1', '-ar', String(AUDIO_RATE), '-f', 'f32le', '-'], { stdio: ['ignore', 'pipe', 'pipe'] });
+  } catch (e) {
+    audioDecodes--;
+    return sendJson(res, 500, { error: 'Could not read the video’s sound.' });
+  }
+  let started = false;
+  let err = '';
+  let done = false;
+  const finish = () => { if (!done) { done = true; audioDecodes--; } };
+  const begin = () => {
+    if (started) return;
+    started = true;
+    res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Cache-Control': 'no-store', 'X-Sample-Rate': String(AUDIO_RATE) });
+  };
+  // The caller went away (another songsheet, another video): stop decoding.
+  res.on('close', () => { if (p.exitCode === null) try { p.kill('SIGKILL'); } catch { /* gone */ } });
+  p.stderr.on('data', (d) => { err = (err + d).slice(-2000); });
+  p.stdout.on('data', (d) => { begin(); res.write(d); });
+  p.on('error', () => { finish(); if (!started && !res.headersSent) sendJson(res, 500, { error: 'Could not read the video’s sound.' }); else res.destroy(); });
+  p.on('close', (code) => {
+    finish();
+    if (res.writableEnded || res.destroyed) return;
+    if (started) return void (code === 0 ? res.end() : res.destroy());
+    // Nothing came out: a video without sound, or a window past its end.
+    if (/does not contain any stream|matches no streams|Output file.*empty/i.test(err)) return sendJson(res, 404, { error: 'This video has no sound.' });
+    if (code === 0) { begin(); return res.end(); }
+    sendJson(res, 500, { error: 'Could not read the video’s sound.' });
+  });
+}
+
 // ---------------------------------------------------------------- files
 
 // pipe() never destroys the source on client abort — an aborted request would
@@ -1235,7 +1294,7 @@ let ALLOWED_HOSTS = hostsFor(PORT);
 // already means one person.
 const OWNER_COOKIE = 'vtt_owner';
 const JOB_SCOPED = new Set([
-  'GET /api/meta', 'GET /api/video', 'GET /thumb.jpg',
+  'GET /api/meta', 'GET /api/video', 'GET /api/audio', 'GET /thumb.jpg',
   'POST /api/cancel', 'POST /api/export', 'POST /api/detect', 'POST /api/analyze',
 ]);
 const ownerCookie = (req) => (/(?:^|;\s*)vtt_owner=([a-f0-9]{32})/.exec(req.headers.cookie || '') || [])[1] || null;
@@ -1444,6 +1503,7 @@ async function route(req, res) {
   }
   if (key === 'GET /api/meta') return job.meta ? sendJson(res, 200, job.meta) : sendJson(res, 404, { error: 'no video' });
   if (key === 'GET /api/video') return serveVideo(req, res);
+  if (key === 'GET /api/audio') return serveAudio(req, res, u);
   if (key === 'GET /thumb.jpg') return serveFile(res, THUMB, 'image/jpeg');
   if (req.method === 'GET' && u.pathname.startsWith('/captures/')) return serveCapture(res, u.pathname);
   if (key === 'POST /api/video/url') return heavy(req, res, () => postUrl(req, res));

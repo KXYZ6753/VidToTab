@@ -41,6 +41,20 @@ export function normaliseListen(input = {}) {
   };
 }
 
+// The settings that make a video's pitch come out right: every string
+// `shift` semitones from these settings, the low string `low` more (what the
+// timing probe hears in the video). Up is a capo; down past the capo is the
+// whole guitar tuned down. A preset is named when the strings match one.
+export function settingsForShift(base, shift, low = 0) {
+  const s = normaliseListen(base);
+  let capo = s.capo + shift;
+  let tuning = [...s.tuning];
+  if (capo < 0) { tuning = tuning.map((m) => m + capo); capo = 0; }
+  tuning[5] += low;
+  const preset = TUNINGS.find((t) => t.notes && t.notes.every((m, i) => m === tuning[i]));
+  return normaliseListen({ ...s, tuningId: preset ? preset.id : 'custom', tuning, capo });
+}
+
 // A natural harmonic sounds above the open string by the harmonic's interval:
 // 12th fret an octave, 7th and 19th an octave and a fifth, 5th and 24th two
 // octaves, 4th, 9th and 16th two octaves and a major third.
@@ -69,6 +83,8 @@ export function buildEvents(reading, settings, { page = 0, minConf = 0.5 } = {})
         const optional = tech.includes('ghost') || tech.includes('grace') || (n.conf ?? 1) < minConf;
         const note = { string: n.string, fret: n.fret, midi, required: !optional, tech: [...tech], conf: n.conf ?? 1 };
         if (tech.includes('b') && Number.isFinite(n.bendTo)) note.bendTo = open + n.bendTo;
+        // the reader's runner-up, for the recording to try (shared/timing.js)
+        if (Number.isInteger(n.alt)) note.alt = n.alt;
         notes.push(note);
       }
       if (!notes.length) return;
@@ -81,6 +97,8 @@ export function buildEvents(reading, settings, { page = 0, minConf = 0.5 } = {})
         x0: ev.x0,
         x1: ev.x1,
         xc: ev.xc,
+        // the staff's line spacing: how near a stored time's place must be
+        spacing: sys.spacing || 0,
         notes,
         // Muted strokes and events the reader could not vouch for accept any
         // fresh attack: there is no pitch to insist on.
@@ -106,9 +124,20 @@ export function ringing(events, i, { back = 4 } = {}) {
 }
 
 // Play mode: when, within a page's time, each event comes. Tab spacing is not
-// rhythm, so this is only an even spread across where the notes are — the
-// scoring windows allow for it — until the video's audio supplies real times.
-export function playTimes(events, dur) {
+// rhythm, so without more to go on this is an even spread across where the
+// notes are — the scoring windows allow for it.
+//
+// timed: the times heard in the video's own recording at scan time
+// ([system, x, t] per event, t seconds from when the page appeared; see
+// shared/timing.js). They are matched by place, not by index, because a
+// correction in the editor adds, removes and splits events: an event takes
+// the nearest stored time on its system within 0.35 of a line spacing (8 px
+// when the spacing is unknown), each stored time once. Times are clamped to
+// the page; a stored time that runs backwards against the others is dropped
+// (the longest run of them in order is kept). The events between two known
+// ones are placed between them in proportion to the even spread, and the
+// page's start and end bound the ones before the first and after the last.
+export function playTimes(events, dur, timed = null) {
   if (!events.length) return [];
   const bySys = new Map();
   for (const e of events) {
@@ -120,17 +149,78 @@ export function playTimes(events, dur) {
   const order = [...bySys.keys()].sort((a, b) => a - b);
   const widths = order.map((k) => Math.max(1, bySys.get(k).x1 - bySys.get(k).x0));
   const total = widths.reduce((a, b) => a + b, 0);
-  return events.map((e) => {
+  const even = events.map((e) => {
     const k = order.indexOf(e.system);
     const before = widths.slice(0, k).reduce((a, b) => a + b, 0);
     const s = bySys.get(e.system);
     return ((before + (e.x0 - s.x0)) / total) * dur;
   });
+  if (!Array.isArray(timed) || !timed.length) return even;
+
+  const pairs = [];
+  events.forEach((e, i) => {
+    const x = Number.isFinite(e.xc) ? e.xc : (e.x0 + e.x1) / 2;
+    const tol = e.spacing > 0 ? 0.35 * e.spacing : 8;
+    timed.forEach((row, j) => {
+      if (!Array.isArray(row) || row[0] !== e.system || !Number.isFinite(row[1]) || !Number.isFinite(row[2])) return;
+      const d = Math.abs(x - row[1]);
+      if (d <= tol) pairs.push({ i, j, d });
+    });
+  });
+  pairs.sort((a, b) => a.d - b.d || a.i - b.i);
+  const known = new Array(events.length).fill(null);
+  const used = new Set();
+  for (const { i, j } of pairs) {
+    if (known[i] !== null || used.has(j)) continue;
+    known[i] = Math.min(dur, Math.max(0, timed[j][2]));
+    used.add(j);
+  }
+  // The longest run of known times that never goes backwards (O(n²) is
+  // plenty for a page's events).
+  const idx = known.map((t, i) => (t === null ? -1 : i)).filter((i) => i >= 0);
+  const len = idx.map(() => 1);
+  const from = idx.map(() => -1);
+  let end = -1;
+  for (let a = 0; a < idx.length; a++) {
+    for (let b = 0; b < a; b++) {
+      if (known[idx[b]] <= known[idx[a]] && len[b] + 1 > len[a]) { len[a] = len[b] + 1; from[a] = b; }
+    }
+    if (end < 0 || len[a] > len[end]) end = a;
+  }
+  const anchors = [];
+  for (let a = end; a >= 0; a = from[a]) anchors.unshift(idx[a]);
+  // Interpolated against the even spread between neighbouring anchors; the
+  // page's own start and end (0 and dur) are anchors too.
+  const pts = [{ p: 0, t: 0 }, ...anchors.map((i) => ({ p: even[i], t: known[i], i })), { p: dur, t: dur }];
+  const out = new Array(events.length);
+  for (const pt of pts) if (pt.i !== undefined) out[pt.i] = pt.t;
+  let q = 0;
+  for (let i = 0; i < events.length; i++) {
+    if (out[i] !== undefined) continue;
+    while (q + 1 < pts.length - 1 && pts[q + 1].i !== undefined && pts[q + 1].i < i) q++;
+    const a = pts[q];
+    const b = pts[q + 1];
+    const span = b.p - a.p;
+    const f = span > 1e-9 ? Math.min(1, Math.max(0, (even[i] - a.p) / span)) : 0;
+    out[i] = a.t + f * (b.t - a.t);
+  }
+  // Even spread and anchors can still disagree by a hair at the seams.
+  for (let i = 1; i < out.length; i++) if (out[i] < out[i - 1]) out[i] = out[i - 1];
+  return out;
 }
 
 // ---------------------------------------------------------------- self-check
 
 export function selfCheck(assert) {
+  {
+    const std = normaliseListen();
+    const at = (sh, lo) => { const r = settingsForShift(std, sh, lo); return `${r.tuningId} ${r.tuning.join(',')} capo ${r.capo}`; };
+    assert.equal(at(3, 0), 'standard 64,59,55,50,45,40 capo 3', 'up is a capo');
+    assert.equal(at(5, 1), 'custom 64,59,55,50,45,41 capo 5', 'and a low string tuned up to F (yT9gKKwBeVw)');
+    assert.equal(at(0, -2), 'dropD 64,59,55,50,45,38 capo 0', 'a dropped low string is Drop D');
+    assert.equal(at(-1, 0), 'halfDown 63,58,54,49,44,39 capo 0', 'down is a tuning down');
+    assert.equal(settingsForShift({ capo: 2 }, -1).capo, 1, 'down from a capo lowers the capo first');
+  }
   assert.equal(noteName(40), 'E2');
   assert.equal(noteName(64), 'E4');
   assert.equal(noteName(61), 'C♯4');
@@ -174,6 +264,36 @@ export function selfCheck(assert) {
   // Play-mode times: spread across where the notes are.
   const t = playTimes([{ system: 0, x0: 0, x1: 10 }, { system: 0, x0: 90, x1: 100 }, { system: 1, x0: 0, x1: 10 }, { system: 1, x0: 90, x1: 100 }], 20);
   assert.deepEqual(t.map((x) => Math.round(x)), [0, 9, 10, 19]);
+
+  // …and with the times heard in the video's recording. Five events on one
+  // system, 20 px apart, spacing 10 (a stored place matches within 3.5 px).
+  const row = (xs, spacing = 10) => xs.map((x) => ({ system: 0, x0: x - 3, x1: x + 3, xc: x, spacing }));
+  const r2 = (ts) => ts.map((x) => Math.round(x * 100) / 100);
+  const five = row([10, 30, 50, 70, 90]);
+  assert.deepEqual(r2(playTimes(five, 10, [])), r2(playTimes(five, 10)), 'nothing stored: the even spread');
+  // Stored for the 1st, 3rd and 5th: those exactly, the others halfway (the
+  // even spread puts them halfway too).
+  assert.deepEqual(r2(playTimes(five, 10, [[0, 11, 1], [0, 49, 2], [0, 91, 8]])), [1, 1.5, 2, 5, 8]);
+  // Matched by place, not order: an event added in the editor between the
+  // first two takes no stored time and goes between its neighbours.
+  const six = row([10, 20, 30, 50, 70, 90]);
+  const stored = [[0, 10, 1], [0, 30, 2], [0, 50, 3], [0, 70, 4], [0, 90, 5]];
+  assert.deepEqual(r2(playTimes(six, 10, stored)), [1, 1.5, 2, 3, 4, 5]);
+  // Another system's time, or one too far off, is no match (8 px with no spacing).
+  assert.deepEqual(r2(playTimes(five, 10, [[1, 30, 6]])), r2(playTimes(five, 10)));
+  assert.deepEqual(r2(playTimes(row([10, 30], 0), 10, [[0, 39, 6]])), r2(playTimes(row([10, 30], 0), 10)), '9 px away is not this event');
+  assert.equal(playTimes(row([10, 30], 0), 10, [[0, 37, 6]])[1], 6, '7 px away is');
+  // Clamped to the page: a note heard before the page appeared is due at once.
+  assert.deepEqual(r2(playTimes(five, 10, [[0, 10, -1.2], [0, 90, 12]])), [0, 2.5, 5, 7.5, 10]);
+  // One stored time that runs backwards against the rest is dropped; times
+  // never go backwards.
+  const back = playTimes(five, 10, [[0, 10, 1], [0, 30, 9], [0, 50, 3], [0, 70, 4], [0, 90, 5]]);
+  assert.deepEqual(r2(back), [1, 2, 3, 4, 5]);
+  for (let i = 1; i < back.length; i++) assert.ok(back[i] >= back[i - 1]);
+  // Before the first known time the page's start bounds them; after the last, its end.
+  // (the even spread has the last event at 9.3 s of 10, so after a known 3 s
+  // at 4.65 the rest are placed in proportion between there and 10 s)
+  assert.deepEqual(r2(playTimes(five, 10, [[0, 50, 3]])), [0, 1.5, 3, 6.04, 9.09]);
 }
 
 if (typeof process !== 'undefined' && process.argv?.[1]
