@@ -27,9 +27,12 @@ export const planetOf = (version) => {
 };
 export const titleOf = (version) => `VidToTab ${version} · ${planetOf(version)}`;
 
+// A Windows checkout gives these files CRLF line endings; the page uses LF.
+const read = (...p) => fs.readFileSync(path.join(ROOT, ...p), 'utf8').replace(/\r\n/g, '\n');
+
 // The lines under "## <version>" up to the next "## " heading, or null.
 export function sectionOf(changelog, version) {
-  const lines = changelog.split('\n');
+  const lines = changelog.replace(/\r\n/g, '\n').split('\n');
   const start = lines.findIndex((l) => l.trim() === `## ${version}`);
   if (start < 0) return null;
   const next = lines.findIndex((l, i) => i > start && l.startsWith('## '));
@@ -40,8 +43,8 @@ export const fill = (template, values) => template.replace(/\{\{(\w+)\}\}/g, (m,
 
 export function notesFor(tag, prev) {
   const version = tag.replace(/^v/, '');
-  const template = fs.readFileSync(path.join(ROOT, '.github', 'release-template.md'), 'utf8');
-  let whatsNew = sectionOf(fs.readFileSync(path.join(ROOT, 'CHANGELOG.md'), 'utf8'), version);
+  const template = read('.github', 'release-template.md');
+  let whatsNew = sectionOf(read('CHANGELOG.md'), version);
   if (!whatsNew) {
     console.error(`::warning::CHANGELOG.md has no "## ${version}" section — the release lists its commits instead.`);
     whatsNew = prev
@@ -62,6 +65,7 @@ function selfCheck(assert) {
   assert.equal(sectionOf(log, '0.5.0'), 'New.\n- a', 'one section, not the next');
   assert.equal(sectionOf(log, '0.4.0'), 'Old.');
   assert.equal(sectionOf(log, '0.4'), null, 'a version is matched whole');
+  assert.equal(sectionOf(log.replace(/\n/g, '\r\n'), '0.5.0'), 'New.\n- a', 'a Windows checkout reads the same');
   assert.equal(fill('{{a}} {{b}} {{c}}', { a: 1, b: '' }), '1  {{c}}');
   // The real files: every placeholder filled, and this release's section found.
   const notes = notesFor('v0.4.0', null);
