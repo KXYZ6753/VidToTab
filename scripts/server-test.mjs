@@ -772,8 +772,12 @@ async function audioWindow() {
     check('audio: they are the video\'s sound (440 Hz in its first second)', Math.abs(hz(a.pcm) - 440) < 10, `${hz(a.pcm).toFixed(1)} Hz`);
     const b = await sound('from=1.2&to=1.7');
     check('audio: from where it was asked (880 Hz in its second)', Math.abs(hz(b.pcm) - 880) < 15, `${hz(b.pcm).toFixed(1)} Hz`);
+    // From the very start, one AAC frame (1024 samples) may be missing: some
+    // ffmpeg builds — the one on the CI machines — keep the encoder's priming
+    // out of the first window and some do not. 21 ms is far below what timing
+    // a note can tell apart.
     const early = await sound('from=-3&to=0.5');
-    check('audio: a start before the video is clamped to 0', early.status === 200 && Math.abs(early.pcm.length - 24000) <= 480, `${early.status} ${early.pcm.length}`);
+    check('audio: a start before the video is clamped to 0', early.status === 200 && Math.abs(early.pcm.length - 24000) <= 480 + 1024, `${early.status} ${early.pcm.length}`);
     const long = await sound('from=0&to=100000');
     check('audio: a window past the end gives what there is', long.status === 200 && Math.abs(long.pcm.length - 2 * TONE_RATE) <= 2400, `${long.status} ${long.pcm.length}`);
     const bad = [await sound('from=2&to=1'), await sound('from=x&to=1'), await sound('from=1')].map((r) => r.status);
