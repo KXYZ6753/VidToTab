@@ -18,7 +18,10 @@ import { fileURLToPath } from 'node:url';
 import { synth, writeWav } from './guitar-synth.mjs';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
-const OUT = path.join(ROOT, '.cache', 'listen-e2e');
+// --play: the same, with the songsheet set to Play along and its clock never
+// started — someone who switched modes and just plays. Pages must still turn.
+const MODE = process.argv.includes('--play') ? 'play' : 'wait';
+const OUT = path.join(ROOT, '.cache', MODE === 'play' ? 'listen-e2e-play' : 'listen-e2e');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const log = (...a) => console.log('[listen-e2e]', ...a);
 
@@ -42,7 +45,10 @@ PAGES[0].forEach((ev, i) => {
   // Between E2 and A2, a wrong note: F2 where A2 is expected.
   if (i === 0) { played.push({ t, notes: [{ midi: 41, string: 6 }] }); t += GAP; }
 });
-t += 0.3;
+// No pause at the page turn: the next page's first note comes 0.2 s after
+// the chord, as it does when someone plays straight through. The page must
+// still turn — it once waited for a quiet moment that never came.
+t -= GAP - 0.2;
 for (const ev of PAGES[1]) { played.push({ t, notes: ev.map((n) => ({ midi: midi(n), string: n[0] })) }); t += GAP; }
 const DURATION = t + 1.5;
 const TOTAL_EVENTS = PAGES.flat().length;
@@ -184,7 +190,7 @@ try {
       stored.push({ tStart: k * 10, tEnd: k * 10 + 10, w: W, h: H, clean, color: null });
     }
     await saveSheet({ id: 'listen-e2e', title: 'Listen e2e', url: '', channel: '', duration: 20, recipe: {}, look: 'print', paper: 'letter' }, stored, null);
-    await updateSheet('listen-e2e', { transcript });
+    await updateSheet('listen-e2e', { transcript, listen: { mode: ${JSON.stringify(MODE)} } });
     localStorage.setItem('vtt.prFollow', 'listen');
     localStorage.setItem('vtt.prLayout', 'scroll');
     localStorage.setItem('vtt.micDevice', ${JSON.stringify(fakeId)});
@@ -217,6 +223,12 @@ try {
       if (!last || last.heard !== heard || last.msg !== msg || last.cur !== cur) window.__seen.push({ t: (performance.now() - window.__t0) / 1000, heard, msg, cur });
     }, 50); true`);
   await js(`document.getElementById('practiceBtn').click(); true`);
+  // First time in Listen on this songsheet: it asks for tuning and capo
+  // before listening. Save closes it (into the microphone button) for good.
+  await waitFor(`document.getElementById('listenFirst').open`, 10000, 'the tuning window');
+  check('the first time, it asks for tuning and capo', await js(`document.getElementById('lfTuning').value + ' ' + document.getElementById('lfCapo').value`) === 'standard 0');
+  await js(`document.getElementById('lfSave').click(); true`);
+  await waitFor(`!document.getElementById('listenFirst').open`, 5000, 'the tuning window to close');
   await waitFor(`document.querySelectorAll('#practice .ls-note').length === ${TOTAL_NOTES}`, 15000, 'every note drawn on the cards');
   check('the stored notes are drawn on both cards', true);
   await waitFor(`/^Listening with/.test(document.getElementById('lsMicState').textContent)`, 15000, 'microphone open');
@@ -258,6 +270,8 @@ try {
   await waitFor(`!!document.querySelector('.side-item[data-sheet="listen-e2e"]')`, 20000, 'songsheet listed again');
   const stored = await js(`import('/lib/library.js').then(({ getSheet }) => getSheet('listen-e2e')).then((s) => Object.values(s.transcript?.pages || {}).map((p) => p.systems[0].events[0].n[0][1]))`);
   check('the fix is stored with the songsheet', Array.isArray(stored) && stored.includes(3), JSON.stringify(stored));
+  const confirmed = await js(`import('/lib/library.js').then(({ getSheet }) => getSheet('listen-e2e')).then((s) => s.listen?.confirmed === true)`);
+  check('the tuning is stored as confirmed, so it is not asked again', confirmed === true);
   await js(`document.querySelector('.side-item[data-sheet="listen-e2e"]').click()`);
   await waitFor(`!document.getElementById('step4').hidden`, 10000, 'songsheet reopened');
   await key('e');

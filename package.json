@@ -20,7 +20,7 @@
     "eval:listen": "node scripts/eval-listen.mjs",
     "test:listen": "node scripts/listen-test.mjs",
     "eval:clips": "node scripts/eval-clips.mjs",
-    "e2e:listen": "node scripts/listen-e2e.mjs",
+    "e2e:listen": "node scripts/listen-e2e.mjs && node scripts/listen-e2e.mjs --play",
     "app": "electron .",
     "test:app": "node scripts/app-test.mjs",
     "pack": "npm run icon && electron-builder --dir",

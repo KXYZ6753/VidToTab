@@ -192,6 +192,7 @@ body[data-view="app"] .get-app { display: none; }
   /* Everything else that moves on its own. The bar stays put at a third full
      and the active stage keeps its ring, so neither stops saying "working". */
   .libview, .live-grid img, .bar.indeterminate > div, .shimmer, .stages li.active .dot { animation: none; }
+  .btn.attn, .ls-first[open], #lsSetupBtn.ls-landed { animation: none; }
 }
 
 /* ---------- buttons & inputs ---------- */
@@ -347,6 +348,29 @@ body[data-view="app"] .source-card { margin: 14px 0 0; }
 .dialog::backdrop { background: rgba(10, 8, 6, .42); }
 .dialog-body { padding: 20px; display: flex; flex-direction: column; gap: 14px; }
 .dialog-foot { display: flex; justify-content: flex-end; }
+/* Listen's first-run window: a dimmed, blurred view behind it so it is the
+   one thing to answer; it leaves by shrinking into the microphone button. */
+.ls-first { width: min(380px, calc(100vw - 32px)); }
+.ls-first::backdrop { background: rgba(6, 6, 8, .62); backdrop-filter: blur(3px); transition: opacity .45s ease; }
+.ls-first.leaving::backdrop { opacity: 0; }
+.ls-first[open] { animation: lf-in .22s cubic-bezier(.2, .7, .2, 1); }
+.ls-first h2 { font-size: 18px; line-height: 1.25; }
+.lf-field { display: grid; grid-template-columns: 70px 1fr; align-items: center; gap: 10px; font-size: 14px; }
+.lf-field > span { color: var(--muted); }
+.lf-foot { gap: 8px; margin-top: 4px; }
+@keyframes lf-in { from { opacity: 0; transform: translateY(8px) scale(.98); } }
+/* Where the window went: one soft ring on the microphone button. */
+#lsSetupBtn.ls-landed { animation: ls-landed .7s ease-out; }
+@keyframes ls-landed { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 70%, transparent); } 100% { box-shadow: 0 0 0 10px transparent; } }
+/* Arriving on a songsheet, its two main actions glow once: Practice and
+   Export PDF. Brief, and not at all with reduced motion. */
+.btn.attn { animation: btn-attn 1.6s ease-out; }
+@keyframes btn-attn {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 50%, transparent); }
+  45% { box-shadow: 0 0 0 7px transparent; }
+  50% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 40%, transparent); }
+  100% { box-shadow: 0 0 0 7px transparent; }
+}
 .about-head { display: flex; align-items: center; gap: 12px; }
 .about-mark { width: 40px; height: 40px; flex: none; }
 .about-head h2 { font-size: 18px; line-height: 1.2; }
@@ -533,6 +557,8 @@ body[data-view="app"] .source-card { margin: 14px 0 0; }
 .ls-pill-meter { width: 46px; height: 6px; border-radius: 3px; background: rgba(255, 255, 255, .12); overflow: hidden; }
 .ls-pill-meter span, .ls-meter span { display: block; height: 100%; width: 0; background: #52c77a; transition: width .08s linear; }
 #lsSetupBtn[aria-expanded="true"] { background: rgba(255, 255, 255, .22); }
+.ls-pill .ls-more { padding-left: 8px; border-left: 1px solid rgba(255, 255, 255, .2); box-sizing: content-box; opacity: .8; }
+.ls-pill:hover .ls-more, #lsSetupBtn[aria-expanded="true"] .ls-more { opacity: 1; }
 .ls-msg { position: absolute; left: 50%; bottom: 72px; z-index: 3; transform: translateX(-50%); max-width: min(640px, calc(100vw - 32px)); display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; padding: 10px 14px; border-radius: 12px; background: var(--surface-2); border: 1px solid rgba(255, 255, 255, .12); box-shadow: 0 12px 30px -8px rgba(0, 0, 0, .8); font-size: 14px; }
 .ls-msg[hidden] { display: none; }
 .ls-msg button, .ls-setup button { background: rgba(255, 255, 255, .12); border: none; color: inherit; font: inherit; font-weight: 600; padding: 6px 12px; border-radius: 8px; cursor: pointer; }
@@ -553,6 +579,7 @@ body[data-view="app"] .source-card { margin: 14px 0 0; }
 .ls-tuner-scale span { position: absolute; top: 0; bottom: 0; left: 50%; width: 3px; margin-left: -1.5px; background: #ffb561; border-radius: 2px; transition: left .1s; }
 .ls-tuner-scale span.in { background: #52c77a; }
 .ls-row { display: flex; align-items: center; gap: 10px; }
+.ls-row button { white-space: nowrap; }
 .ls-custom { display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; }
 .ls-custom[hidden] { display: none; }
 .ls-custom input { width: 100%; font: inherit; color: inherit; background: rgba(255, 255, 255, .08); border: 1px solid rgba(255, 255, 255, .16); border-radius: 6px; padding: 4px; text-align: center; }
@@ -1074,7 +1101,7 @@ button.chip { cursor: pointer; }
         <p id="timingLine" class="quiet timing-line" role="status" hidden></p>
       </div>
       <div class="review-controls">
-        <button type="button" class="btn" id="practiceBtn" title="Play along full screen (P)">
+        <button type="button" class="btn primary" id="practiceBtn" title="Play along full screen (P)">
           <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4h5a2 2 0 0 1 2 2v9a2 2 0 0 0-2-2H3Z"/><path d="M17 4h-5a2 2 0 0 0-2 2v9a2 2 0 0 1 2-2h5Z"/></svg>Practice</button>
         <button type="button" class="btn" id="notesBtn" title="Check and fix notes (E)">
           <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h14M3 10h14M3 14h14"/><circle cx="7" cy="10" r="1.6" fill="currentColor"/><circle cx="13" cy="6" r="1.6" fill="currentColor"/></svg>Notes</button>
@@ -1239,9 +1266,11 @@ button.chip { cursor: pointer; }
       <button type="button" data-follow="listen" aria-pressed="false" title="Turn pages as notes are heard (L)">Listen</button>
     </div>
     <div class="ls-controls" role="group" aria-label="Listening">
-      <button type="button" id="lsSetupBtn" class="ls-pill" aria-expanded="false" aria-controls="listenSetup" title="Microphone, tuner and tuning (T)">
+      <!-- The dots say it opens: a meter alone reads as a gauge, not a button. -->
+      <button type="button" id="lsSetupBtn" class="ls-pill" aria-expanded="false" aria-controls="listenSetup" aria-label="Microphone settings" title="Microphone settings: device, tuner, tuning (T)">
         <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><rect x="7" y="2.5" width="6" height="10" rx="3"/><path d="M4.5 9.5a5.5 5.5 0 0 0 11 0h-1.6a3.9 3.9 0 0 1-7.8 0Zm4.7 6.4h1.6v2h-1.6z"/></svg>
         <span class="ls-pill-meter" aria-hidden="true"><span id="lsPillMeter"></span></span>
+        <svg class="ls-more" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><circle cx="4" cy="10" r="1.8"/><circle cx="10" cy="10" r="1.8"/><circle cx="16" cy="10" r="1.8"/></svg>
       </button>
       <button type="button" id="lsSkip" title="Skip note (N)">Skip</button>
       <button type="button" id="lsFix" title="Fix notes on this page (E)">Fix notes</button>
@@ -1280,6 +1309,21 @@ button.chip { cursor: pointer; }
     <label class="pr-check"><input type="checkbox" id="practicePlayhead"> Show playhead <em class="pr-exp">experimental</em></label>
     <p class="pr-keys"><kbd>K</kbd> play · <kbd>[</kbd> <kbd>]</kbd> speed · <kbd>0</kbd> real speed · <kbd>←</kbd> <kbd>→</kbd> <kbd>Space</kbd> turn page · <kbd>Home</kbd> first page · <kbd>L</kbd> listen · <kbd>E</kbd> fix notes · <kbd>Esc</kbd> exit</p>
   </div>
+  <!-- The first time Listen opens on a songsheet: what the guitar is tuned to,
+       before anything is compared with it. Inside #practice so it takes the
+       practice view's colours; showModal() still puts it above everything. -->
+  <dialog id="listenFirst" class="dialog ls-first" aria-labelledby="lfTitle" aria-describedby="lfNote">
+    <form method="dialog" class="dialog-body">
+      <h2 id="lfTitle">Set up your guitar</h2>
+      <p id="lfNote" class="quiet"></p>
+      <label class="lf-field"><span>Tuning</span><select id="lfTuning" class="select"></select></label>
+      <label class="lf-field"><span>Capo</span><select id="lfCapo" class="select"></select></label>
+      <div class="dialog-foot lf-foot">
+        <button type="submit" class="btn ghost" value="skip">Skip</button>
+        <button type="button" class="btn primary" id="lfSave">Save</button>
+      </div>
+    </form>
+  </dialog>
   <!-- Listen: the microphone, a tuner, and what the guitar is tuned to. The
        notes come from reading the page; the microphone is only compared with
        them, and nothing is recorded or sent anywhere. -->
@@ -1297,11 +1341,11 @@ button.chip { cursor: pointer; }
       </div>
       <p id="lsDrift" class="ls-warn"></p>
       <div class="ls-row">
-        <button type="button" id="lsQuiet">Stay quiet 3 s</button>
-        <span id="lsQuietDone" class="quiet" hidden>Room noise measured</span>
+        <button type="button" id="lsQuiet">Calibrate</button>
+        <span id="lsQuietNote" class="quiet">Measures room noise</span>
       </div>
       <div class="ls-row">
-        <button type="button" id="lsRecord">Record a test clip</button>
+        <button type="button" id="lsRecord">Record clip</button>
         <span class="quiet">Saves audio and expected notes as a test</span>
       </div>
     </div>

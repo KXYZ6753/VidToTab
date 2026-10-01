@@ -131,6 +131,7 @@ export function cleanListen(l) {
     capo: Math.min(12, Math.max(0, Math.round(Number(l.capo) || 0))),
     strictness: ['lenient', 'strict', 'bass'].includes(l.strictness) ? l.strictness : 'lenient',
     mode: l.mode === 'play' ? 'play' : 'wait',
+    confirmed: l.confirmed === true,
   };
 }
 
@@ -479,7 +480,7 @@ export function selfCheck(assert) {
   assert.deepEqual(normaliseSheet({ practice: { speed: 9, songBpm: 1000 } }).practice, { speed: 2, songBpm: 0 });
   assert.equal(s.listen, null, 'no follow-along settings until someone sets them');
   assert.deepEqual(cleanListen({ tuningId: 'dropD', capo: 40, strictness: 'x', mode: 'play' }),
-    { tuningId: 'dropD', tuning: null, capo: 12, strictness: 'lenient', mode: 'play' });
+    { tuningId: 'dropD', tuning: null, capo: 12, strictness: 'lenient', mode: 'play', confirmed: false });
   const hash = 'a'.repeat(40);
   const tr = cleanTranscript({ pages: {
     [hash]: { at: 5, model: 'm1', w: 900, h: 200, systems: [{ lines: [10.04, 20, 30, 40, 50, 60], events: [

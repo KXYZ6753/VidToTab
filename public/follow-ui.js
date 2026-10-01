@@ -74,6 +74,10 @@ export function createListen(ctx) {
   }
 
   const idle = () => ls.paused || ls.held;
+  // Who turns the pages: the clock while Play along's clock is running,
+  // otherwise the listening — in either mode. Play along with its clock
+  // stopped (switched to, never started) used to turn nothing at all.
+  const clockTurns = () => ls.mode === 'play' && ctx.clockRunning();
 
   function toggleSetup(open) {
     if (open) ctx.closeSettings();
@@ -157,7 +161,7 @@ export function createListen(ctx) {
       driftOffered = true;
       message(said, { actions: [['Follow my tuning', () => { mic.call('setOffsetCents', m.cents); message(''); }], ['I’ll retune', () => message('')]] });
     });
-    mic.on('calib', () => { $('lsQuiet').disabled = false; $('lsQuiet').textContent = 'Stay quiet 3 s'; $('lsQuietDone').hidden = false; });
+    mic.on('calib', () => { $('lsQuiet').disabled = false; $('lsQuiet').textContent = 'Calibrate'; $('lsQuietNote').textContent = 'Room noise measured'; });
     mic.on('ended', () => { if (ls.mic === mic && ls.active) message('Microphone disconnected', { actions: [['Reconnect', () => startMic()]] }); });
     mic.on('error', (m) => { if (ls.mic === mic && ls.active) message(`Listening failed: ${m.message}`); });
     const ready = await mic.ready;
@@ -266,7 +270,7 @@ export function createListen(ctx) {
     for (let i = ls.cur; i < index; i++) ls.status.set(i, 'missed');
     ls.cur = index;
     ls.status.set(index, 'heard');
-    if (ls.mode === 'wait' && ls.flat[index].entry > ctx.current()) ctx.showEntry(ls.flat[index].entry);
+    if (!clockTurns() && ls.flat[index].entry > ctx.current()) ctx.showEntry(ls.flat[index].entry);
     ls.partial.delete(index);
     advance();
   }
@@ -303,7 +307,7 @@ export function createListen(ctx) {
     clearTimeout(ls.turnTimer);
     const at = ls.cur;
     ls.turnTimer = setTimeout(() => {
-      if (ls.active && ls.cur === at && ctx.current() < k && k < ctx.getSeq().length) ctx.showEntry(k);
+      if (ls.active && ls.cur >= at && !clockTurns() && ctx.current() < k && k < ctx.getSeq().length) ctx.showEntry(k);
     }, 300);
   }
 
@@ -316,7 +320,7 @@ export function createListen(ctx) {
     drawEntry(was.entry);
     armCurrent();
     // In Play mode the clock turns pages and reports the end.
-    if (ls.mode !== 'wait') { if (next) drawEntry(next.entry); return; }
+    if (clockTurns()) { if (next) drawEntry(next.entry); return; }
     if (!next) {
       ctx.fill(was.entry, 1, 'the end');
       turnTo(was.entry + 1);
@@ -472,7 +476,7 @@ export function createListen(ctx) {
         layer.appendChild(d);
       }
     }
-    if (ls.mode === 'wait') {
+    if (!clockTurns()) {
       ctx.fill(k, done / b.count, `${done} of ${b.count} notes`);
     } else {
       let heard = 0;
@@ -486,6 +490,75 @@ export function createListen(ctx) {
         card.querySelector('.pr-card-head')?.insertBefore(chip, card.querySelector('.pr-card-head .spacer'));
       }
     }
+  }
+
+  // ---------------------------------------------------------------- first run
+
+  // The first time Listen opens on a songsheet it asks what the guitar is
+  // tuned to: the one thing it cannot follow without, and easy to miss in the
+  // panel. Save keeps it and stops asking (for this songsheet); Skip or Esc
+  // asks again next time. Resolves once the window has gone.
+  function askSetup() {
+    const dlg = $('listenFirst');
+    const s = ctx.settings();
+    const heard = s.tuningId !== 'standard' || s.capo > 0;
+    $('lfNote').textContent = heard
+      ? 'Heard in the video. Check it matches your guitar; you can change it later from the microphone button.'
+      : 'You can change this later from the microphone button.';
+    const tuning = $('lfTuning');
+    tuning.textContent = '';
+    for (const t of TUNINGS) {
+      // Custom only when it is what was found: there is nowhere here to type one.
+      if (t.id === 'custom' && s.tuningId !== 'custom') continue;
+      const names = [...s.tuning].reverse().map((m) => noteName(m).replace(/-?\d+$/, '')).join(' ');
+      const o = el('option', null, t.id === 'custom' ? `Custom (${names})` : t.label);
+      o.value = t.id;
+      tuning.appendChild(o);
+    }
+    tuning.value = s.tuningId;
+    const capo = $('lfCapo');
+    capo.textContent = '';
+    for (let c = 0; c <= 12; c++) {
+      const o = el('option', null, c ? `Capo ${c}` : 'No capo');
+      o.value = String(c);
+      capo.appendChild(o);
+    }
+    capo.value = String(s.capo);
+    return new Promise((resolve) => {
+      dlg.addEventListener('close', () => resolve(), { once: true });
+      $('lfSave').onclick = () => {
+        const id = tuning.value;
+        ctx.saveSettings({ tuningId: id, tuning: id === 'custom' ? s.tuning : undefined, capo: Number(capo.value), confirmed: true });
+        renderSetup();
+        flyToMic(dlg);
+      };
+      dlg.showModal();
+    });
+  }
+
+  // Saved: the window shrinks into the microphone button, which rings once,
+  // so the place to change it later is the place it went.
+  function flyToMic(dlg) {
+    const btn = $('lsSetupBtn');
+    const to = btn.getBoundingClientRect();
+    if (!to.width || !dlg.animate || matchMedia('(prefers-reduced-motion: reduce)').matches) { dlg.close(); return; }
+    const from = dlg.getBoundingClientRect();
+    const dx = to.left + to.width / 2 - (from.left + from.width / 2);
+    const dy = to.top + to.height / 2 - (from.top + from.height / 2);
+    dlg.classList.add('leaving');
+    const run = dlg.animate([
+      { transform: 'none', opacity: 1 },
+      { transform: `translate(${dx}px, ${dy}px) scale(${Math.max(0.1, to.width / from.width)})`, opacity: 0.25 },
+    ], { duration: 520, easing: 'cubic-bezier(.55, 0, .7, .2)', fill: 'forwards' });
+    run.finished.catch(() => {}).then(() => {
+      dlg.close();
+      run.cancel();
+      dlg.classList.remove('leaving');
+      btn.classList.remove('ls-landed');
+      void btn.offsetWidth;
+      btn.classList.add('ls-landed');
+      btn.addEventListener('animationend', () => btn.classList.remove('ls-landed'), { once: true });
+    });
   }
 
   // ---------------------------------------------------------------- test clips
@@ -509,7 +582,7 @@ export function createListen(ctx) {
     r.onstop = () => {
       clearTimeout(limit);
       rec = null;
-      $('lsRecord').textContent = 'Record a test clip';
+      $('lsRecord').textContent = 'Record clip';
       const ext = /ogg/.test(r.mimeType) ? 'ogg' : /mp4/.test(r.mimeType) ? 'm4a' : 'webm';
       const name = `vidtotab-clip-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}`;
       const events = ls.flat.slice(from, from + 200).map(({ ev }) => ({
@@ -559,8 +632,8 @@ export function createListen(ctx) {
   $('lsQuiet').addEventListener('click', () => {
     if (!ls.mic) return;
     $('lsQuiet').disabled = true;
-    $('lsQuiet').textContent = 'Listening to the room…';
-    $('lsQuietDone').hidden = true;
+    $('lsQuiet').textContent = 'Listening…';
+    $('lsQuietNote').textContent = 'Stay quiet 3 s';
     ls.mic.call('calibrateNoise', 3);
   });
   for (const t of TUNINGS) {
@@ -574,7 +647,7 @@ export function createListen(ctx) {
     $('lsCapo').appendChild(o);
   }
   const resettle = () => { renderSetup(); if (ls.active) build(); };
-  $('lsTuning').addEventListener('change', () => { ctx.saveSettings({ tuningId: $('lsTuning').value }); resettle(); });
+  $('lsTuning').addEventListener('change', () => { ctx.saveSettings({ tuningId: $('lsTuning').value, confirmed: true }); resettle(); });
   for (const inp of document.querySelectorAll('#lsCustom input')) {
     inp.addEventListener('change', () => {
       const inputs = [...document.querySelectorAll('#lsCustom input')];
@@ -582,11 +655,11 @@ export function createListen(ctx) {
       // One field half-typed or out of range must not reset the other five.
       for (const x of inputs) x.toggleAttribute('aria-invalid', !(Number.isInteger(Number(x.value)) && Number(x.value) >= 28 && Number(x.value) <= 76));
       if (inputs.some((x) => x.hasAttribute('aria-invalid'))) return;
-      ctx.saveSettings({ tuningId: 'custom', tuning });
+      ctx.saveSettings({ tuningId: 'custom', tuning, confirmed: true });
       resettle();
     });
   }
-  $('lsCapo').addEventListener('change', () => { ctx.saveSettings({ capo: Number($('lsCapo').value) }); resettle(); });
+  $('lsCapo').addEventListener('change', () => { ctx.saveSettings({ capo: Number($('lsCapo').value), confirmed: true }); resettle(); });
   $('lsStrict').addEventListener('change', () => { ctx.saveSettings({ strictness: $('lsStrict').value }); if (ls.mic) ls.mic.call('setStrictness', $('lsStrict').value); });
   for (const b of document.querySelectorAll('#lsModeSeg [data-mode]')) b.addEventListener('click', () => setMode(b.dataset.mode));
 
@@ -600,6 +673,8 @@ export function createListen(ctx) {
       ls.mode = ctx.settings().mode;
       document.getElementById('practice').dataset.listen = ls.mode;
       renderSetup();
+      if (!ctx.settings().confirmed) await askSetup();
+      if (!ls.active) return;
       await build();
       if (!ls.active || ls.mic) return;
       if (await micPermissionState() === 'granted') await startMic(ctx.savedDevice());

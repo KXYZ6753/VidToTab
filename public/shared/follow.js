@@ -38,6 +38,9 @@ export function normaliseListen(input = {}) {
     capo: Math.min(12, Math.max(0, Math.round(Number(input.capo) || 0))),
     strictness: STRICTNESS.includes(input.strictness) ? input.strictness : 'lenient',
     mode: input.mode === 'play' ? 'play' : 'wait',
+    // Someone has said what the guitar is tuned to (the first-run window, or
+    // the tuning and capo in the microphone panel): don't ask again.
+    confirmed: input.confirmed === true,
   };
 }
 
@@ -226,12 +229,15 @@ export function selfCheck(assert) {
   assert.equal(noteName(61), 'C♯4');
 
   const d = normaliseListen({});
-  assert.deepEqual(d, { tuningId: 'standard', tuning: [64, 59, 55, 50, 45, 40], capo: 0, strictness: 'lenient', mode: 'wait' });
+  assert.deepEqual(d, { tuningId: 'standard', tuning: [64, 59, 55, 50, 45, 40], capo: 0, strictness: 'lenient', mode: 'wait', confirmed: false });
   assert.equal(normaliseListen({ capo: 30 }).capo, 12);
   assert.deepEqual(normaliseListen({ tuningId: 'dropD' }).tuning, [64, 59, 55, 50, 45, 38]);
   assert.deepEqual(normaliseListen({ tuningId: 'custom', tuning: [62, 57, 55, 50, 45, 38] }).tuning, [62, 57, 55, 50, 45, 38]);
   assert.deepEqual(normaliseListen({ tuningId: 'custom', tuning: [1, 2] }).tuning, [64, 59, 55, 50, 45, 40], 'nonsense custom → standard');
   assert.equal(normaliseListen({ strictness: 'weird' }).strictness, 'lenient');
+  assert.equal(normaliseListen({}).confirmed, false, 'nobody has confirmed the tuning yet');
+  assert.equal(normaliseListen({ confirmed: 'yes' }).confirmed, false, 'only a real true counts');
+  assert.equal(settingsForShift({ confirmed: true }, 2).confirmed, true, 'a pitch shift keeps it');
 
   const reading = { found: true, systems: [{ events: [
     { x0: 10, x1: 20, xc: 15, conf: 0.9, notes: [

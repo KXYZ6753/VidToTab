@@ -305,6 +305,17 @@ import { createListen } from '/follow-ui.js';
       updateStartSeg();
       redrawPreview();
     }
+    // Arriving on a songsheet, its two main actions glow once.
+    if (changed && n === 4) {
+      setTimeout(() => {
+        for (const b of [$('practiceBtn'), $('exportPdf')]) {
+          b.classList.remove('attn');
+          void b.offsetWidth;
+          b.classList.add('attn');
+          b.addEventListener('animationend', () => b.classList.remove('attn'), { once: true });
+        }
+      }, 300);
+    }
     if (changed) {
       window.scrollTo({ top: 0 });
       // Focus follows the step. Hiding the section that held the focused
@@ -1590,6 +1601,9 @@ import { createListen } from '/follow-ui.js';
 
   document.addEventListener('keydown', (e) => {
     if (e.metaKey || e.ctrlKey) return;
+    // A modal window (Listen's first-run setup, About) has the keyboard: Enter
+    // on its Save is not a page turn, Esc closes it rather than practice.
+    if (document.querySelector('dialog[open]')) return;
     // The note editor handles its own keys (in the capture phase); nothing
     // behind it reacts to the ones it leaves.
     if (editor.isOpen) return;
@@ -2053,8 +2067,10 @@ import { createListen } from '/follow-ui.js';
     const e = player.seq[state.practice];
     const f = Math.min(1, player.t / e.dur);
     const card = currentCard();
-    // Wait mode fills a card by the notes heard instead.
-    if (card && !(listen.active && listen.mode === 'wait')) {
+    // Listening fills a card by the notes heard instead — except while Play
+    // along's clock is running, which fills it by time like the timer.
+    const byNotes = listen.active && !(listen.mode === 'play' && player.playing);
+    if (card && !byNotes) {
       const secs = Math.max(0, Math.ceil((e.dur - player.t) / state.pace.speed));
       const last = state.practice === player.seq.length - 1;
       fillCard(card, f, `${last ? 'ends' : 'next'} in ${fmtTime(secs)}`);
@@ -2547,6 +2563,7 @@ import { createListen } from '/follow-ui.js';
     fill: (k, f, label) => { const c = cardFor(k); if (c) fillCard(c, f, label); },
     openEditor: openEditorAt,
     stopClock: () => setPlaying(false),
+    clockRunning: () => player.playing,
     closeSettings: () => toggleSettings(false),
     download: downloadBlob,
     restart: () => { goTo(0); setPlaying(true); },

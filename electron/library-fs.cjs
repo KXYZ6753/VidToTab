@@ -85,6 +85,7 @@ function cleanListen(l) {
     capo: Math.min(12, Math.max(0, Math.round(Number(l.capo) || 0))),
     strictness: ['lenient', 'strict', 'bass'].includes(l.strictness) ? l.strictness : 'lenient',
     mode: l.mode === 'play' ? 'play' : 'wait',
+    confirmed: l.confirmed === true,
   };
 }
 const r1 = (v) => Math.round((Number(v) || 0) * 10) / 10;
