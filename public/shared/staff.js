@@ -89,7 +89,7 @@ export function bestSix(run) {
 // Where along the staff the lines really run: the columns where at least four
 // of the six lines have ink. The page may start before the staff (a clef, a
 // string-name column) or the staff may stop short of the page edge.
-function staffSpan(ink, W, six, dark) {
+function staffSpan(ink, W, six, dark, spacing) {
   const hit = new Uint8Array(W);
   for (const l of six) {
     const y0 = Math.max(0, Math.floor(l.y) - 1);
@@ -104,7 +104,35 @@ function staffSpan(ink, W, six, dark) {
   let x1 = W - 1;
   while (x0 < W && hit[x0] < 4) x0++;
   while (x1 > x0 && hit[x1] < 4) x1--;
-  return x0 < W ? { xStart: x0, xEnd: x1 + 1 } : { xStart: 0, xEnd: W };
+  if (x0 >= W) return { xStart: 0, xEnd: W };
+  // Ink on the line rows is not yet a line: a column of circled string names
+  // or a clef touches every row it crosses. A line starts where it runs on for
+  // a stretch (1.5 spacings, dash gaps allowed); the third earliest of the six
+  // starts is where the staff does, so one line that opens with a note, or a
+  // chord at the very left edge, does not move it.
+  const starts = six.map((l) => lineStart(ink, W, l.y, spacing, dark)).filter((x) => x >= 0).sort((a, b) => a - b);
+  const xStart = starts.length >= 3 ? Math.max(x0, starts[2]) : x0;
+  return { xStart, xEnd: x1 + 1 };
+}
+
+// First column of the first long run of ink along a line row, or -1.
+function lineStart(ink, W, yc, spacing, dark) {
+  const y0 = Math.max(0, Math.floor(yc) - 1);
+  const y1 = Math.floor(yc) + 1;
+  const H = ink.length / W;
+  const maxGap = Math.max(3, Math.round(0.35 * spacing));
+  const minRun = 1.5 * spacing;
+  let start = -1;
+  let last = -1e9;
+  for (let x = 0; x < W; x++) {
+    let on = false;
+    for (let y = y0; y <= Math.min(H - 1, y1); y++) if (ink[y * W + x] >= dark) { on = true; break; }
+    if (!on) continue;
+    if (start < 0 || x - last - 1 > maxGap) start = x;
+    last = x;
+    if (last - start + 1 >= minRun) return start;
+  }
+  return -1;
 }
 
 // Every six-line staff on the page, top to bottom, plus any other staff (four
@@ -134,7 +162,7 @@ export function findStaves(img, { dark = 0.22 } = {}) {
       spacing: s,
       top: Math.max(0, Math.floor(ys[0] - s * 0.9)),
       bottom: Math.min(H - 1, Math.ceil(ys[5] + s * 0.9)),
-      ...staffSpan(ink, W, pick.six, dark),
+      ...staffSpan(ink, W, pick.six, dark, s),
       evenness: pick.worst,
     });
   }
@@ -186,6 +214,17 @@ export function selfCheck(assert) {
   r = findStaves(page);
   assert.equal(r.systems[0].xStart, 90);
   assert.equal(r.systems[0].xEnd, 560);
+
+  // A column of circled string names before the lines: it touches every line
+  // row, but the lines start after it.
+  const named = drawPage(600, 200, []);
+  for (const y of six) {
+    for (let x = 110; x < 560; x++) for (let t = 0; t < 2; t++) named.px(x, y + t, 30);
+    for (let a = 0; a < 64; a++) named.px(Math.round(40 + 8 * Math.cos(a / 10)), Math.round(y + 8 * Math.sin(a / 10)), 0);
+    for (let x = 52; x < 60; x++) named.px(x, y, 0);
+  }
+  r = findStaves(named);
+  assert.ok(Math.abs(r.systems[0].xStart - 110) <= 1, `lines start after the name column (${r.systems[0].xStart})`);
 
   // Uneven gaps are not a staff.
   assert.equal(bestSix([10, 30, 50, 90, 110, 130].map((y) => ({ y, cover: 1 }))), null);
