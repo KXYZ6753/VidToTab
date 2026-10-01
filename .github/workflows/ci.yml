@@ -306,6 +306,13 @@ jobs:
       - name: What is about to be published
         run: ls -lh artifacts
 
+      # The page is .github/release-template.md with this version's section of
+      # CHANGELOG.md as "What's new" (scripts/release-notes.mjs); a version
+      # with no section still ships, listing its commits, with a warning.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '26'
+
       - name: Write the notes
         shell: bash
         run: |
@@ -313,39 +320,8 @@ jobs:
           # (pre-remaster, remaster-1) that are not releases, and without the
           # filter the first release would list every commit since one of those.
           prev=$(git describe --tags --abbrev=0 --match 'v*' "${GITHUB_REF_NAME}^" 2>/dev/null || true)
-          {
-            echo '## Install'
-            echo
-            echo 'Nothing else is needed — ffmpeg, ffprobe and yt-dlp travel inside the app.'
-            echo
-            echo '**macOS** (Apple Silicon) — the `.dmg`. Open it and drag VidToTab to Applications.'
-            echo
-            echo 'It is signed, but only ad-hoc, and it is not notarised — so Gatekeeper stops the first launch and says Apple cannot check it for malicious software. Since macOS 15, right-click → **Open** no longer gets past that: open the app once, then go to **System Settings → Privacy & Security**, scroll down, and click **Open Anyway**. Or skip the dialog entirely:'
-            echo
-            echo '```sh'
-            echo 'xattr -dr com.apple.quarantine /Applications/VidToTab.app'
-            echo '```'
-            echo
-            echo '**Windows** (x64) — `VidToTab.Setup.*.exe`. Also unsigned, so SmartScreen will warn: **More info** then **Run anyway**.'
-            echo
-            echo '**Linux** — the `.deb` for Debian and Ubuntu, x64 or arm64:'
-            echo
-            echo '```sh'
-            echo 'sudo apt install ./vidtotab_*_amd64.deb'
-            echo '```'
-            echo
-            echo 'or the x64 `.AppImage`, which needs `chmod +x` before it will start.'
-            echo
-            echo '## Changes'
-            echo
-            if [ -n "$prev" ]; then
-              git log --no-merges --pretty='- %s' "$prev..${GITHUB_REF_NAME}"
-              echo
-              echo "[Everything that changed](https://github.com/${GITHUB_REPOSITORY}/compare/${prev}...${GITHUB_REF_NAME})"
-            else
-              echo '- First release.'
-            fi
-          } > notes.md
+          node scripts/release-notes.mjs "$GITHUB_REF_NAME" "$prev" > notes.md
+          echo "title=$(node scripts/release-notes.mjs --title "$GITHUB_REF_NAME")" >> "$GITHUB_ENV"
           cat notes.md
 
       - name: Publish
@@ -372,10 +348,10 @@ jobs:
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             echo "release $GITHUB_REF_NAME exists — replacing its files"
             gh release upload "$GITHUB_REF_NAME" artifacts/* --clobber
-            gh release edit "$GITHUB_REF_NAME" --notes-file notes.md --draft=false $pre
+            gh release edit "$GITHUB_REF_NAME" --title "$title" --notes-file notes.md --draft=false $pre
           else
             gh release create "$GITHUB_REF_NAME" artifacts/* \
-              --title "VidToTab ${GITHUB_REF_NAME}" \
+              --title "$title" \
               --notes-file notes.md \
               --verify-tag \
               $pre

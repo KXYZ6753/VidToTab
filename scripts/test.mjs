@@ -29,6 +29,8 @@ const mods = [
   // reader's unsure digits against it, on a synthesized string.
   { name: 'timing', file: path.join(here, '..', 'public', 'shared', 'timing.js') },
   { name: 'tabread-truth', file: path.join(here, 'tabread-truth.mjs') },
+  // The release page: template, changelog section, planet name.
+  { name: 'release-notes', file: path.join(here, 'release-notes.mjs') },
   // Only its pure parts run here — IndexedDB does not exist in Node, and the
   // storage paths are covered by the browser end-to-end test instead.
   { name: 'library', file: path.join(here, '..', 'public', 'lib', 'library.js') },

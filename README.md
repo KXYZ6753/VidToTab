@@ -161,12 +161,14 @@ Steps arrive from the side they came from: forward from the right, back from the
 `npm run icon` draws the app icon from the same mark, so the icon and the interface cannot drift apart.
 ### Releasing
 
-Two commands. `npm version` bumps `package.json`, commits that, and makes the matching tag; pushing the tag is what starts a release.
+First write what's new in that version as a `## <version>` section of [`CHANGELOG.md`](CHANGELOG.md) and commit it. Then two commands: `npm version` bumps `package.json`, commits that, and makes the matching tag; pushing the tag is what starts a release.
 
 ```sh
 npm version patch          # or minor, or major
 git push --follow-tags
 ```
+
+The release page is [`.github/release-template.md`](.github/release-template.md) — downloads, first launch, updating, privacy — with the version, its download links and its changelog section filled in by `scripts/release-notes.mjs` (run `node scripts/release-notes.mjs v0.4.0` to see a page before tagging). It is titled with the version and its planet: each major version is one, outward from the sun — 0.x (beta) and 1.x Mercury, 2.x Venus, 3.x Earth, then Mars and on. A version missing from the changelog still releases, listing its commits instead, with a warning on the run.
 
 The tag runs the same matrix as any other push — module self-checks, server checks, a real build, and the packaged app started and shut down again on macOS, Windows and Linux — and then, only if all of that is green, builds the installers and publishes a GitHub release with them attached:
 
