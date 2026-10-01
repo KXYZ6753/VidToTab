@@ -77,7 +77,7 @@ docker run -p 3000:3000 -v vidtotab-data:/data -e VIDTOTAB_PUBLIC=1 vidtotab
 1. **Video** — paste a link (anywhere on the page, not just in the box), drop a link or a video file, or open `…/?url=<video>` from a bookmark. Saved songsheets are listed underneath.
 2. **Tab area** — the tab is detected automatically and outlined on the video. Check the box, adjust it if needed (drag the handles), pick where scanning starts, and press **Scan for pages**.
 3. **Scan** — pages appear as they're found; cancel any time.
-4. **Songsheet** — edit the title, remove pages you don't want (undo supported), click a timestamp to check it against the video, choose a **look** (Print, Dark, Sepia, or the original video colours), pick Letter or A4, and export a PDF or PNG. *Not quite right?* re-scans with fewer or more pages in seconds — frames are cached.
+4. **Songsheet** — edit the title, remove pages you don't want (undo supported), click a timestamp to check it against the video, choose a **look** (Print, Dark, Sepia, or the original video colours), pick Letter or A4, and export a PDF or PNG. *Missing or extra pages?* re-scans with fewer or more pages in seconds — frames are cached.
 
 **Practice** is for playing along, full screen. Press **Play** (or K) and each page, shown as a card like on the songsheet step, fills from left to right behind the page over the time it lasts, with a countdown to the next page — then the next one comes up. It is a timer for when the page turns, not a claim to follow the notes, which are not evenly spaced in time. The pace is the video's own timing by default (every page knows how long it was on screen), and **−** / **+** (or [ and ]) slow it down or speed it up; click the speed to go back to real speed. Enter the song's tempo in Settings and the pace is shown and set in BPM instead. Pages the video repeats are played again where it repeats them, and there is a short count-in before the first page. *Scroll* shows the next pages coming up below the one being played; *One page* shows one at a time. The pace is saved with the songsheet; the layout and count-in are remembered.
 
@@ -211,7 +211,7 @@ One held-out video shows the limits honestly: YouTube refused every stream for t
 - **"Only 360p came through"** — YouTube gave the fallback route a low-quality stream. Small tab text may not survive the scan; trying again later often gets the better one.
 - **"Couldn't lock onto the six tab lines"** — the box probably isn't on the tab, or the video is too low quality to read.
 - **The box is wrong or missing** — pause on a frame where the tab is visible, press *Adjust box*/*Draw box*, and drag. *Detect again* re-samples the video.
-- **Duplicates or a missing page** — *Not quite right? → Fewer pages / More pages*.
+- **Duplicates or a missing page** — *Missing or extra pages? → Fewer pages / More pages*.
 
 **Test against the ffmpeg the app ships, not the one on your machine.** The bundled builds are LGPL: no libx264, and compiled `--disable-avdevice`, so `-f lavfi` does not exist in them. A Homebrew copy has both, which hides a whole class of failure until it reaches a user.
 

@@ -82,7 +82,7 @@ import { createListen } from '/follow-ui.js';
       body: JSON.stringify(body ?? {}),
     });
     const data = (res.headers.get('content-type') || '').includes('json') ? await res.json().catch(() => null) : null;
-    if (!res.ok) throw new Error(data?.error || `Request failed (HTTP ${res.status})`);
+    if (!res.ok) throw new Error(data?.error || `The VidToTab server returned an error (HTTP ${res.status})`);
     return data;
   }
 
@@ -561,7 +561,7 @@ import { createListen } from '/follow-ui.js';
     const text = e.clipboardData?.getData('text');
     if (!looksLikeLink(text)) return;
     if (busyWithWork()) {
-      showToast('Still working on the current video — cancel it first', false);
+      showToast('Still working on the current video. Cancel it first.', false);
       return;
     }
     e.preventDefault();
@@ -589,7 +589,7 @@ import { createListen } from '/follow-ui.js';
     xhr.onerror = () => {
       state.job = 'idle';
       $('dlProgress').hidden = true;
-      showError('Upload failed — the app server isn’t reachable.');
+      showError('Upload failed: the app server isn’t reachable.');
     };
     xhr.send(file);
   }
@@ -627,7 +627,7 @@ import { createListen } from '/follow-ui.js';
     const dropped = e.dataTransfer?.getData('text/uri-list') || e.dataTransfer?.getData('text/plain');
     if (!looksLikeLink(dropped)) return;
     if (busyWithWork()) {
-      showToast('Still working on the current video — cancel it first', false);
+      showToast('Still working on the current video. Cancel it first.', false);
       return;
     }
     showStep(1);
@@ -649,7 +649,7 @@ import { createListen } from '/follow-ui.js';
     if (meta.lowRes) {
       subBits.push(meta.lowRes.advertised
         ? `only ${meta.lowRes.height}p came through (this video publishes ${meta.lowRes.advertised}p)`
-        : `${meta.lowRes.height}p — small tab text may not scan well`);
+        : `${meta.lowRes.height}p, so small tab text may not scan well`);
     }
     $('metaSub').textContent = subBits.filter(Boolean).join(' · ');
     if (newThumb || (meta.thumb && $('metaThumb').hidden)) {
@@ -765,11 +765,11 @@ import { createListen } from '/follow-ui.js';
     if (state.detecting || (!s && state.job === 'ready')) {
       mode = 'pending'; title = 'Looking for the tab…'; text = 'This takes a second or two.';
     } else if (state.rectSource === 'user') {
-      mode = 'found'; title = 'Using your box'; text = 'Scan when you’re ready — or detect again to start over.';
+      mode = 'found'; title = 'Using your box'; text = 'Scan when you’re ready, or detect again to start over.';
     } else if (s?.crop && s.confidence >= 0.6) {
       mode = 'found'; title = 'Tab area found'; text = 'Check that the box covers the whole tab, then scan.';
     } else if (s?.crop) {
-      mode = 'low'; title = 'This might be the tab'; text = 'Make sure the box covers the notation — adjust it if not.';
+      mode = 'low'; title = 'This might be the tab'; text = 'Make sure the box covers the notation, and adjust it if not.';
     } else if (s) {
       mode = 'none'; title = 'Couldn’t find the tab'; text = 'Pause where the tab is visible, then draw a box around it.';
     } else {
@@ -789,7 +789,7 @@ import { createListen } from '/follow-ui.js';
     $('rectTag').textContent = state.rectSource === 'user' ? 'Your box' : 'Detected tab';
     $('regionSub').textContent = state.selectMode
       ? 'Drag to draw a new box, drag inside to move it, or pull the handles. Press Done when it fits.'
-      : 'Only what’s inside the box is scanned — fret numbers, chord names and rhythm marks, not the guitarist.';
+      : 'Only what’s inside the box is scanned: fret numbers, chord names and rhythm marks, not the guitarist.';
   }
 
   $('adjustBtn').addEventListener('click', () => setSelectMode(!state.selectMode));
@@ -904,7 +904,7 @@ import { createListen } from '/follow-ui.js';
     const dur = state.meta?.duration || video.duration || 0;
     const warn = $('longWarn');
     warn.hidden = dur <= 15 * 60;
-    if (!warn.hidden) warn.textContent = `This is a long video (${Math.round(dur / 60)} min) — scanning will take a few minutes.`;
+    if (!warn.hidden) warn.textContent = `This is a long video (${Math.round(dur / 60)} min), so scanning will take a few minutes.`;
   }
 
   for (const b of $('startSeg').querySelectorAll('button')) {
@@ -1159,7 +1159,7 @@ import { createListen } from '/follow-ui.js';
     const list = $('reviewList');
     list.textContent = '';
     if (state.items.length && !vis.length) {
-      list.appendChild(el('div', 'empty', 'All pages removed — press u to undo.'));
+      list.appendChild(el('div', 'empty', 'All pages removed. Press u to undo.'));
       return;
     }
     let pageNo = 0;
@@ -1464,7 +1464,7 @@ import { createListen } from '/follow-ui.js';
     ctx.font = `500 ${subSize}px ${FONT}`;
     if (sub) { ctx.fillStyle = rgbCss(mixRgb(paperC, inkC, 0.55)); ctx.fillText(ellipsize(ctx, sub, textW), tx, y); y += subH; }
     // The link keeps the accent colour: it reads on cream and on near-black.
-    if (meta.url) { ctx.fillStyle = '#c2410c'; ctx.fillText(ellipsize(ctx, meta.url, textW), tx, y); }
+    if (meta.url) { ctx.fillStyle = '#c93f0c'; ctx.fillText(ellipsize(ctx, meta.url, textW), tx, y); }
     // Last, so nothing can land on top of it. Sat on the title's own cap line
     // rather than the top of the canvas, where it would float.
     const lockupY = Math.round(titleSize * 0.22);
@@ -1717,12 +1717,12 @@ import { createListen } from '/follow-ui.js';
 
   function onErrorEvent(ev) {
     if (state.job === 'downloading') {
-      showError(ev.msg || 'Something went wrong.', ev.detail, { escape: true });
+      showError(ev.msg || 'The video could not be loaded. Try the link again, or download the video and choose the file.', ev.detail, { escape: true });
       state.meta = null;
       backToSource();
       return;
     }
-    showError(ev.msg || 'The scan failed.', ev.detail);
+    showError(ev.msg || 'The scan stopped before it finished. Scan again, or change the tab area first.', ev.detail);
     if (state.job === 'analyzing') {
       if (ev.captures?.length) onDone(ev.captures);
       else { state.job = 'ready'; showStep(2); }
@@ -1866,7 +1866,7 @@ import { createListen } from '/follow-ui.js';
         lostTimer = null;
         if (es.readyState !== EventSource.OPEN) {
           lost = true;
-          showError('Lost connection to VidToTab — reconnecting…');
+          showError('Lost connection to VidToTab. Reconnecting…');
         }
       }, 5000);
     };
@@ -2649,7 +2649,7 @@ import { createListen } from '/follow-ui.js';
     // with fewer pages than the scan found — silently, looking like success.
     const wanted = keep.length;
     if (pages.length !== wanted) {
-      addWarning(`This songsheet was not saved: ${wanted - pages.length} of ${wanted} pages could not be read back. It is still on screen — export it, or scan again.`);
+      addWarning(`This songsheet was not saved: ${wanted - pages.length} of ${wanted} pages could not be read back. It is still on screen: export it, or scan again.`);
       return;
     }
     // Every page removed: nothing to store, and nothing to delete either — the
@@ -2846,7 +2846,7 @@ import { createListen } from '/follow-ui.js';
 
   async function openSheet(id) {
     if (scanBusy()) {
-      showToast('Finish or cancel the scan first — opening a songsheet now would save the scan over it.');
+      showToast('Finish or cancel the scan first. Opening a songsheet now would save the scan over it.');
       return;
     }
     // The songsheet being left may have an edit waiting; it is written from
@@ -2870,7 +2870,7 @@ import { createListen } from '/follow-ui.js';
     // without saving until they are readable again.
     if (sheet.missing) {
       state.saveOff = true;
-      addWarning(`${sheet.missing} page${sheet.missing === 1 ? '' : 's'} of this songsheet could not be read from its folder, so changes to it are not being saved — otherwise ${sheet.missing === 1 ? 'that page' : 'those pages'} would be lost. If the folder is in iCloud Drive or OneDrive, connect and download it, then open it again.`);
+      addWarning(`${sheet.missing} page${sheet.missing === 1 ? '' : 's'} of this songsheet could not be read from its folder, so changes to it are not being saved. Otherwise ${sheet.missing === 1 ? 'that page' : 'those pages'} would be lost. If the folder is in iCloud Drive or OneDrive, connect and download it, then open it again.`);
     }
     // No video is loaded for a saved sheet, so the source is metadata only.
     state.meta = { title: sheet.title, url: sheet.url, channel: sheet.channel, duration: sheet.duration, thumb: false, ready: false, width: 0, height: 0, fps: 0 };
@@ -3412,7 +3412,7 @@ import { createListen } from '/follow-ui.js';
       hint.hidden = false;
       if (p === 'darwin') {
         hint.textContent = upd.opened
-          ? 'In the window that opened, drag VidToTab into Applications and choose Replace. Quit this copy first — macOS will not replace an app that is open.'
+          ? 'In the window that opened, drag VidToTab into Applications and choose Replace. Quit this copy first: macOS will not replace an app that is open.'
           : 'Open it, then drag VidToTab into Applications to replace this version.';
         actions.appendChild(updButton(upd.opened ? 'Open again' : 'Open', openInstaller, 'btn small primary'));
         if (upd.opened) actions.appendChild(updButton('Quit VidToTab', () => shellUpdates.quit()));
@@ -3506,7 +3506,7 @@ import { createListen } from '/follow-ui.js';
     if (upd.checking) status.textContent = 'Checking GitHub for a newer version…';
     else if (upd.checkError) status.textContent = `Could not check: ${upd.checkError}`;
     else if (!info) status.textContent = upd.auto ? 'Not checked yet.' : 'Automatic checks are off.';
-    else if (info.available) status.textContent = `VidToTab ${info.latest} is available — you have ${info.current}.`;
+    else if (info.available) status.textContent = `VidToTab ${info.latest} is available. You have ${info.current}.`;
     else if (!info.latest) status.textContent = 'No release has been published yet.';
     else status.textContent = `You have the latest version (${info.current}).`;
   }

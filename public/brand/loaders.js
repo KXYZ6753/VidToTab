@@ -213,7 +213,7 @@ const GRAPHIC = { strings, beam, pages, scan: scanStage };
 // The scan is the only one with a caption of its own, because it is the only
 // one that stands alone in the middle of a card with nothing beside it to say
 // what is happening.
-const DEFAULT_LABEL = { scan: 'transcribing' };
+const DEFAULT_LABEL = { scan: 'scanning' };
 
 const textNode = (label) => h('span', { class: 'vtt-loader-text', text: label });
 
@@ -221,7 +221,7 @@ const textNode = (label) => h('span', { class: 'vtt-loader-text', text: label })
  * Build a loader.
  *
  * `kind` is one of KINDS. `label` is optional visible text; the scan says
- * "transcribing" unless told otherwise, the other three say nothing unless
+ * "scanning" unless told otherwise, the other three say nothing unless
  * given something to say. Pass an empty string to silence the scan.
  *
  * The element comes back hidden and detached — append it, then show().

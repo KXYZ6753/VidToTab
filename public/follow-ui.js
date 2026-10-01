@@ -15,7 +15,7 @@ const HELP = {
   insecure: 'The microphone is only offered on a secure page. Open VidToTab from this computer (http://127.0.0.1) or over https.',
   unsupported: 'This browser cannot listen to a microphone. A current Chrome, Edge, Firefox or Safari can.',
   nodevice: 'No microphone was found. Plug one in, or check it is switched on, then try again.',
-  busy: 'The microphone is there but could not be started — another app may be using it. Close that app and try again.',
+  busy: 'The microphone is there but could not be started. Another app may be using it. Close that app and try again.',
   failed: 'The microphone could not be opened.',
 };
 
@@ -67,7 +67,7 @@ export function createListen(ctx) {
     $('lsStrict').value = s.strictness;
     for (const b of document.querySelectorAll('#lsModeSeg [data-mode]')) b.setAttribute('aria-pressed', String(b.dataset.mode === ls.mode));
     $('lsMicState').textContent = ls.mic
-      ? `Listening with ${ls.mic.label || 'the microphone'}${ls.engine ? '' : ' — the listener did not start'}`
+      ? `Listening with ${ls.mic.label || 'the microphone'}${ls.engine ? '' : ': the listener did not start'}`
       : 'The microphone is off.';
     $('lsAllow').hidden = Boolean(ls.mic);
     $('lsLive').hidden = !ls.mic;
@@ -152,13 +152,13 @@ export function createListen(ctx) {
     mic.on('drift', (m) => {
       const far = Math.abs(m.cents) >= 30;
       const said = `The guitar reads ${m.cents > 0 ? 'sharp' : 'flat'} by about ${Math.abs(Math.round(m.cents))} cents`;
-      $('lsDrift').textContent = far ? `${said} — worth retuning.` : '';
+      $('lsDrift').textContent = far ? `${said}. Worth retuning.` : '';
       if (!far || driftOffered || !ls.active) return;
       driftOffered = true;
       message(`${said}.`, { actions: [['Follow my tuning', () => { mic.call('setOffsetCents', m.cents); message(''); }], ['I’ll retune', () => message('')]] });
     });
     mic.on('calib', () => { $('lsQuiet').disabled = false; $('lsQuiet').textContent = 'Stay quiet 3 s'; $('lsQuietDone').hidden = false; });
-    mic.on('ended', () => { if (ls.mic === mic && ls.active) message('The microphone stopped — it may have been unplugged.', { actions: [['Reconnect', () => startMic()]] }); });
+    mic.on('ended', () => { if (ls.mic === mic && ls.active) message('The microphone stopped. It may have been unplugged.', { actions: [['Reconnect', () => startMic()]] }); });
     mic.on('error', (m) => { if (ls.mic === mic && ls.active) message(`Listening failed: ${m.message}`); });
     const ready = await mic.ready;
     if (ls.mic !== mic) return null;
@@ -176,7 +176,7 @@ export function createListen(ctx) {
     $('lsPillMeter').style.width = `${v * 100}%`;
     $('lsMeterFill').style.width = `${v * 100}%`;
     $('lsClip').hidden = !clip;
-    if (clip && !$('listenSetup').hidden) $('lsClip').textContent = 'Too loud — move back a little';
+    if (clip && !$('listenSetup').hidden) $('lsClip').textContent = 'Too loud. Move back a little.';
   }
 
   function onTuner({ midi, cents, hz, clarity }) {
@@ -224,7 +224,7 @@ export function createListen(ctx) {
     ls.partial = new Map();
     ls.wrongCount = new Map();
     const unread = byEntry.filter((b) => !b.count).length;
-    message(unread ? `${unread} page${unread === 1 ? '' : 's'} could not be read — turn ${unread === 1 ? 'it' : 'them'} by hand, or fix the notes (E).` : '');
+    message(unread ? `${unread} page${unread === 1 ? '' : 's'} could not be read. Turn ${unread === 1 ? 'it' : 'them'} by hand, or fix the notes (E).` : '');
     ls.cur = firstOf(ctx.current());
     await sendTargets();
     drawAll();
@@ -394,7 +394,7 @@ export function createListen(ctx) {
       for (const n of ls.flat[i].ev.notes) if (n.midi !== null) missedNotes.set(n.midi, (missedNotes.get(n.midi) || 0) + 1);
     }
     const worst = [...missedNotes].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([m, c]) => `${noteName(m)} ×${c}`);
-    message(`${heard} of ${total} heard — ${Math.round((heard / total) * 100)}%.${worst.length ? ` Most missed: ${worst.join(', ')}.` : ''}`, { actions: [['Again', () => ctx.restart()]] });
+    message(`${heard} of ${total} heard (${Math.round((heard / total) * 100)}%).${worst.length ? ` Most missed: ${worst.join(', ')}.` : ''}`, { actions: [['Again', () => ctx.restart()]] });
   }
 
   function fixCurrent() {
@@ -410,7 +410,7 @@ export function createListen(ctx) {
     const heard = [...ls.status.values()].filter((v) => v === 'heard').length;
     const skipped = [...ls.status.values()].filter((v) => v === 'skipped').length;
     const unread = ls.byEntry.filter((b) => !b.count).length;
-    message(`Played through — ${heard} of ${total} heard${skipped ? `, ${skipped} skipped` : ''}${unread ? `; ${unread} page${unread === 1 ? '' : 's'} could not be read` : ''}.`, { actions: [['From the top', fromTop]] });
+    message(`Played through: ${heard} of ${total} heard${skipped ? `, ${skipped} skipped` : ''}${unread ? `; ${unread} page${unread === 1 ? '' : 's'} could not be read` : ''}.`, { actions: [['From the top', fromTop]] });
   }
 
   function fromTop() {
@@ -523,7 +523,7 @@ export function createListen(ctx) {
     r.start(1000);
     rec = r;
     $('lsRecord').textContent = 'Stop recording';
-    message('Recording — play from the highlighted note, then stop.');
+    message('Recording. Play from the highlighted note, then stop.');
   }
 
   // ---------------------------------------------------------------- mode
@@ -540,7 +540,7 @@ export function createListen(ctx) {
     ls.cur = firstOf(ctx.current());
     armCurrent();
     drawAll();
-    message(ls.mode === 'play' ? 'Play (K) starts the clock — notes are scored as they come.' : '');
+    message(ls.mode === 'play' ? 'Play (K) starts the clock. Notes are scored as they come.' : '');
     for (const b of document.querySelectorAll('#lsModeSeg [data-mode]')) b.setAttribute('aria-pressed', String(b.dataset.mode === ls.mode));
     if (ls.mic) ls.mic.call('setMode', ls.mode);
   }
@@ -666,7 +666,7 @@ export function createListen(ctx) {
     async refresh() { if (ls.active) await build(); },
     togglePause() {
       ls.paused = !ls.paused;
-      message(ls.paused ? 'Paused — press K to listen again.' : '');
+      message(ls.paused ? 'Paused. Press K to listen again.' : '');
       if (ls.mic) ls.mic.call('setMode', idle() ? 'idle' : ls.mode);
       armCurrent();
     },
