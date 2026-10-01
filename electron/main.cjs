@@ -287,7 +287,7 @@ handle('library:remove', async (_e, ids) => {
   const trashName = process.platform === 'win32' ? 'Recycle Bin' : 'Trash';
   const choice = await confirmBox({
     message: n === 1 ? `Move this songsheet to the ${trashName}?` : `Move ${n} songsheets to the ${trashName}?`,
-    detail: `${n === 1 ? 'Its folder' : 'Their folders'} in ${libraryDir()} ${n === 1 ? 'goes' : 'go'} to the ${trashName}, so ${n === 1 ? 'it' : 'they'} can still be put back from there.`,
+    detail: `${n === 1 ? 'Its folder' : 'Their folders'} in ${libraryDir()} can be restored from the ${trashName}.`,
     buttons: [`Move to ${trashName}`, 'Cancel'],
     defaultId: 0,
     cancelId: 1,
@@ -298,7 +298,7 @@ handle('library:remove', async (_e, ids) => {
 });
 handle('library:reveal', async (_e, id) => {
   const dir = await library.locate(libraryDir(), id);
-  if (!dir) throw new Error('That songsheet is no longer in the library folder.');
+  if (!dir) throw new Error('Songsheet not found in the library folder.');
   shell.showItemInFolder(dir);
   return true;
 });
@@ -312,9 +312,9 @@ handle('library:open-folder', async () => {
 handle('library:choose-folder', async () => {
   const from = libraryDir();
   const picked = await dialog.showOpenDialog(win, {
-    title: 'Choose a folder for your songsheets',
+    title: 'Choose library folder',
     defaultPath: from,
-    buttonLabel: 'Use this folder',
+    buttonLabel: 'Use folder',
     properties: ['openDirectory', 'createDirectory'],
   });
   if (picked.canceled || !picked.filePaths?.[0]) return null;
@@ -324,7 +324,7 @@ handle('library:choose-folder', async () => {
   // move would try to put a folder inside itself.
   for (let d = to; ; d = path.dirname(d)) {
     if (await library.isSheetFolder(d)) {
-      throw new Error('That folder is part of a songsheet. Choose the folder that should hold your songsheets instead.');
+      throw new Error('That folder is inside a songsheet. Choose another folder.');
     }
     if (path.dirname(d) === d) break;
   }
@@ -333,8 +333,8 @@ handle('library:choose-folder', async () => {
   if (count) {
     const choice = await confirmBox({
       message: `Move your ${count === 1 ? 'songsheet' : `${count} songsheets`} to the new folder?`,
-      detail: `From ${from}\nto ${to}\n\nIf you leave them, the library shows only what is in the new folder, and switching back shows them again.`,
-      buttons: ['Move them', 'Leave them where they are', 'Cancel'],
+      detail: `From ${from}\nto ${to}\n\nSongsheets you leave behind reappear if you switch back.`,
+      buttons: ['Move them', 'Leave them', 'Cancel'],
       defaultId: 0,
       cancelId: 2,
     });
@@ -409,7 +409,7 @@ async function finishDownload(file, digest) {
     const got = await sha256(file);
     if (got !== digest) {
       await fs.promises.rm(file, { force: true });
-      throw new Error('The download did not match the checksum GitHub published for it, so it was deleted. Try again, or download it from the releases page.');
+      throw new Error('The download failed its checksum check and was deleted. Try again, or use the releases page.');
     }
   }
   // An AppImage is the program itself, and a download is never executable.
@@ -419,7 +419,7 @@ async function finishDownload(file, digest) {
 
 handle('updates:download', async () => {
   const asset = lastCheck?.available && lastCheck.asset;
-  if (!asset) throw new Error('There is no download for this computer on that release.');
+  if (!asset) throw new Error('That release has no download for this computer.');
   if (!updates.isAllowedDownload(asset.url, updateFeed)) throw new Error('That download is not from the VidToTab releases.');
   if (download && download.state === 'progressing') return { started: false };
   const dir = downloadsDir();

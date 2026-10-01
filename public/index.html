@@ -887,12 +887,12 @@ button.chip { cursor: pointer; }
     <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3.5" width="3.5" height="13" rx="1"/><rect x="8.25" y="3.5" width="3.5" height="13" rx="1"/><path d="m13.6 4.6 3.1-.8 2.4 11.9-3.1.8Z"/></svg>Library<span class="side-lib-count" id="sideLibraryCount"></span></button>
   <p class="side-label" id="sideListLabel" hidden>Your songsheets</p>
   <ul class="side-list" id="sideList"></ul>
-  <p id="sideBusy" class="side-why" hidden>Scanning. Songsheets can be opened when it finishes.</p>
-  <p id="sideEmpty" class="side-empty quiet">Scanned songsheets are kept here.</p>
+  <p id="sideBusy" class="side-why" hidden>Songsheets open after the scan</p>
+  <p id="sideEmpty" class="side-empty quiet">No songsheets yet</p>
   <div class="side-foot">
     <button type="button" class="btn" id="sidePractice" disabled>
       <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4h5a2 2 0 0 1 2 2v9a2 2 0 0 0-2-2H3Z"/><path d="M17 4h-5a2 2 0 0 0-2 2v9a2 2 0 0 1 2-2h5Z"/></svg>Practice</button>
-    <p class="side-why" id="sidePracticeWhy">Open a songsheet first. Practice shows its pages full screen.</p>
+    <p class="side-why" id="sidePracticeWhy">Open a songsheet first</p>
   </div>
 </aside>
 
@@ -918,7 +918,7 @@ button.chip { cursor: pointer; }
     <div class="body">
       <p id="errorMsg"></p>
       <details id="errorDetails" hidden><summary>Technical details</summary><pre id="errorDetailText"></pre></details>
-      <p id="errorEscape" class="quiet" style="color:inherit;margin-top:4px">Or download the video yourself and <button type="button" class="linklike" id="errEscape">choose the file</button>.</p>
+      <p id="errorEscape" class="quiet" style="color:inherit;margin-top:4px">Or <button type="button" class="linklike" id="errEscape">choose a downloaded file</button></p>
     </div>
     <button type="button" id="errorDismiss" class="x" aria-label="Dismiss">&times;</button>
   </div>
@@ -928,7 +928,7 @@ button.chip { cursor: pointer; }
     <div id="preflight" class="banner warn" hidden>
       <svg class="icon" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path d="M10 2 1 18h18L10 2Zm-.9 5h1.8v5.5H9.1V7Zm0 7h1.8v1.8H9.1V14Z"/></svg>
       <div class="body">
-        <p><strong>Missing tools:</strong> <span id="preflightMissing"></span>. Install them with Homebrew:</p>
+        <p><strong>Missing tools:</strong> <span id="preflightMissing"></span>. Install with Homebrew:</p>
         <p class="row wrap" style="margin-top:6px"><code>brew install yt-dlp ffmpeg</code>
           <button type="button" class="btn small" id="copyBrew">Copy</button>
           <button type="button" class="btn small" id="recheck">Check again</button></p>
@@ -937,13 +937,13 @@ button.chip { cursor: pointer; }
 
     <div class="hero">
       <h1>Every tab page in a video, cleaned up and ready to print.</h1>
-      <p class="lede">Paste a YouTube link. VidToTab finds the tab on screen, keeps each page once, strips out cursors and highlights, and lays it all out as a PDF.</p>
+      <p class="lede">Paste a YouTube link to get a clean PDF of the tab, without cursors or highlights.</p>
       <form id="urlForm" class="url-form">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></svg>
         <input id="urlInput" type="url" inputmode="url" placeholder="https://www.youtube.com/watch?v=…" autocomplete="off" spellcheck="false" aria-label="Video link">
         <button type="submit" class="btn primary" id="urlSubmit">Get video</button>
       </form>
-      <p class="quiet">or <button type="button" class="linklike" id="chooseFile">choose a video file</button>, or drop one anywhere on the page</p>
+      <p class="quiet">or <button type="button" class="linklike" id="chooseFile">choose a video file</button>, or drop one anywhere</p>
       <input id="fileInput" type="file" accept="video/*,.mkv" hidden>
     </div>
 
@@ -972,9 +972,9 @@ button.chip { cursor: pointer; }
     </section>
 
     <ul class="how" id="how">
-      <li><b>Finds the tab</b><p>VidToTab finds the tab area. You only confirm the box.</p></li>
-      <li><b>Keeps each page once</b><p>Repeated sections are recognised and folded in, not duplicated.</p></li>
-      <li><b>Prints cleanly</b><p>Dark panels become black ink on white paper, with the song title on top.</p></li>
+      <li><b>Finds the tab</b><p>Detected automatically, confirmed by you</p></li>
+      <li><b>Keeps each page once</b><p>Repeats recognised, not duplicated</p></li>
+      <li><b>Prints cleanly</b><p>Black ink on white paper, song title on top</p></li>
     </ul>
 
     <!-- Removed outright by app.js inside the desktop app, where it would be an
@@ -983,7 +983,7 @@ button.chip { cursor: pointer; }
       <svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="9" fill="currentColor" style="color: var(--accent)"/><g stroke="#fff" stroke-width="1.75" stroke-linecap="round"><path d="M8.92 8.71h6.66M8.92 11.63h10.83M8.92 14.54h14.16M8.92 17.46h14.16M8.92 20.37h10.83M8.92 23.29h6.66"/></g></svg>
       <div class="body">
         <b>Get the desktop app</b>
-        <p>macOS, Windows and Linux. It brings its own ffmpeg and yt-dlp, so there is nothing to install alongside it, and your songsheets stay on your machine.</p>
+        <p>macOS, Windows and Linux. Includes ffmpeg and yt-dlp. Songsheets stay on your machine.</p>
       </div>
       <a class="btn" id="getAppLink" href="https://github.com/KXYZ6753/VidToTab/releases/latest" target="_blank" rel="noopener">
         <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 3v10m0 0 4-4m-4 4-4-4M4 16h12"/></svg>Download</a>
@@ -993,8 +993,8 @@ button.chip { cursor: pointer; }
   <!-- ============ 2. tab area ============ -->
   <section id="step2" class="step" tabindex="-1" hidden>
     <div class="step-head">
-      <h2>Confirm the tab area</h2>
-      <p class="quiet" id="regionSub">Only what’s inside the box is scanned: fret numbers, chord names and rhythm marks, not the guitarist.</p>
+      <h2>Confirm tab area</h2>
+      <p class="quiet" id="regionSub">Only the box is scanned</p>
     </div>
     <div class="stage-grid">
       <div>
@@ -1009,13 +1009,13 @@ button.chip { cursor: pointer; }
             </div>
           </div>
         </div>
-        <p class="keyhint" id="keyhint2"><kbd>←</kbd> <kbd>→</kbd> skip 5 s · <kbd>,</kbd> <kbd>.</kbd> step one frame · <kbd>b</kbd> draw a box · while adjusting: arrows move the box, <kbd>Shift</kbd>+arrows resize</p>
+        <p class="keyhint" id="keyhint2"><kbd>←</kbd> <kbd>→</kbd> skip 5 s · <kbd>,</kbd> <kbd>.</kbd> one frame · <kbd>b</kbd> draw box · adjusting: arrows move, <kbd>Shift</kbd>+arrows resize</p>
       </div>
 
       <aside class="panel card">
         <div id="detectStatus" class="detect-status" aria-live="polite">
           <span class="icon" id="detectIcon" hidden></span>
-          <div><b id="detectTitle">Looking for the tab…</b><p id="detectText">This takes a second or two.</p></div>
+          <div><b id="detectTitle">Finding the tab…</b><p id="detectText"></p></div>
         </div>
         <div id="detectLoaderSlot" class="detect-loader"></div>
 
@@ -1025,8 +1025,8 @@ button.chip { cursor: pointer; }
         </div>
 
         <div>
-          <p class="label">Start scanning from</p>
-          <div class="seg" id="startSeg" role="group" aria-label="Start scanning from">
+          <p class="label">Start from</p>
+          <div class="seg" id="startSeg" role="group" aria-label="Start from">
             <button type="button" data-start="suggested" aria-pressed="false">Tab start<span id="startSuggested"></span></button>
             <button type="button" data-start="current" aria-pressed="false">Paused here<span id="startCurrent"></span></button>
             <button type="button" data-start="zero" aria-pressed="false">Beginning<span>0:00</span></button>
@@ -1048,7 +1048,7 @@ button.chip { cursor: pointer; }
   <!-- ============ 3. scan ============ -->
   <section id="step3" class="step" tabindex="-1" hidden>
     <div class="scan-card card">
-      <h2 id="stageLabel">Scanning the video…</h2>
+      <h2 id="stageLabel">Scanning video…</h2>
       <div id="scanLoaderSlot" class="scan-loader"></div>
       <ol class="stages" id="stages">
         <li data-stage="scan"><span class="dot"></span>Reading frames</li>
@@ -1074,9 +1074,9 @@ button.chip { cursor: pointer; }
         <p id="timingLine" class="quiet timing-line" role="status" hidden></p>
       </div>
       <div class="review-controls">
-        <button type="button" class="btn" id="practiceBtn" title="Full-screen pages for playing along (P)">
+        <button type="button" class="btn" id="practiceBtn" title="Play along full screen (P)">
           <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4h5a2 2 0 0 1 2 2v9a2 2 0 0 0-2-2H3Z"/><path d="M17 4h-5a2 2 0 0 0-2 2v9a2 2 0 0 1 2-2h5Z"/></svg>Practice</button>
-        <button type="button" class="btn" id="notesBtn" title="See and fix the notes read off each page (E)">
+        <button type="button" class="btn" id="notesBtn" title="Check and fix notes (E)">
           <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h14M3 10h14M3 14h14"/><circle cx="7" cy="10" r="1.6" fill="currentColor"/><circle cx="13" cy="6" r="1.6" fill="currentColor"/></svg>Notes</button>
         <!-- Filled from shared/look.js so the preview, the PNG and the PDF all
              offer exactly the same set. -->
@@ -1095,11 +1095,11 @@ button.chip { cursor: pointer; }
     <div id="diagCard" class="banner warn" hidden>
       <svg class="icon" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path d="M10 2 1 18h18L10 2Zm-.9 5h1.8v5.5H9.1V7Zm0 7h1.8v1.8H9.1V14Z"/></svg>
       <div class="body">
-        <p><strong id="diagText">Only one page found.</strong> If the video has more, the box may not cover the tab.</p>
+        <p><strong id="diagText">Only one page found.</strong> Check the box covers the whole tab</p>
         <p class="row wrap" style="margin-top:8px">
-          <button type="button" class="btn small" id="diagAdjust">Adjust the tab area</button>
-          <button type="button" class="btn small" id="diagMore">Scan for more pages</button>
-          <button type="button" class="btn small" id="diagTimed" hidden>Capture every 4 seconds instead</button>
+          <button type="button" class="btn small" id="diagAdjust">Adjust tab area</button>
+          <button type="button" class="btn small" id="diagMore">Find more pages</button>
+          <button type="button" class="btn small" id="diagTimed" hidden>Capture every 4 s</button>
         </p>
       </div>
     </div>
@@ -1113,16 +1113,16 @@ button.chip { cursor: pointer; }
     <details id="settings" class="settings">
       <summary>Missing or extra pages?</summary>
       <div class="settings-body">
-        <p class="quiet">Scan again with a different setting. It’s quick, because the frames are cached.</p>
+        <p class="quiet">Pick a setting to rescan from cached frames</p>
         <div class="seg" id="sensSeg" role="group" aria-label="Page sensitivity">
           <button type="button" data-sens="0.25" aria-pressed="false">Fewer pages<small>merge near-duplicates</small></button>
           <button type="button" data-sens="0.5" aria-pressed="true">Balanced<small>recommended</small></button>
           <button type="button" data-sens="0.75" aria-pressed="false">More pages<small>catch small changes</small></button>
         </div>
-        <button type="button" class="linklike" id="backToRegion">Change the tab area</button>
+        <button type="button" class="linklike" id="backToRegion">Change tab area</button>
       </div>
     </details>
-    <p class="keyhint center"><kbd>j</kbd>/<kbd>k</kbd> select · <kbd>x</kbd> remove · <kbd>u</kbd> undo · <kbd>Enter</kbd> jump to the video · <kbd>p</kbd> practice</p>
+    <p class="keyhint center"><kbd>j</kbd>/<kbd>k</kbd> select · <kbd>x</kbd> remove · <kbd>u</kbd> undo · <kbd>Enter</kbd> go to video · <kbd>p</kbd> practice</p>
   </section>
 
   <!-- ============ library (desktop) ============
@@ -1150,7 +1150,7 @@ button.chip { cursor: pointer; }
     <div class="lv-tools" id="lvTools">
       <label class="lv-search">
         <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="8.6" cy="8.6" r="5.4"/><path d="m12.8 12.8 4 4"/></svg>
-        <input id="lvSearch" type="search" placeholder="Search titles, artists and notes" aria-label="Search songsheets" autocomplete="off" spellcheck="false">
+        <input id="lvSearch" type="search" placeholder="Search songsheets" aria-label="Search songsheets" autocomplete="off" spellcheck="false">
       </label>
       <select id="lvSort" class="select" aria-label="Sort songsheets">
         <option value="edited">Recently edited</option>
@@ -1175,8 +1175,8 @@ button.chip { cursor: pointer; }
         <div class="lvd-thumb"><img id="lvdThumb" alt=""></div>
         <div class="lvd-fields">
           <label class="field"><span>Title</span><input id="lvdTitle" type="text" autocomplete="off" spellcheck="false"></label>
-          <label class="field"><span>Artist</span><input id="lvdArtist" type="text" autocomplete="off" spellcheck="false" placeholder="Who wrote or plays it"></label>
-          <label class="field"><span>Notes</span><textarea id="lvdNotes" rows="4" placeholder="Capo, tuning, the bars to practise…"></textarea></label>
+          <label class="field"><span>Artist</span><input id="lvdArtist" type="text" autocomplete="off" spellcheck="false" placeholder="Add artist"></label>
+          <label class="field"><span>Notes</span><textarea id="lvdNotes" rows="4" placeholder="Capo, tuning, bars to practise…"></textarea></label>
           <p id="lvdSaved" class="lvd-saved" aria-live="polite"></p>
         </div>
         <dl class="lvd-facts" id="lvdFacts"></dl>
@@ -1210,8 +1210,8 @@ button.chip { cursor: pointer; }
       <button type="button" class="btn primary" id="aboutCheck">Check for updates</button>
       <button type="button" class="btn" id="aboutReleases">All releases</button>
     </div>
-    <label class="check"><input type="checkbox" id="aboutAuto"> Check for updates when VidToTab starts</label>
-    <p class="quiet about-note">The check asks GitHub which version is the newest, and tells it only which version and platform this is. Nothing about you or your songsheets is sent.</p>
+    <label class="check"><input type="checkbox" id="aboutAuto"> Check for updates at launch</label>
+    <p class="quiet about-note">Sends GitHub only the app version and platform</p>
     <div class="dialog-foot"><button class="btn ghost" value="close">Close</button></div>
   </form>
 </dialog>
@@ -1235,19 +1235,19 @@ button.chip { cursor: pointer; }
   <div class="practice-bar">
     <button type="button" id="practiceBack">Back</button>
     <div class="pr-seg" role="group" aria-label="Follow along by">
-      <button type="button" data-follow="timer" aria-pressed="true" title="Pages turn on a timer">Timer</button>
-      <button type="button" data-follow="listen" aria-pressed="false" title="Pages turn when the notes are heard (L)">Listen</button>
+      <button type="button" data-follow="timer" aria-pressed="true" title="Turn pages on a timer">Timer</button>
+      <button type="button" data-follow="listen" aria-pressed="false" title="Turn pages as notes are heard (L)">Listen</button>
     </div>
     <div class="ls-controls" role="group" aria-label="Listening">
       <button type="button" id="lsSetupBtn" class="ls-pill" aria-expanded="false" aria-controls="listenSetup" title="Microphone, tuner and tuning (T)">
         <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><rect x="7" y="2.5" width="6" height="10" rx="3"/><path d="M4.5 9.5a5.5 5.5 0 0 0 11 0h-1.6a3.9 3.9 0 0 1-7.8 0Zm4.7 6.4h1.6v2h-1.6z"/></svg>
         <span class="ls-pill-meter" aria-hidden="true"><span id="lsPillMeter"></span></span>
       </button>
-      <button type="button" id="lsSkip" title="Skip this note (N)">Skip</button>
-      <button type="button" id="lsFix" title="Fix what was read off this page (E)">Fix notes</button>
+      <button type="button" id="lsSkip" title="Skip note (N)">Skip</button>
+      <button type="button" id="lsFix" title="Fix notes on this page (E)">Fix notes</button>
     </div>
     <div class="pr-transport" role="group" aria-label="Playback">
-      <button type="button" id="practiceRestart" class="pr-icon" aria-label="Back to the first page" title="Back to the first page (Home)">
+      <button type="button" id="practiceRestart" class="pr-icon" aria-label="First page" title="First page (Home)">
         <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><rect x="4" y="4.5" width="2.2" height="11" rx="1"/><path d="M16 5.2v9.6a.8.8 0 0 1-1.2.7L7.6 10.7a.8.8 0 0 1 0-1.4l7.2-4.8a.8.8 0 0 1 1.2.7Z"/></svg></button>
       <button type="button" id="practicePlay" class="pr-play" aria-label="Play" title="Play (K)">
         <svg class="pr-i-play" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path d="M6 4.3v11.4a.9.9 0 0 0 1.4.8l8.9-5.7a.9.9 0 0 0 0-1.6L7.4 3.5A.9.9 0 0 0 6 4.3Z"/></svg>
@@ -1256,7 +1256,7 @@ button.chip { cursor: pointer; }
     </div>
     <div class="pr-pace" role="group" aria-label="Speed">
       <button type="button" id="practiceSlower" class="pr-icon" aria-label="Slower" title="Slower ( [ )">−</button>
-      <button type="button" id="practiceSpeed" class="pr-speed" title="Back to real speed (0)"></button>
+      <button type="button" id="practiceSpeed" class="pr-speed" title="Real speed (0)"></button>
       <button type="button" id="practiceFaster" class="pr-icon" aria-label="Faster" title="Faster ( ] )">+</button>
     </div>
     <span id="practicePos" class="quiet pr-pos" role="status"></span>
@@ -1265,27 +1265,27 @@ button.chip { cursor: pointer; }
   </div>
   <div class="pr-settings" id="practiceSettings" hidden>
     <label class="pr-field"><span>Speed</span>
-      <input type="range" id="practiceRange" min="25" max="200" step="5" aria-label="Speed, percent of the video">
+      <input type="range" id="practiceRange" min="25" max="200" step="5" aria-label="Speed, % of video">
       <output id="practiceRangeOut"></output></label>
     <label class="pr-field"><span>Song tempo</span>
       <input type="number" id="practiceSongBpm" min="20" max="400" step="1" inputmode="numeric" placeholder="BPM">
-      <small>With it, speed is shown and set in BPM.</small></label>
+      <small>Shows speed in BPM</small></label>
     <div class="pr-field"><span>Layout</span>
       <div class="pr-seg" role="group" aria-label="Layout">
         <button type="button" data-layout="scroll">Scroll</button>
         <button type="button" data-layout="page">One page</button>
       </div></div>
-    <label class="pr-check"><input type="checkbox" id="practiceCountIn"> Count in before playing</label>
-    <label class="pr-check"><input type="checkbox" id="practiceRepeats"> Play repeats where the video repeats them</label>
-    <label class="pr-check"><input type="checkbox" id="practicePlayhead"> Also show a playhead over the notes <em class="pr-exp">experimental</em></label>
-    <p class="pr-keys"><kbd>K</kbd> play · <kbd>[</kbd> <kbd>]</kbd> speed · <kbd>0</kbd> real speed · <kbd>←</kbd> <kbd>→</kbd> or space to turn · <kbd>Home</kbd> start · <kbd>L</kbd> listen · <kbd>E</kbd> fix notes · <kbd>Esc</kbd> leave</p>
+    <label class="pr-check"><input type="checkbox" id="practiceCountIn"> Count in</label>
+    <label class="pr-check"><input type="checkbox" id="practiceRepeats"> Follow the video’s repeats</label>
+    <label class="pr-check"><input type="checkbox" id="practicePlayhead"> Show playhead <em class="pr-exp">experimental</em></label>
+    <p class="pr-keys"><kbd>K</kbd> play · <kbd>[</kbd> <kbd>]</kbd> speed · <kbd>0</kbd> real speed · <kbd>←</kbd> <kbd>→</kbd> <kbd>Space</kbd> turn page · <kbd>Home</kbd> first page · <kbd>L</kbd> listen · <kbd>E</kbd> fix notes · <kbd>Esc</kbd> exit</p>
   </div>
   <!-- Listen: the microphone, a tuner, and what the guitar is tuned to. The
        notes come from reading the page; the microphone is only compared with
        them, and nothing is recorded or sent anywhere. -->
   <div class="pr-settings ls-setup" id="listenSetup" hidden>
     <p id="lsMicState" class="ls-state"></p>
-    <button type="button" id="lsAllow" class="ls-allow">Allow the microphone</button>
+    <button type="button" id="lsAllow" class="ls-allow">Allow microphone</button>
     <div id="lsLive" class="ls-live" hidden>
       <label class="pr-field"><span>Microphone</span><select id="lsDevice"></select></label>
       <div class="ls-meter" aria-hidden="true"><span id="lsMeterFill"></span></div>
@@ -1298,11 +1298,11 @@ button.chip { cursor: pointer; }
       <p id="lsDrift" class="ls-warn"></p>
       <div class="ls-row">
         <button type="button" id="lsQuiet">Stay quiet 3 s</button>
-        <span id="lsQuietDone" class="quiet" hidden>Room noise measured.</span>
+        <span id="lsQuietDone" class="quiet" hidden>Room noise measured</span>
       </div>
       <div class="ls-row">
         <button type="button" id="lsRecord">Record a test clip</button>
-        <span class="quiet">Saves the sound and the notes it should match, so it can be replayed as a test.</span>
+        <span class="quiet">Saves audio and expected notes as a test</span>
       </div>
     </div>
     <label class="pr-field"><span>Tuning</span><select id="lsTuning"></select></label>
@@ -1311,23 +1311,23 @@ button.chip { cursor: pointer; }
     </div>
     <label class="pr-field"><span>Capo</span><select id="lsCapo"></select></label>
     <label class="pr-field"><span>Chords</span><select id="lsStrict">
-      <option value="lenient">Lenient: all but one note of a big chord</option>
+      <option value="lenient">Lenient: one miss per big chord</option>
       <option value="strict">Strict: every note</option>
-      <option value="bass">Bass note and the right notes anywhere</option>
+      <option value="bass">Bass exact, others any octave</option>
     </select></label>
     <div class="pr-field"><span>Mode</span>
       <div class="pr-seg" id="lsModeSeg" role="group" aria-label="Listening mode">
-        <button type="button" data-mode="wait" title="Waits on each note until it is played (W)">Wait for me</button>
-        <button type="button" data-mode="play" title="Keeps time and scores what was hit (W)">Play along</button>
+        <button type="button" data-mode="wait" title="Waits for each note (W)">Wait for me</button>
+        <button type="button" data-mode="play" title="Keeps time and scores hits (W)">Play along</button>
       </div></div>
-    <p class="ls-hint">Headphones help if the video is playing too, since the microphone hears the speakers.</p>
-    <p class="pr-keys"><kbd>N</kbd> skip note · <kbd>B</kbd> back a note · <kbd>K</kbd> pause · <kbd>T</kbd> this panel · <kbd>E</kbd> fix notes</p>
+    <p class="ls-hint">Use headphones if the video plays aloud</p>
+    <p class="pr-keys"><kbd>N</kbd> skip note · <kbd>B</kbd> previous note · <kbd>K</kbd> pause · <kbd>T</kbd> toggle panel · <kbd>E</kbd> fix notes</p>
   </div>
 </div>
 
 <!-- Fix-by-click: what was read off a page, as boxes over the page. Built and
      driven by tabedit.js. -->
-<div id="tabEdit" class="tab-edit" hidden role="dialog" aria-modal="true" aria-label="Fix the notes">
+<div id="tabEdit" class="tab-edit" hidden role="dialog" aria-modal="true" aria-label="Fix notes">
   <div class="te-bar">
     <button type="button" id="teClose">Done</button>
     <button type="button" id="tePrevPage" aria-label="Previous page">‹</button>
@@ -1336,12 +1336,12 @@ button.chip { cursor: pointer; }
     <span id="teStatus" class="te-status" role="status"></span>
     <button type="button" id="teNextUnsure" title="Next note to check (N)">Next to check</button>
     <span class="spacer"></span>
-    <label class="pr-check"><input type="checkbox" id="teShowReadings" checked> Show what was read</label>
+    <label class="pr-check"><input type="checkbox" id="teShowReadings" checked> Show detected notes</label>
     <button type="button" id="teUndo" title="Undo (U)">Undo</button>
     <button type="button" id="teRedo" title="Redo (Shift+Cmd+Z)">Redo</button>
   </div>
   <div class="te-stage">
-    <div class="te-page"><img alt="The page being fixed"><div class="te-notes"></div></div>
+    <div class="te-page"><img alt="Page"><div class="te-notes"></div></div>
     <div class="te-pop" hidden>
       <p id="tePopTitle" class="te-pop-title"></p>
       <div id="teFrets" class="te-keys"></div>
@@ -1355,10 +1355,10 @@ button.chip { cursor: pointer; }
       </div>
     </div>
   </div>
-  <p class="te-help">Click a note to change it, or empty staff to add one. Keys: digits set the fret, <kbd>x</kbd> muted, <kbd>↑</kbd> <kbd>↓</kbd> string, <kbd>←</kbd> <kbd>→</kbd> other notes, <kbd>h</kbd> <kbd>p</kbd> <kbd>/</kbd> <kbd>b</kbd> <kbd>~</kbd> <kbd>&lt;</kbd> <kbd>(</kbd> <kbd>g</kbd> techniques, <kbd>|</kbd> separate, <kbd>+</kbd> join, <kbd>Enter</kbd> looks right, <kbd>Delete</kbd>, <kbd>N</kbd> next to check, <kbd>U</kbd> undo, <kbd>Esc</kbd> done.</p>
+  <p class="te-help">Click a note to edit, or empty staff to add · <kbd>0</kbd>–<kbd>9</kbd> fret · <kbd>x</kbd> muted · <kbd>↑</kbd> <kbd>↓</kbd> string · <kbd>←</kbd> <kbd>→</kbd> select note · <kbd>h</kbd> <kbd>p</kbd> <kbd>/</kbd> <kbd>b</kbd> <kbd>~</kbd> <kbd>&lt;</kbd> <kbd>(</kbd> <kbd>g</kbd> techniques · <kbd>|</kbd> separate · <kbd>+</kbd> join · <kbd>Enter</kbd> looks right · <kbd>Delete</kbd> delete · <kbd>N</kbd> next to check · <kbd>U</kbd> undo · <kbd>Esc</kbd> done</p>
 </div>
 
-<div id="dropVeil" class="drop-veil" hidden><div>Drop the video to load it</div></div>
+<div id="dropVeil" class="drop-veil" hidden><div>Drop video to open</div></div>
 
 <!-- A module: app.js imports the look maths that the PNG and PDF exports use,
      so what the preview shows and what you export cannot drift apart. -->

@@ -262,11 +262,11 @@ async function scan(root) {
 
 function friendly(e, where) {
   if (e && (e.code === 'EPERM' || e.code === 'EACCES')) {
-    const err = new Error(`VidToTab is not allowed to use ${where}. On a Mac, allow it under System Settings → Privacy & Security → Files and Folders, or choose another folder for the library.`);
+    const err = new Error(`VidToTab can’t access ${where}. On a Mac, allow it in System Settings → Privacy & Security → Files and Folders, or choose another folder.`);
     err.code = e.code;
     return err;
   }
-  if (e && e.code === 'ENOSPC') return new Error('The disk is full, so the songsheet could not be saved.');
+  if (e && e.code === 'ENOSPC') return new Error('The disk is full. Free up space to save the songsheet.');
   return e;
 }
 
@@ -487,7 +487,7 @@ async function save(root, meta, pages = [], thumb = null) {
 async function update(root, id, patch = {}) {
   assertId(id);
   const hit = (await scan(root)).get(id);
-  if (!hit) throw new Error('That songsheet is no longer in the library folder.');
+  if (!hit) throw new Error('Songsheet not found in the library folder.');
   const allowed = {};
   for (const k of EDITABLE) if (patch[k] !== undefined) allowed[k] = patch[k];
   const clean = cleanMeta({ ...allowed, id }, hit.rec);

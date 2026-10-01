@@ -84,7 +84,7 @@ import { createListen } from '/follow-ui.js';
       body: JSON.stringify(body ?? {}),
     });
     const data = (res.headers.get('content-type') || '').includes('json') ? await res.json().catch(() => null) : null;
-    if (!res.ok) throw new Error(data?.error || `The VidToTab server returned an error (HTTP ${res.status})`);
+    if (!res.ok) throw new Error(data?.error || `Server error (HTTP ${res.status})`);
     return data;
   }
 
@@ -338,10 +338,10 @@ import { createListen } from '/follow-ui.js';
     document.body.dataset.view = app ? 'app' : 'home';
     $('viewToggleLabel').textContent = app ? 'Home' : 'Open the app';
     // The label is hidden on a phone, so the name has to survive without it.
-    $('viewToggle').setAttribute('aria-label', app ? 'Back to the home page' : 'Open the app view');
+    $('viewToggle').setAttribute('aria-label', app ? 'Home page' : 'Open the app');
     $('viewToggle').title = app
-      ? 'Back to the home page'
-      : 'A working layout, with your songsheets alongside';
+      ? 'Home page'
+      : 'Workspace with your songsheets';
     $('viewIconApp').hidden = app;
     $('viewIconHome').hidden = !app;
     if (remember) store.set('vtt.view', app ? 'app' : 'home');
@@ -433,7 +433,7 @@ import { createListen } from '/follow-ui.js';
     staleEl.appendChild(icon(ICON.warn)).classList.add('icon');
     const body = el('div', 'body');
     body.appendChild(el('p', null,
-      `yt-dlp is ${ageDays} days old (${version}). YouTube changes every few weeks, and an out-of-date copy fails in ways that look like a broken link.`));
+      `yt-dlp is ${ageDays} days old (${version}). Update it to keep YouTube links working:`));
     const row = el('p', 'row wrap');
     row.style.marginTop = '6px';
     row.appendChild(el('code', null, 'brew upgrade yt-dlp'));
@@ -567,7 +567,7 @@ import { createListen } from '/follow-ui.js';
     const text = e.clipboardData?.getData('text');
     if (!looksLikeLink(text)) return;
     if (busyWithWork()) {
-      showToast('Still working on the current video. Cancel it first.', false);
+      showToast('Cancel the current video first', false);
       return;
     }
     e.preventDefault();
@@ -633,7 +633,7 @@ import { createListen } from '/follow-ui.js';
     const dropped = e.dataTransfer?.getData('text/uri-list') || e.dataTransfer?.getData('text/plain');
     if (!looksLikeLink(dropped)) return;
     if (busyWithWork()) {
-      showToast('Still working on the current video. Cancel it first.', false);
+      showToast('Cancel the current video first', false);
       return;
     }
     showStep(1);
@@ -654,8 +654,8 @@ import { createListen } from '/follow-ui.js';
     // pages and looks like the video simply had very few.
     if (meta.lowRes) {
       subBits.push(meta.lowRes.advertised
-        ? `only ${meta.lowRes.height}p came through (this video publishes ${meta.lowRes.advertised}p)`
-        : `${meta.lowRes.height}p, so small tab text may not scan well`);
+        ? `only ${meta.lowRes.height}p received (${meta.lowRes.advertised}p available)`
+        : `${meta.lowRes.height}p, small text may not scan well`);
     }
     $('metaSub').textContent = subBits.filter(Boolean).join(' · ');
     if (newThumb || (meta.thumb && $('metaThumb').hidden)) {
@@ -769,17 +769,17 @@ import { createListen } from '/follow-ui.js';
     const s = state.suggestion;
     let mode, title, text;
     if (state.detecting || (!s && state.job === 'ready')) {
-      mode = 'pending'; title = 'Looking for the tab…'; text = 'This takes a second or two.';
+      mode = 'pending'; title = 'Finding the tab…'; text = '';
     } else if (state.rectSource === 'user') {
-      mode = 'found'; title = 'Using your box'; text = 'Scan when you’re ready, or detect again to start over.';
+      mode = 'found'; title = 'Using your box'; text = 'Ready to scan';
     } else if (s?.crop && s.confidence >= 0.6) {
-      mode = 'found'; title = 'Tab area found'; text = 'Check that the box covers the whole tab, then scan.';
+      mode = 'found'; title = 'Tab area found'; text = 'Check the box covers the whole tab';
     } else if (s?.crop) {
-      mode = 'low'; title = 'This might be the tab'; text = 'Make sure the box covers the notation, and adjust it if not.';
+      mode = 'low'; title = 'Possible tab area'; text = 'Check the box covers the notation';
     } else if (s) {
-      mode = 'none'; title = 'Couldn’t find the tab'; text = 'Pause where the tab is visible, then draw a box around it.';
+      mode = 'none'; title = 'No tab found'; text = 'Pause on the tab, then draw a box';
     } else {
-      mode = 'pending'; title = 'Waiting for the video…'; text = '';
+      mode = 'pending'; title = 'Waiting for video…'; text = '';
     }
     $('detectStatus').className = 'detect-status is-' + mode; // prefixed: .found is the scan-step counter
     if (mode === 'pending') loaders.detect.show(); else loaders.detect.hide();
@@ -794,8 +794,8 @@ import { createListen } from '/follow-ui.js';
     $('redetectBtn').disabled = state.detecting || !state.meta?.ready;
     $('rectTag').textContent = state.rectSource === 'user' ? 'Your box' : 'Detected tab';
     $('regionSub').textContent = state.selectMode
-      ? 'Drag to draw a new box, drag inside to move it, or pull the handles. Press Done when it fits.'
-      : 'Only what’s inside the box is scanned: fret numbers, chord names and rhythm marks, not the guitarist.';
+      ? 'Drag to draw · drag inside to move · drag a handle to resize'
+      : 'Only the box is scanned';
   }
 
   $('adjustBtn').addEventListener('click', () => setSelectMode(!state.selectMode));
@@ -910,7 +910,7 @@ import { createListen } from '/follow-ui.js';
     const dur = state.meta?.duration || video.duration || 0;
     const warn = $('longWarn');
     warn.hidden = dur <= 15 * 60;
-    if (!warn.hidden) warn.textContent = `This is a long video (${Math.round(dur / 60)} min), so scanning will take a few minutes.`;
+    if (!warn.hidden) warn.textContent = `Long video (${Math.round(dur / 60)} min): scanning takes a few minutes`;
   }
 
   for (const b of $('startSeg').querySelectorAll('button')) {
@@ -979,7 +979,7 @@ import { createListen } from '/follow-ui.js';
   // ---------- 3. scan ----------
 
   const STAGES = ['scan', 'find', 'render'];
-  const STAGE_LABEL = { scan: 'Scanning the video…', find: 'Finding the pages…', render: 'Cleaning up the pages…' };
+  const STAGE_LABEL = { scan: 'Scanning video…', find: 'Finding pages…', render: 'Cleaning up pages…' };
 
   function resetProcessing() {
     state.captures = [];
@@ -1032,7 +1032,7 @@ import { createListen } from '/follow-ui.js';
     $('liveGrid').appendChild(img);
     const n = state.captures.length;
     $('foundCount').hidden = false;
-    $('foundCount').textContent = `${n} page${n === 1 ? '' : 's'} so far`;
+    $('foundCount').textContent = `${n} page${n === 1 ? '' : 's'} found`;
   }
 
   function warningBanner(msg) {
@@ -1041,7 +1041,7 @@ import { createListen } from '/follow-ui.js';
     const body = el('div', 'body');
     body.appendChild(el('p', null, msg || 'Warning'));
     if (/region|tab area|moving video|recognised/i.test(msg || '')) {
-      const b = el('button', 'linklike', 'Adjust the tab area');
+      const b = el('button', 'linklike', 'Adjust tab area');
       b.type = 'button';
       b.addEventListener('click', () => { showStep(2); setSelectMode(true); });
       body.appendChild(b);
@@ -1191,7 +1191,7 @@ import { createListen } from '/follow-ui.js';
       bar.appendChild(el('span', 'page-no', String(pageNo)));
       const time = el('button', 'chip time');
       time.type = 'button';
-      time.title = 'Show this moment in the video';
+      time.title = 'Show in video';
       time.appendChild(icon(ICON.clock));
       time.appendChild(document.createTextNode(`${fmtTime(it.tStart)} – ${fmtTime(it.tEnd)}`));
       time.addEventListener('click', (e) => { e.stopPropagation(); seekToSource(it.tStart); });
@@ -1200,7 +1200,7 @@ import { createListen } from '/follow-ui.js';
       for (const t of shown) {
         const chip = el('button', 'chip repeat', 'repeats at ' + fmtTime(t));
         chip.type = 'button';
-        chip.title = 'This page is shown again here';
+        chip.title = 'Page repeats here';
         chip.addEventListener('click', (e) => { e.stopPropagation(); seekToSource(t); });
         bar.appendChild(chip);
       }
@@ -1208,7 +1208,7 @@ import { createListen } from '/follow-ui.js';
       bar.appendChild(el('span', 'spacer'));
       const del = el('button', 'icon-btn');
       del.type = 'button';
-      del.title = 'Remove this page';
+      del.title = 'Remove page';
       del.setAttribute('aria-label', 'Remove page ' + pageNo);
       del.appendChild(icon(ICON.trash));
       del.addEventListener('click', (e) => { e.stopPropagation(); deleteItem(idx); });
@@ -1578,7 +1578,7 @@ import { createListen } from '/follow-ui.js';
         y += heights[i] + gap;
       });
       const blob = await new Promise((r) => c.toBlob(r, 'image/png'));
-      if (!blob) throw new Error('The image is too large for this browser.');
+      if (!blob) throw new Error('Image too large for this browser.');
       downloadBlob(blob, exportBase() + '.png');
       showToast('PNG downloaded', false);
     } catch (err) {
@@ -1723,12 +1723,12 @@ import { createListen } from '/follow-ui.js';
 
   function onErrorEvent(ev) {
     if (state.job === 'downloading') {
-      showError(ev.msg || 'The video could not be loaded. Try the link again, or download the video and choose the file.', ev.detail, { escape: true });
+      showError(ev.msg || 'Couldn’t load the video. Try the link again.', ev.detail, { escape: true });
       state.meta = null;
       backToSource();
       return;
     }
-    showError(ev.msg || 'The scan stopped before it finished. Scan again, or change the tab area first.', ev.detail);
+    showError(ev.msg || 'Scan stopped early. Try again or adjust the tab area.', ev.detail);
     if (state.job === 'analyzing') {
       if (ev.captures?.length) onDone(ev.captures);
       else { state.job = 'ready'; showStep(2); }
@@ -1996,7 +1996,7 @@ import { createListen } from '/follow-ui.js';
     const look = lookById(state.look);
     paper.style.background = isOriginal(look) ? '#0b0b0c' : rgbCss(paperRgb(look));
     const img = el('img');
-    img.alt = `Page ${e.index + 1}${e.repeat ? ', repeated' : ''}, from ${fmtTime(e.start)} in the video`;
+    img.alt = `Page ${e.index + 1}${e.repeat ? ', repeated' : ''}, at ${fmtTime(e.start)}`;
     img.draggable = false;
     if (e.item.w && e.item.h) { img.width = e.item.w; img.height = e.item.h; }
     lookSrc(e.item, img);
@@ -2143,7 +2143,7 @@ import { createListen } from '/follow-ui.js';
     const pct = Math.round(state.pace.speed * 100);
     const bpm = bpmNow();
     $('practiceSpeed').textContent = bpm ? `${bpm} BPM · ${pct}%` : pct === 100 ? 'Real speed' : `${pct}%`;
-    $('practiceSpeed').setAttribute('aria-label', bpm ? `${bpm} beats per minute, ${pct} percent of the video` : `${pct} percent of the video's speed`);
+    $('practiceSpeed').setAttribute('aria-label', bpm ? `${bpm} beats per minute, ${pct} percent speed` : `${pct} percent speed`);
     $('practiceRange').value = String(pct);
     $('practiceRangeOut').textContent = bpm ? `${pct}% · ${bpm}` : `${pct}%`;
     if (document.activeElement !== $('practiceSongBpm')) $('practiceSongBpm').value = state.pace.songBpm ? String(state.pace.songBpm) : '';
@@ -2258,7 +2258,7 @@ import { createListen } from '/follow-ui.js';
         player.t = e.dur;
         renderSweep();
         setPlaying(false);
-        $('practicePos').textContent += '  ·  the end';
+        $('practicePos').textContent += '  ·  End';
         listen.onEnd();
         return;
       }
@@ -2475,7 +2475,7 @@ import { createListen } from '/follow-ui.js';
     readings,
     onProgress: (done, total) => {
       $('timingLine').hidden = done === null;
-      if (done !== null) $('timingLine').textContent = `Timing the notes from the video…${done ? ` ${done} of ${total}` : ''}`;
+      if (done !== null) $('timingLine').textContent = `Timing notes…${done ? ` ${done} of ${total}` : ''}`;
     },
     onTimed: (save) => { timingDirty = true; if (save) syncTranscript(); },
     // The pitch the video is played at, heard by the probe: it becomes the
@@ -2484,8 +2484,8 @@ import { createListen } from '/follow-ui.js';
       if (state.listenSet || (!shift && !low)) return;
       const found = settingsForShift(base, shift, low);
       saveListen(found);
-      const tuning = found.tuningId === 'standard' ? '' : found.tuningId === 'custom' ? 'a retuned guitar' : tuningById(found.tuningId).label;
-      showToast(`Heard in the video: ${[found.capo ? `capo ${found.capo}` : '', tuning].filter(Boolean).join(', ')}. Listen is set to it.`, false);
+      const tuning = found.tuningId === 'standard' ? '' : found.tuningId === 'custom' ? 'custom tuning' : tuningById(found.tuningId).label;
+      showToast(`Listen set from the video: ${[found.capo ? `capo ${found.capo}` : '', tuning].filter(Boolean).join(', ')}`, false);
     },
   });
   function startTiming() {
@@ -2658,7 +2658,7 @@ import { createListen } from '/follow-ui.js';
     // with fewer pages than the scan found — silently, looking like success.
     const wanted = keep.length;
     if (pages.length !== wanted) {
-      addWarning(`This songsheet was not saved: ${wanted - pages.length} of ${wanted} pages could not be read back. It is still on screen: export it, or scan again.`);
+      addWarning(`Songsheet not saved: ${wanted - pages.length} of ${wanted} pages couldn’t be read back. Export it or scan again.`);
       return;
     }
     // Every page removed: nothing to store, and nothing to delete either — the
@@ -2688,7 +2688,7 @@ import { createListen } from '/follow-ui.js';
       if (state.sheetId === target.id) bindSheet(target.id);
       renderLibrary(); // so the home screen already shows it when you go back
     } catch (err) {
-      addWarning('Could not save this songsheet: ' + err.message);
+      addWarning('Songsheet not saved: ' + err.message);
     }
   }
 
@@ -2787,8 +2787,8 @@ import { createListen } from '/follow-ui.js';
     $('libCount').textContent = sheets.length ? `${sheets.length} saved` : '';
     $('libOpenAll').hidden = !folderMode;
     $('libNote').textContent = !sheets.length ? ''
-      : folderMode ? 'Each songsheet is saved as a folder of pages you can open outside the app.'
-        : 'Kept in this browser. Export a PDF to keep a copy anywhere else.';
+      : folderMode ? 'Saved as folders of pages'
+        : 'Saved in this browser only. Export a PDF to keep a copy.';
     // No need to check whether a video is loaded: this section lives inside
     // step 1, so it is already only visible on the home screen. Hiding it
     // whenever a video was loaded meant it disappeared after the first scan —
@@ -2813,7 +2813,7 @@ import { createListen } from '/follow-ui.js';
       card.appendChild(body);
       const del = el('button', 'lib-del', '×');
       del.type = 'button';
-      del.title = folderMode ? `Move to the ${trashName()}` : 'Remove from your songsheets';
+      del.title = folderMode ? `Move to ${trashName()}` : 'Remove songsheet';
       del.setAttribute('aria-label', 'Remove ' + s.title);
       del.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -2833,7 +2833,7 @@ import { createListen } from '/follow-ui.js';
     if (!ids.length) return 0;
     flushLibraryEdit();
     let n = 0;
-    try { n = await deleteSheets(ids); } catch (err) { showError('Could not remove that: ' + err.message); return 0; }
+    try { n = await deleteSheets(ids); } catch (err) { showError('Remove failed: ' + err.message); return 0; }
     if (!n) return 0;
     for (const id of ids) trashedIds.add(id);
     if (state.sheetId && ids.includes(state.sheetId)) detachOpenSheet();
@@ -2855,7 +2855,7 @@ import { createListen } from '/follow-ui.js';
 
   async function openSheet(id) {
     if (scanBusy()) {
-      showToast('Finish or cancel the scan first. Opening a songsheet now would save the scan over it.');
+      showToast('Finish or cancel the scan first');
       return;
     }
     // The songsheet being left may have an edit waiting; it is written from
@@ -2867,7 +2867,7 @@ import { createListen } from '/follow-ui.js';
     await flushTranscript();
     let sheet = null;
     try { sheet = await getSheet(id); } catch { /* unreadable */ }
-    if (!sheet || !sheet.pages?.length) { showError('That songsheet could not be opened.'); return; }
+    if (!sheet || !sheet.pages?.length) { showError('Couldn’t open that songsheet.'); return; }
     state.sheetId = sheet.id;
     state.saveOff = false;
     // Warnings belong to a scan; a stored songsheet brings none of its own.
@@ -2879,7 +2879,7 @@ import { createListen } from '/follow-ui.js';
     // without saving until they are readable again.
     if (sheet.missing) {
       state.saveOff = true;
-      addWarning(`${sheet.missing} page${sheet.missing === 1 ? '' : 's'} of this songsheet could not be read from its folder, so changes to it are not being saved. Otherwise ${sheet.missing === 1 ? 'that page' : 'those pages'} would be lost. If the folder is in iCloud Drive or OneDrive, connect and download it, then open it again.`);
+      addWarning(`Not saving: ${sheet.missing} page${sheet.missing === 1 ? '' : 's'} couldn’t be read, and saving would lose ${sheet.missing === 1 ? 'that page' : 'those pages'}. If the folder is in iCloud Drive or OneDrive, download it and reopen.`);
     }
     // No video is loaded for a saved sheet, so the source is metadata only.
     state.meta = { title: sheet.title, url: sheet.url, channel: sheet.channel, duration: sheet.duration, thumb: false, ready: false, width: 0, height: 0, fps: 0 };
@@ -3055,8 +3055,8 @@ import { createListen } from '/follow-ui.js';
     if (empty) {
       $('lvEmptyTitle').textContent = total ? `Nothing matches “${lv.query.trim()}”` : 'No songsheets yet';
       $('lvEmptyText').textContent = total
-        ? 'Search looks at titles, artists, channels and notes.'
-        : 'Every scan is saved here automatically, as a folder of pages. Paste a video link to make the first one.';
+        ? 'Search covers titles, artists, channels and notes.'
+        : 'Paste a video link to make one.';
     }
     $('lvTools').hidden = total === 0;
     renderBulk(shown);
@@ -3398,14 +3398,14 @@ import { createListen } from '/follow-ui.js';
     const latest = info?.latest ? `VidToTab ${info.latest}` : 'The new version';
 
     if (upd.status === 'downloading' || upd.status === 'verifying') {
-      $('updTitle').textContent = upd.status === 'verifying' ? `Checking ${latest}…` : `Downloading ${latest}…`;
+      $('updTitle').textContent = upd.status === 'verifying' ? `Verifying ${latest}…` : `Downloading ${latest}…`;
       $('updText').textContent = '';
       progress.hidden = false;
       const total = upd.total || info?.asset?.size || 0;
       if (upd.status === 'verifying' || !total) {
         $('updBar').classList.add('indeterminate');
         $('updBar').removeAttribute('aria-valuenow');
-        $('updProgressLabel').textContent = upd.status === 'verifying' ? 'Comparing it with the checksum GitHub published' : mb(upd.received);
+        $('updProgressLabel').textContent = upd.status === 'verifying' ? 'Checking the GitHub checksum…' : mb(upd.received);
       } else {
         $('updBarFill').style.width = `${Math.min(100, (upd.received / total) * 100).toFixed(1)}%`;
         $('updBar').setAttribute('aria-valuenow', String(Math.round(Math.min(100, (upd.received / total) * 100))));
@@ -3419,21 +3419,21 @@ import { createListen } from '/follow-ui.js';
       const p = platform();
       const appImage = /\.AppImage$/i.test(upd.name);
       $('updTitle').textContent = `${latest} is downloaded.`;
-      $('updText').textContent = upd.verified ? '' : 'GitHub published no checksum for this file, so it could not be verified.';
+      $('updText').textContent = upd.verified ? '' : 'Not verified: GitHub published no checksum.';
       hint.hidden = false;
       if (p === 'darwin') {
         hint.textContent = upd.opened
-          ? 'In the window that opened, drag VidToTab into Applications and choose Replace. Quit this copy first: macOS will not replace an app that is open.'
-          : 'Open it, then drag VidToTab into Applications to replace this version.';
+          ? 'Quit this copy, then drag VidToTab into Applications and choose Replace.'
+          : 'Open it and drag VidToTab into Applications.';
         actions.appendChild(updButton(upd.opened ? 'Open again' : 'Open', openInstaller, 'btn small primary'));
         if (upd.opened) actions.appendChild(updButton('Quit VidToTab', () => shellUpdates.quit()));
       } else if (p === 'win32') {
-        hint.textContent = 'The installer replaces this version. VidToTab closes so it can.';
+        hint.textContent = 'VidToTab closes while the installer runs.';
         actions.appendChild(updButton('Install and close', openInstaller, 'btn small primary'));
       } else if (appImage) {
-        hint.textContent = 'It is ready to run. Replace your current VidToTab AppImage with it, then start the new one.';
+        hint.textContent = 'Replace your current AppImage with it, then start the new one.';
       } else {
-        hint.textContent = 'Open it to install with your software centre, or run: sudo apt install ./' + upd.name;
+        hint.textContent = 'Open it in your software centre, or run: sudo apt install ./' + upd.name;
         actions.appendChild(updButton('Open', openInstaller, 'btn small primary'));
       }
       actions.appendChild(updButton(`Show in ${folderAppName()}`, () => shellUpdates.reveal()));
@@ -3441,7 +3441,7 @@ import { createListen } from '/follow-ui.js';
     }
 
     if (upd.status === 'error') {
-      $('updTitle').textContent = 'The update could not be downloaded.';
+      $('updTitle').textContent = 'Update download failed.';
       $('updText').textContent = upd.error;
       actions.appendChild(updButton('Try again', startDownload, 'btn small primary'));
       actions.appendChild(seeReleases());
@@ -3454,7 +3454,7 @@ import { createListen } from '/follow-ui.js';
     if (info.asset) {
       actions.appendChild(updButton(`Download (${mb(info.asset.size)})`, startDownload, 'btn small primary'));
     } else {
-      $('updText').textContent += ' There is no download for this computer on that release, but the releases page has the others.';
+      $('updText').textContent += ' No download for this computer in this release.';
     }
     actions.appendChild(updButton('What’s new', () => shellUpdates.openPage('release'), 'btn small'));
     actions.appendChild(seeReleases());
@@ -3514,12 +3514,12 @@ import { createListen } from '/follow-ui.js';
     const status = $('aboutStatus');
     const info = upd.info;
     $('aboutCheck').disabled = upd.checking;
-    if (upd.checking) status.textContent = 'Checking GitHub for a newer version…';
+    if (upd.checking) status.textContent = 'Checking for updates…';
     else if (upd.checkError) status.textContent = `Could not check: ${upd.checkError}`;
-    else if (!info) status.textContent = upd.auto ? 'Not checked yet.' : 'Automatic checks are off.';
+    else if (!info) status.textContent = upd.auto ? 'Not checked yet' : 'Automatic checks off';
     else if (info.available) status.textContent = `VidToTab ${info.latest} is available. You have ${info.current}.`;
-    else if (!info.latest) status.textContent = 'No release has been published yet.';
-    else status.textContent = `You have the latest version (${info.current}).`;
+    else if (!info.latest) status.textContent = 'No releases yet';
+    else status.textContent = `Up to date (${info.current})`;
   }
 
   if (shellUpdates) {

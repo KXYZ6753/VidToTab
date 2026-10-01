@@ -47,12 +47,12 @@ export function createReadings({ loadImage, grabBlob, onSaved }) {
     if (bySrc.has(item.src)) return bySrc.get(item.src);
     const job = (async () => {
       const blob = await grabBlob(item.src);
-      if (!blob) throw new Error('This page could not be read back.');
+      if (!blob) throw new Error('Couldn’t load this page.');
       const hash = await sha1(blob);
       const stored = transcript.pages[hash];
       if (stored) return { hash, reading: fromStored(stored), corrected: true };
       const read = await readerFn();
-      if (!read) throw new Error('The tab reader is not available in this build.');
+      if (!read) throw new Error('Tab reader unavailable in this build.');
       const reading = await read(await pixels(item.src));
       return { hash, reading: applyFixes(reading, timing.pages[hash]?.fixes), corrected: false };
     })();

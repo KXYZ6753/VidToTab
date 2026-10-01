@@ -40,7 +40,7 @@ const toBlob = (bytes, type) => (bytes && bytes.byteLength ? new Blob([bytes], {
 let dbPromise = null;
 
 function openDb() {
-  if (!hasIdb()) return Promise.reject(new Error('This browser has no local storage for songsheets.'));
+  if (!hasIdb()) return Promise.reject(new Error('This browser can’t store songsheets.'));
   if (dbPromise) return dbPromise;
   dbPromise = new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
@@ -62,7 +62,7 @@ function openDb() {
 const done = (tx) => new Promise((resolve, reject) => {
   tx.oncomplete = () => resolve();
   tx.onerror = () => reject(tx.error);
-  tx.onabort = () => reject(tx.error || new Error('Storing the songsheet was aborted.'));
+  tx.onabort = () => reject(tx.error || new Error('Couldn’t save the songsheet.'));
 });
 
 const reqValue = (req) => new Promise((resolve, reject) => {

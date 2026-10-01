@@ -87,7 +87,7 @@ const httpsUrl = (u, fallback) => (typeof u === 'string' && /^https:\/\/github\.
 // link is checked to be a github.com page before it is handed over.
 function summarise(release, { current, platform, arch, appImage = false } = {}) {
   if (!release || typeof release.tag_name !== 'string') {
-    throw new Error('GitHub sent something that is not a release.');
+    throw new Error('Unexpected reply from GitHub.');
   }
   const latest = release.tag_name.replace(/^v/, '');
   const stable = !release.draft && !release.prerelease;
@@ -127,11 +127,11 @@ async function fetchLatest({ fetchImpl = globalThis.fetch, feed = FEED, userAgen
     if (res.status === 404) return null; // nothing published yet
     // Unauthenticated calls get 60 an hour per address — plenty for one check
     // a launch, but a shared network can use them up.
-    if (res.status === 403 || res.status === 429) throw new Error('GitHub is limiting update checks from this network right now. Try again later.');
+    if (res.status === 403 || res.status === 429) throw new Error('GitHub is limiting update checks. Try again later.');
     if (!res.ok) throw new Error(`GitHub answered HTTP ${res.status}.`);
     return await res.json();
   } catch (e) {
-    if (e?.name === 'AbortError') throw new Error('GitHub did not answer in time. Check your connection and try again.');
+    if (e?.name === 'AbortError') throw new Error('GitHub didn’t answer in time. Check your connection.');
     throw e;
   } finally {
     clearTimeout(timer);

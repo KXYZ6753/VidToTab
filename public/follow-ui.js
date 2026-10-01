@@ -12,11 +12,11 @@ import { openMic, micPermissionState } from '/listen-audio.js';
 import { TUNINGS, buildEvents, noteName, normaliseListen, playTimes } from '/shared/follow.js';
 
 const HELP = {
-  insecure: 'The microphone is only offered on a secure page. Open VidToTab from this computer (http://127.0.0.1) or over https.',
-  unsupported: 'This browser cannot listen to a microphone. A current Chrome, Edge, Firefox or Safari can.',
-  nodevice: 'No microphone was found. Plug one in, or check it is switched on, then try again.',
-  busy: 'The microphone is there but could not be started. Another app may be using it. Close that app and try again.',
-  failed: 'The microphone could not be opened.',
+  insecure: 'Microphone needs a secure page. Open VidToTab at http://127.0.0.1 or over https.',
+  unsupported: 'This browser can’t use a microphone. Try a current Chrome, Edge, Firefox or Safari.',
+  nodevice: 'No microphone found. Connect one and try again.',
+  busy: 'Couldn’t start the microphone. Close any app using it and try again.',
+  failed: 'Couldn’t open the microphone.',
 };
 
 export function createListen(ctx) {
@@ -68,7 +68,7 @@ export function createListen(ctx) {
     for (const b of document.querySelectorAll('#lsModeSeg [data-mode]')) b.setAttribute('aria-pressed', String(b.dataset.mode === ls.mode));
     $('lsMicState').textContent = ls.mic
       ? `Listening with ${ls.mic.label || 'the microphone'}${ls.engine ? '' : ': the listener did not start'}`
-      : 'The microphone is off.';
+      : 'Microphone off';
     $('lsAllow').hidden = Boolean(ls.mic);
     $('lsLive').hidden = !ls.mic;
   }
@@ -128,8 +128,8 @@ export function createListen(ctx) {
       if (err.code === 'denied') {
         const desktop = ctx.desktopMic();
         text = desktop
-          ? 'VidToTab is not allowed to use the microphone. Allow it in System Settings, then come back.'
-          : 'The browser is not letting this page use the microphone. Allow it in the site settings (the icon in the address bar), then try again.';
+          ? 'Microphone blocked. Allow VidToTab in System Settings.'
+          : 'Microphone blocked. Allow it in site settings (address bar icon) and try again.';
         if (desktop) actions.push(['Open System Settings', () => desktop.openSettings()]);
       }
       actions.push(['Try again', () => startMic(deviceId)]);
@@ -151,14 +151,14 @@ export function createListen(ctx) {
     let driftOffered = false;
     mic.on('drift', (m) => {
       const far = Math.abs(m.cents) >= 30;
-      const said = `The guitar reads ${m.cents > 0 ? 'sharp' : 'flat'} by about ${Math.abs(Math.round(m.cents))} cents`;
-      $('lsDrift').textContent = far ? `${said}. Worth retuning.` : '';
+      const said = `Guitar about ${Math.abs(Math.round(m.cents))} cents ${m.cents > 0 ? 'sharp' : 'flat'}`;
+      $('lsDrift').textContent = far ? `${said}, retune recommended` : '';
       if (!far || driftOffered || !ls.active) return;
       driftOffered = true;
-      message(`${said}.`, { actions: [['Follow my tuning', () => { mic.call('setOffsetCents', m.cents); message(''); }], ['I’ll retune', () => message('')]] });
+      message(said, { actions: [['Follow my tuning', () => { mic.call('setOffsetCents', m.cents); message(''); }], ['I’ll retune', () => message('')]] });
     });
     mic.on('calib', () => { $('lsQuiet').disabled = false; $('lsQuiet').textContent = 'Stay quiet 3 s'; $('lsQuietDone').hidden = false; });
-    mic.on('ended', () => { if (ls.mic === mic && ls.active) message('The microphone stopped. It may have been unplugged.', { actions: [['Reconnect', () => startMic()]] }); });
+    mic.on('ended', () => { if (ls.mic === mic && ls.active) message('Microphone disconnected', { actions: [['Reconnect', () => startMic()]] }); });
     mic.on('error', (m) => { if (ls.mic === mic && ls.active) message(`Listening failed: ${m.message}`); });
     const ready = await mic.ready;
     if (ls.mic !== mic) return null;
@@ -176,7 +176,7 @@ export function createListen(ctx) {
     $('lsPillMeter').style.width = `${v * 100}%`;
     $('lsMeterFill').style.width = `${v * 100}%`;
     $('lsClip').hidden = !clip;
-    if (clip && !$('listenSetup').hidden) $('lsClip').textContent = 'Too loud. Move back a little.';
+    if (clip && !$('listenSetup').hidden) $('lsClip').textContent = 'Too loud. Move back.';
   }
 
   function onTuner({ midi, cents, hz, clarity }) {
@@ -203,7 +203,7 @@ export function createListen(ctx) {
     ls.flat = [];
     ls.byEntry = [];
     ls.cur = 0;
-    message(`Reading the tab… 0 of ${seq.length} pages`);
+    message(`Reading pages… 0 of ${seq.length}`);
     const flat = [];
     const byEntry = [];
     for (let k = 0; k < seq.length; k++) {
@@ -215,7 +215,7 @@ export function createListen(ctx) {
       const events = reading ? buildEvents(reading, s, { page: k }) : [];
       byEntry.push({ first: flat.length, count: events.length, reading, error, events, hash });
       for (let i = 0; i < events.length; i++) flat.push({ entry: k, event: i, ev: events[i] });
-      message(`Reading the tab… ${k + 1} of ${seq.length} pages`);
+      message(`Reading pages… ${k + 1} of ${seq.length}`);
     }
     ls.flat = flat;
     ls.byEntry = byEntry;
@@ -224,7 +224,7 @@ export function createListen(ctx) {
     ls.partial = new Map();
     ls.wrongCount = new Map();
     const unread = byEntry.filter((b) => !b.count).length;
-    message(unread ? `${unread} page${unread === 1 ? '' : 's'} could not be read. Turn ${unread === 1 ? 'it' : 'them'} by hand, or fix the notes (E).` : '');
+    message(unread ? `${unread} page${unread === 1 ? '' : 's'} not read. Turn by hand or fix notes (E).` : '');
     ls.cur = firstOf(ctx.current());
     await sendTargets();
     drawAll();
@@ -286,7 +286,7 @@ export function createListen(ctx) {
     ls.wrongCount.set(index, n);
     const said = `Heard ${heard.map(noteName).join(' ')}${expected?.length ? `, expected ${expected.map(noteName).join(' ')}` : ''}`;
     if (n >= 3) {
-      message(`${said}. The tab may be misread here.`, { actions: [['Skip note (N)', skip], ['Fix it (E)', fixCurrent]] });
+      message(`${said}. Tab may be misread.`, { actions: [['Skip note (N)', skip], ['Fix note (E)', fixCurrent]] });
     } else {
       message(said);
     }
@@ -394,7 +394,7 @@ export function createListen(ctx) {
       for (const n of ls.flat[i].ev.notes) if (n.midi !== null) missedNotes.set(n.midi, (missedNotes.get(n.midi) || 0) + 1);
     }
     const worst = [...missedNotes].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([m, c]) => `${noteName(m)} ×${c}`);
-    message(`${heard} of ${total} heard (${Math.round((heard / total) * 100)}%).${worst.length ? ` Most missed: ${worst.join(', ')}.` : ''}`, { actions: [['Again', () => ctx.restart()]] });
+    message(`${heard} of ${total} heard (${Math.round((heard / total) * 100)}%).${worst.length ? ` Most missed: ${worst.join(', ')}.` : ''}`, { actions: [['Play again', () => ctx.restart()]] });
   }
 
   function fixCurrent() {
@@ -410,7 +410,7 @@ export function createListen(ctx) {
     const heard = [...ls.status.values()].filter((v) => v === 'heard').length;
     const skipped = [...ls.status.values()].filter((v) => v === 'skipped').length;
     const unread = ls.byEntry.filter((b) => !b.count).length;
-    message(`Played through: ${heard} of ${total} heard${skipped ? `, ${skipped} skipped` : ''}${unread ? `; ${unread} page${unread === 1 ? '' : 's'} could not be read` : ''}.`, { actions: [['From the top', fromTop]] });
+    message(`Finished: ${heard} of ${total} heard${skipped ? `, ${skipped} skipped` : ''}${unread ? `, ${unread} page${unread === 1 ? '' : 's'} not read` : ''}`, { actions: [['Play again', fromTop]] });
   }
 
   function fromTop() {
@@ -496,8 +496,8 @@ export function createListen(ctx) {
   let rec = null;
   function toggleRecord() {
     if (rec) { rec.stop(); return; }
-    if (!ls.mic) { message('Allow the microphone first.'); return; }
-    if (typeof MediaRecorder === 'undefined') { message('This browser cannot record.'); return; }
+    if (!ls.mic) { message('Allow the microphone first'); return; }
+    if (typeof MediaRecorder === 'undefined') { message('This browser can’t record.'); return; }
     const type = ['audio/webm;codecs=opus', 'audio/ogg;codecs=opus', 'audio/mp4'].find((t) => MediaRecorder.isTypeSupported(t));
     const r = new MediaRecorder(ls.mic.stream, type ? { mimeType: type, audioBitsPerSecond: 256000 } : {});
     const chunks = [];
@@ -518,12 +518,12 @@ export function createListen(ctx) {
       }));
       ctx.download(new Blob(chunks, { type: r.mimeType }), `${name}.${ext}`);
       ctx.download(new Blob([JSON.stringify({ v: 1, audio: `${name}.${ext}`, settings: ctx.settings(), mic, events }, null, 2)], { type: 'application/json' }), `${name}.json`);
-      message(`Saved ${name}.${ext} and its notes. Put both in scripts/listen-clips/ to replay them as a test.`);
+      message(`Saved ${name}.${ext} and notes. Add both to scripts/listen-clips/ to replay as a test.`);
     };
     r.start(1000);
     rec = r;
     $('lsRecord').textContent = 'Stop recording';
-    message('Recording. Play from the highlighted note, then stop.');
+    message('Recording… Play from the highlighted note.');
   }
 
   // ---------------------------------------------------------------- mode
@@ -540,7 +540,7 @@ export function createListen(ctx) {
     ls.cur = firstOf(ctx.current());
     armCurrent();
     drawAll();
-    message(ls.mode === 'play' ? 'Play (K) starts the clock. Notes are scored as they come.' : '');
+    message(ls.mode === 'play' ? 'Play (K) starts the clock' : '');
     for (const b of document.querySelectorAll('#lsModeSeg [data-mode]')) b.setAttribute('aria-pressed', String(b.dataset.mode === ls.mode));
     if (ls.mic) ls.mic.call('setMode', ls.mode);
   }
@@ -666,7 +666,7 @@ export function createListen(ctx) {
     async refresh() { if (ls.active) await build(); },
     togglePause() {
       ls.paused = !ls.paused;
-      message(ls.paused ? 'Paused. Press K to listen again.' : '');
+      message(ls.paused ? 'Paused. Press K to resume.' : '');
       if (ls.mic) ls.mic.call('setMode', idle() ? 'idle' : ls.mode);
       armCurrent();
     },

@@ -19,21 +19,21 @@ export const LOOKS = [
   {
     id: 'dark',
     label: 'Dark',
-    hint: 'Light ink on near-black, for reading on a screen',
+    hint: 'Light on dark, for screens',
     ink: [235, 235, 238],
     paper: [17, 17, 19],
   },
   {
     id: 'sepia',
     label: 'Sepia',
-    hint: 'Warm paper, easier under lamplight',
+    hint: 'Warm paper tone',
     ink: [58, 42, 30],
     paper: [246, 236, 218],
   },
   {
     id: 'color',
     label: 'Original',
-    hint: 'Colours straight from the video',
+    hint: 'Colours from the video',
     original: true,
   },
 ];

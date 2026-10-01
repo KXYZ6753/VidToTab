@@ -112,7 +112,7 @@ export function setNote(reading, at, patch) {
     n.string = patch.string;
   }
   if (patch.fret !== undefined) {
-    if (patch.fret !== null && !(Number.isInteger(patch.fret) && patch.fret >= 0 && patch.fret <= 24)) throw new Error('A fret is 0 to 24.');
+    if (patch.fret !== null && !(Number.isInteger(patch.fret) && patch.fret >= 0 && patch.fret <= 24)) throw new Error('Fret must be 0 to 24.');
     n.fret = patch.fret;
     if (patch.fret === null && !n.tech.includes('x')) n.tech.push('x');
     if (patch.fret !== null) n.tech = n.tech.filter((t) => t !== 'x');

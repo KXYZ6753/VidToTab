@@ -69,7 +69,7 @@ export function createEditor({ el, readings, pageSrc, onClose, onChange }) {
     layer.textContent = '';
     if (!reading) return;
     if (!reading.found) {
-      $q('#teStatus').textContent = reading.flags?.includes('notSixLines') ? 'This is not six-string tab.' : 'No tab staff found on this page.';
+      $q('#teStatus').textContent = reading.flags?.includes('notSixLines') ? 'Not six-string tab' : 'No tab staff found';
       return;
     }
     const W = reading.w;

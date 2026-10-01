@@ -88,7 +88,7 @@ const lengthLabel = (sec) => (sec >= 90 ? plural(Math.round(sec / 60), 'minute')
 function tooLongMsg(seconds) {
   if (!LIMITS.on || !(Number(seconds) > LIMITS.maxSeconds)) return null;
   return `That video is ${lengthLabel(Number(seconds))} long. This instance accepts videos up to `
-    + `${lengthLabel(LIMITS.maxSeconds)} — trim it first, or run VidToTab on your own machine, where nothing is capped.`;
+    + `${lengthLabel(LIMITS.maxSeconds)}. Trim it, or run VidToTab locally (no limit).`;
 }
 
 const MIME = {
@@ -396,11 +396,11 @@ async function urlFlow(my, url) {
   try { j = JSON.parse(info.out.trim().split('\n')[0] || '{}'); }
   catch { return flowError(my, 'Unexpected response from yt-dlp.', info.out.slice(0, 300)); }
   if (j._type === 'playlist' || j.entries) {
-    return flowError(my, 'That link is a playlist. Open one video from it and paste that link instead.');
+    return flowError(my, 'That link is a playlist. Paste a link to one video.');
   }
   // A live stream never finishes: yt-dlp would keep recording until cancelled.
   if (j.is_live) {
-    return flowError(my, 'That video is live right now. Try again once the stream has ended.');
+    return flowError(my, 'That video is live. Try again after the stream ends.');
   }
   // Checked off yt-dlp's metadata, before a byte of it is downloaded.
   const tooLong = tooLongMsg(j.duration);
@@ -428,7 +428,7 @@ async function urlFlow(my, url) {
   // one more refused request against a service that is already rate-limiting.
   for (const [i, client] of orderedClients().entries()) {
     clearDownloads();
-    if (i > 0) broadcast({ phase: 'download', pct: 0, msg: `YouTube refused the stream — retrying via the ${client.label}` });
+    if (i > 0) broadcast({ phase: 'download', pct: 0, msg: `YouTube refused the stream. Retrying (${client.label})…` });
     dl = await download(my, url, client.args);
     if (bail(my)) return;
     if (dl.code === 0 && findDownloaded()) { noteClientSuccess(client.label); break; }
@@ -436,7 +436,7 @@ async function urlFlow(my, url) {
   }
   if (dl.code !== 0) return flowError(my, friendlyYtError(dl.err, 'The download failed.'), dl.err);
   const got = findDownloaded();
-  if (!got) return flowError(my, 'The download finished but produced no video file.', dl.err);
+  if (!got) return flowError(my, 'The download produced no video file.', dl.err);
   const r = await toPlayableMp4(my, got);
   if (bail(my)) return;
   if (r) return flowError(my, r.msg, r.detail);
@@ -450,7 +450,7 @@ function download(my, url, extraArgs) {
     line => {
       if (line.startsWith('[download] Destination:')) stage++;
       if (line.startsWith('[Merger]') || line.startsWith('[VideoRemuxer]')) {
-        broadcast({ phase: 'download', pct: 100, msg: 'Finishing up' });
+        broadcast({ phase: 'download', pct: 100, msg: 'Finishing…' });
         return;
       }
       const m = /^\[download\]\s+([\d.]+)%/.exec(line);
@@ -460,7 +460,7 @@ function download(my, url, extraArgs) {
       const pct = Math.round(stage <= 1 ? p * 0.9 : 90 + p * 0.1);
       if (pct !== last) {
         last = pct;
-        broadcast({ phase: 'download', pct, msg: stage <= 1 ? 'Downloading video' : 'Downloading audio' });
+        broadcast({ phase: 'download', pct, msg: stage <= 1 ? 'Downloading video…' : 'Downloading audio…' });
       }
     });
 }
@@ -473,18 +473,18 @@ function friendlyYtError(err, fallback) {
   // sign-in requirement. Calling it the latter told people to give up on a
   // video that usually works again within minutes.
   if (/confirm you'?re not a bot|not a bot/i.test(e)) {
-    return 'YouTube is rate-limiting downloads from this computer right now. Wait a few minutes and try again, or download the video yourself and drop the file in.';
+    return 'YouTube is rate-limiting this computer. Wait a few minutes, or drop in the video file.';
   }
-  if (/confirm your age|age-restricted/i.test(e)) return 'That video is age-restricted, so it can’t be downloaded without signing in.';
+  if (/confirm your age|age-restricted/i.test(e)) return 'That video is age-restricted. Drop in the video file instead.';
   if (/members-only|join this channel/i.test(e)) return 'That video is for channel members only.';
-  if (/Sign in/i.test(e)) return 'YouTube is asking this download to sign in. Try again in a few minutes, or drop the video file in instead.';
+  if (/Sign in/i.test(e)) return 'YouTube asked for a sign-in. Try again in a few minutes, or drop in the video file.';
   // Every player client is tried before this surfaces, so a 403 here means they
   // all failed — "try again in a minute" was misleading on its own.
   if (/403|Forbidden/i.test(e)) {
-    return 'YouTube refused the download on every route we try. Wait a few minutes, update yt-dlp, or download the video yourself and drop the file in.';
+    return 'YouTube refused the download. Wait a few minutes, update yt-dlp, or drop in the video file.';
   }
-  if (/resolve|getaddrinfo|Network is unreachable|timed out|Connection reset/i.test(e)) return 'Couldn’t reach YouTube — check your internet connection.';
-  if (/No space left|ENOSPC/i.test(e)) return 'The disk is full — free up some space and try again.';
+  if (/resolve|getaddrinfo|Network is unreachable|timed out|Connection reset/i.test(e)) return 'Couldn’t reach YouTube. Check your internet connection.';
+  if (/No space left|ENOSPC/i.test(e)) return 'The disk is full. Free up space and try again.';
   return fallback;
 }
 
@@ -608,7 +608,7 @@ async function toPlayableMp4(my, src) {
   let r = { code: -1, err: '' };
   let stale = false;
   if (PLAY_V.has(p.vcodec)) {
-    r = await convert(my, tmp, ['-c:v', 'copy', ...(PLAY_A.has(p.acodec) ? ['-c:a', 'copy'] : ['-c:a', 'aac'])], p.duration, 'Converting to mp4');
+    r = await convert(my, tmp, ['-c:v', 'copy', ...(PLAY_A.has(p.acodec) ? ['-c:a', 'copy'] : ['-c:a', 'aac'])], p.duration, 'Converting to MP4…');
   }
   if (r.code !== 0 && !my.cancelled && my === job) {
     // Choosing an encoder runs real trial encodes, so it is slow in exactly the
@@ -618,11 +618,11 @@ async function toPlayableMp4(my, src) {
     // the very thing the comment at the top of this function is about.
     const enc = await videoEncoderArgs();
     if (my !== job || my.cancelled) stale = true;
-    else r = await convert(my, tmp, [...enc, '-c:a', 'aac'], p.duration, 'Transcoding');
+    else r = await convert(my, tmp, [...enc, '-c:a', 'aac'], p.duration, 'Re-encoding video…');
   }
   fs.rmSync(tmp, { force: true });
   if (stale) return { superseded: true, msg: 'The video changed.' };
-  return r.code === 0 ? null : { msg: 'Could not convert the video to a playable mp4.', detail: r.err };
+  return r.code === 0 ? null : { msg: 'Couldn’t convert the video to MP4.', detail: r.err };
 }
 
 function convert(my, src, codecArgs, duration, label) {
@@ -695,7 +695,7 @@ async function postUrl(req, res) {
   if (!url || (url.protocol !== 'http:' && url.protocol !== 'https:')) {
     return sendJson(res, 400, { error: 'Paste a full http(s) link.' });
   }
-  if (!preflight.ytdlp) return sendJson(res, 500, { error: 'yt-dlp is not installed (brew install yt-dlp)' });
+  if (!preflight.ytdlp) return sendJson(res, 500, { error: 'yt-dlp is not installed. Run brew install yt-dlp.' });
   if (!takeClaim(req, res)) return;
   await stopCurrent();
   resetWork();
@@ -710,7 +710,7 @@ async function postUrl(req, res) {
 }
 
 async function putFile(req, res, u) {
-  if (!preflight.ffmpeg) return sendJson(res, 500, { error: 'ffmpeg is not installed (brew install ffmpeg)' });
+  if (!preflight.ffmpeg) return sendJson(res, 500, { error: 'ffmpeg is not installed. Run brew install ffmpeg.' });
   // 4 GB locally; a public instance lowers it with VIDTOTAB_MAX_UPLOAD_MB.
   const cap = LIMITS.on ? LIMITS.uploadBytes : UPLOAD_CAP;
   const capMsg = `File too large (${sizeLabel(cap)} max).`;
@@ -810,11 +810,11 @@ async function postAnalyze(req, res) {
   const meta = job.meta;
   if (!meta?.ready || !fs.existsSync(VIDEO)) return sendJson(res, 409, { error: 'No video is ready yet.' });
   const crop = clampRect(body.rect, meta.width, meta.height);
-  if (!crop || crop.w < 16 || crop.h < 16) return sendJson(res, 400, { error: 'The selected region is too small.' });
+  if (!crop || crop.w < 16 || crop.h < 16) return sendJson(res, 400, { error: 'Selection too small. Draw a larger box.' });
   let startTime = Number(body.startTime);
   if (!Number.isFinite(startTime) || startTime < 0) startTime = 0;
   if (meta.duration && startTime > meta.duration - 1) {
-    return sendJson(res, 400, { error: 'The start time is at the very end of the video — seek earlier.' });
+    return sendJson(res, 400, { error: 'Start time is at the end of the video. Choose an earlier one.' });
   }
   let sensitivity = Number(body.sensitivity);
   if (!Number.isFinite(sensitivity)) sensitivity = 0.5;
@@ -863,7 +863,7 @@ async function postAnalyze(req, res) {
     my.captures = my.prevCaptures;
     my.phase = my.captures.length ? 'done' : 'ready';
     if (err?.cancelled) return broadcast({ phase: 'cancelled', runId, captures: my.captures });
-    const ev = { phase: 'error', runId, msg: err?.userMsg || err?.message || 'Analysis failed.', captures: my.captures };
+    const ev = { phase: 'error', runId, msg: err?.userMsg || err?.message || 'Scan failed.', captures: my.captures };
     if (err?.detail || err?.stderr) ev.detail = String(err.detail || err.stderr).slice(-1500);
     broadcast(ev);
   });
@@ -906,7 +906,7 @@ async function postExport(req, res) {
   try { body = await readJson(req, 64e6); }
   catch (e) { tooLarge = /too large/i.test(e?.message || ''); }
   if (tooLarge) {
-    return sendJson(res, 413, { error: 'That export is too big to send. Remove some pages, or use the Print look, which needs no upload.' });
+    return sendJson(res, 413, { error: 'Export too large. Remove some pages or use the Print look.' });
   }
   const items = Array.isArray(body?.items) ? body.items : null;
   if (!items || items.length === 0) return sendJson(res, 400, { error: 'Nothing to export.' });
@@ -923,7 +923,7 @@ async function postExport(req, res) {
     const name = path.basename(String(it?.png || '')); // trust only basename
     const f = path.join(WORK, name);
     if (!name.endsWith('.png') || !fs.existsSync(f)) {
-      return sendJson(res, 400, { error: 'Missing capture: ' + name });
+      return sendJson(res, 400, { error: 'Page file missing: ' + name });
     }
     files.push(f);
   }
@@ -1111,7 +1111,7 @@ function serveAudio(req, res, u) {
   if (!job.meta?.ready || !fs.existsSync(VIDEO)) return sendJson(res, 404, { error: 'no video' });
   if (audioDecodes >= 2) {
     res.setHeader('Retry-After', '1');
-    return sendJson(res, 503, { error: 'Already reading the video’s sound — try again in a moment.' });
+    return sendJson(res, 503, { error: 'Already reading the video’s sound. Try again shortly.' });
   }
   const dur = Math.min(AUDIO_MAX_SEC, to - from);
   audioDecodes++;
@@ -1321,7 +1321,7 @@ function takeClaim(req, res) {
   if (wait) {
     res.setHeader('Retry-After', String(wait));
     sendJson(res, 503, {
-      error: 'Someone else is using this instance right now. Their scan would be erased by starting another video — try again in a few minutes.',
+      error: 'Someone else is using this instance. Try again in a few minutes.',
     });
     return false;
   }
@@ -1431,11 +1431,11 @@ async function heavy(req, res, fn) {
   const retry = rateLimited(req);
   if (retry) {
     res.setHeader('Retry-After', String(retry));
-    return sendJson(res, 429, { error: `Too many requests — wait ${retry}s and try again.` });
+    return sendJson(res, 429, { error: `Too many requests. Try again in ${retry}s.` });
   }
   if (heavyJobs >= LIMITS.maxJobs) {
     res.setHeader('Retry-After', '30');
-    return sendJson(res, 503, { error: 'The server is busy with other videos right now. Try again in a minute.' });
+    return sendJson(res, 503, { error: 'Server busy. Try again in a minute.' });
   }
   heavyJobs++;
   let released = false;
@@ -1483,7 +1483,7 @@ async function route(req, res) {
   // open the event stream or start anything.
   attachOwner(req, res);
   if (!ownsJob(req) && (JOB_SCOPED.has(key) || u.pathname.startsWith('/captures/'))) {
-    return sendJson(res, 403, { error: 'Someone else is using this instance right now.' });
+    return sendJson(res, 403, { error: 'Someone else is using this instance.' });
   }
   // Any sign of the owner keeps the instance theirs.
   if (LIMITS.on && job.owner && req.vttOwner === job.owner) job.touched = Date.now();
@@ -1492,7 +1492,7 @@ async function route(req, res) {
     if (wait) {
       res.setHeader('Retry-After', String(wait));
       return sendJson(res, 503, {
-        error: 'Someone else is using this instance right now. Their scan would be erased by starting another video — try again in a few minutes.',
+        error: 'Someone else is using this instance. Try again in a few minutes.',
       });
     }
   }

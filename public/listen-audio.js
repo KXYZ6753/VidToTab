@@ -250,9 +250,9 @@ export function warningsFor(settings = {}, label = '') {
   const rate = Number(settings.sampleRate);
   const headset = /hands-free|airpods|headset/i.test(label || '');
   if (rate > 0 && rate <= 16000) {
-    out.push(`This microphone is only sending ${Math.round(rate / 1000)} kHz sound, which is what a Bluetooth headset does while its microphone is on. Notes will be hard to tell apart — the computer's own microphone or a wired one will do much better.`);
+    out.push(`Microphone sends only ${Math.round(rate / 1000)} kHz sound, as Bluetooth headsets do. Use the built-in or a wired microphone.`);
   } else if (headset) {
-    out.push('Bluetooth headsets switch to low-quality call sound while their microphone is in use. If notes are missed, try the computer\'s own microphone or a wired one.');
+    out.push('Bluetooth headset microphones are low quality. If notes are missed, use the built-in or a wired microphone.');
   }
   const still = [
     settings.echoCancellation === true && 'echo cancellation',
@@ -261,7 +261,7 @@ export function warningsFor(settings = {}, label = '') {
   ].filter(Boolean);
   if (still.length) {
     const list = still.length === 1 ? still[0] : `${still.slice(0, -1).join(', ')} and ${still[still.length - 1]}`;
-    out.push(`The browser kept ${list} switched on for this microphone. It is made for voices and can swallow held notes.`);
+    out.push(`The browser kept ${list} on, which can swallow held notes.`);
   }
   return out;
 }
