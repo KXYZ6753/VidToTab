@@ -22,6 +22,8 @@ import { createListen } from '/follow-ui.js';
 
   const $ = (id) => document.getElementById(id);
   const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+  // Scrolls jump rather than glide for anyone who has asked for less motion.
+  const smooth = () => (matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth');
   // The bridge the Electron preload exposes; absent in a browser, and absent in
   // a browser that has blocked it, so the read is guarded. It lives up here
   // rather than beside isAppView because start-up asks it well before that
@@ -206,6 +208,8 @@ import { createListen } from '/follow-ui.js';
       const onSteps = state.screen === 'steps';
       li.classList.toggle('active', onSteps && n === state.step);
       li.classList.toggle('done', onSteps && n < state.step);
+      if (onSteps && n === state.step) btn.setAttribute('aria-current', 'step');
+      else btn.removeAttribute('aria-current');
       // A songsheet opened from the library has no video behind it, so the
       // steps that need one stay shut. Reaching them showed an empty video
       // stage, which reads as broken rather than as "there is nothing here".
@@ -408,7 +412,7 @@ import { createListen } from '/follow-ui.js';
     $('errorDetailText').textContent = detail || '';
     $('errorEscape').hidden = !escape;
     $('errorBanner').hidden = false;
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    window.scrollTo({ top: 0, behavior: smooth() });
   }
   const hideError = () => { $('errorBanner').hidden = true; };
   $('errorDismiss').addEventListener('click', hideError);
@@ -514,6 +518,8 @@ import { createListen } from '/follow-ui.js';
     const indeterminate = !Number.isFinite(pct);
     $('dlBar').classList.toggle('indeterminate', indeterminate);
     if (!indeterminate) $('dlBarFill').style.width = clamp(pct, 0, 100) + '%';
+    if (indeterminate) $('dlBar').removeAttribute('aria-valuenow');
+    else $('dlBar').setAttribute('aria-valuenow', String(Math.round(clamp(pct, 0, 100))));
     $('dlLabel').textContent = label || '';
   }
 
@@ -1243,7 +1249,7 @@ import { createListen } from '/follow-ui.js';
     let pos = vis.indexOf(state.selected);
     pos = pos === -1 ? (dir > 0 ? 0 : vis.length - 1) : clamp(pos + dir, 0, vis.length - 1);
     selectItem(vis[pos]);
-    $('reviewList').querySelector(`[data-idx="${vis[pos]}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    $('reviewList').querySelector(`[data-idx="${vis[pos]}"]`)?.scrollIntoView({ block: 'nearest', behavior: smooth() });
   }
 
   function deleteItem(idx) {
@@ -2085,7 +2091,7 @@ import { createListen } from '/follow-ui.js';
     showEntry(state.practice, { scroll: 'instant' });
   }
 
-  function showEntry(i, { scroll = 'smooth' } = {}) {
+  function showEntry(i, { scroll = smooth() } = {}) {
     const n = clamp(i, 0, player.seq.length - 1);
     state.practice = n;
     const e = player.seq[n];
@@ -2290,6 +2296,9 @@ import { createListen } from '/follow-ui.js';
     setPlaying(false);
     holdScreenAwake();
     if (prefs.follow === 'listen') listen.enter();
+    // Into the overlay, on the overlay itself: on a button, Space would press
+    // it as well as toggling play.
+    $('practice').focus({ preventScroll: true });
   }
 
   function closePractice() {
@@ -3395,9 +3404,11 @@ import { createListen } from '/follow-ui.js';
       const total = upd.total || info?.asset?.size || 0;
       if (upd.status === 'verifying' || !total) {
         $('updBar').classList.add('indeterminate');
+        $('updBar').removeAttribute('aria-valuenow');
         $('updProgressLabel').textContent = upd.status === 'verifying' ? 'Comparing it with the checksum GitHub published' : mb(upd.received);
       } else {
         $('updBarFill').style.width = `${Math.min(100, (upd.received / total) * 100).toFixed(1)}%`;
+        $('updBar').setAttribute('aria-valuenow', String(Math.round(Math.min(100, (upd.received / total) * 100))));
         $('updProgressLabel').textContent = `${mb(upd.received)} of ${mb(total)}`;
       }
       if (upd.status === 'downloading') actions.appendChild(updButton('Cancel', () => shellUpdates.cancel(), 'btn small ghost'));

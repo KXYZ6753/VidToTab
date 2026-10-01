@@ -185,6 +185,9 @@ body[data-view="app"] .get-app { display: none; }
 @media (prefers-reduced-motion: reduce) {
   .step, .step[data-dir="fwd"], .step[data-dir="back"] { animation: none; }
   * { transition: none !important; }
+  /* Everything else that moves on its own. The bar stays put at a third full
+     and the active stage keeps its ring, so neither stops saying "working". */
+  .libview, .live-grid img, .bar.indeterminate > div, .shimmer, .stages li.active .dot { animation: none; }
 }
 
 /* ---------- buttons & inputs ---------- */
@@ -353,7 +356,7 @@ body[data-view="app"] .source-card { margin: 14px 0 0; }
 .side-lib-count { margin-left: auto; font-size: 12px; color: var(--faint); font-variant-numeric: tabular-nums; }
 
 .libview { animation: step-fwd .26s cubic-bezier(.2, .7, .2, 1) both; }
-.libview:focus { outline: none; }
+.libview:focus, .practice:focus { outline: none; }
 .lv-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 14px; }
 .lv-head h2 { font-size: 24px; letter-spacing: -.02em; line-height: 1.15; }
 .lv-folder { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
@@ -778,6 +781,17 @@ button.chip { cursor: pointer; }
   .review-controls { width: 100%; }
   .review-controls .btn.primary { flex: 1; }
 }
+/* Fingers need about 44px. These controls are drawn smaller on purpose, so on a
+   touch screen their hit area grows instead, past the edges they are drawn
+   with, and nothing around them moves. */
+@media (pointer: coarse) {
+  .stepper button, .icon-btn, button.chip, .banner .x, .lvd-close, .seg button { position: relative; }
+  .stepper button::after, button.chip::after, .seg button::after { content: ''; position: absolute; inset: -7px 0; }
+  .icon-btn::after, .banner .x::after, .lvd-close::after { content: ''; position: absolute; inset: -7px; }
+}
+/* There is no hover on a touch screen, so a delete button that waits for one
+   is never seen there. */
+@media (hover: none) { .lib-card .lib-del { opacity: 1; } }
 </style>
 </head>
 <body data-view="home">
@@ -831,7 +845,7 @@ button.chip { cursor: pointer; }
       <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="9" fill="currentColor" style="color: var(--accent)"/><g stroke="#fff" stroke-width="1.75" stroke-linecap="round"><path d="M8.92 8.71h6.66M8.92 11.63h10.83M8.92 14.54h14.16M8.92 17.46h14.16M8.92 20.37h10.83M8.92 23.29h6.66"/></g></svg>
       <span>VidTo<b>Tab</b></span>
     </a>
-    <ol id="stepper" class="stepper">
+    <ol id="stepper" class="stepper" aria-label="Steps">
       <li><button type="button" data-step="1"><span class="num">1</span><span class="lbl">Video</span></button></li>
       <li><button type="button" data-step="2" disabled><span class="num">2</span><span class="lbl">Tab area</span></button></li>
       <li><button type="button" data-step="3" disabled><span class="num">3</span><span class="lbl">Scan</span></button></li>
@@ -886,7 +900,7 @@ button.chip { cursor: pointer; }
     <div class="body">
       <p><strong id="updTitle"></strong> <span id="updText"></span></p>
       <div id="updProgress" class="upd-progress" hidden>
-        <div class="bar" id="updBar"><div id="updBarFill"></div></div>
+        <div class="bar" id="updBar" role="progressbar" aria-label="Download progress" aria-valuemin="0" aria-valuemax="100"><div id="updBarFill"></div></div>
         <span id="updProgressLabel" class="quiet"></span>
       </div>
       <p id="updHint" class="upd-hint" hidden></p>
@@ -935,7 +949,7 @@ button.chip { cursor: pointer; }
         <p id="metaTitle" class="source-title"></p>
         <p id="metaSub" class="quiet"></p>
         <div id="dlProgress" class="progress-row" hidden>
-          <div class="bar" id="dlBar"><div id="dlBarFill"></div></div>
+          <div class="bar" id="dlBar" role="progressbar" aria-label="Video download" aria-valuemin="0" aria-valuemax="100"><div id="dlBarFill"></div></div>
           <div class="row spread"><span id="dlLabel" class="quiet"></span><button type="button" class="btn ghost small" id="dlCancel">Cancel</button></div>
         </div>
       </div>
@@ -995,7 +1009,7 @@ button.chip { cursor: pointer; }
       </div>
 
       <aside class="panel card">
-        <div id="detectStatus" class="detect-status">
+        <div id="detectStatus" class="detect-status" aria-live="polite">
           <span class="icon" id="detectIcon" hidden></span>
           <div><b id="detectTitle">Looking for the tab…</b><p id="detectText">This takes a second or two.</p></div>
         </div>
@@ -1206,7 +1220,7 @@ button.chip { cursor: pointer; }
      BPM once the song's is known — and the next page comes up when it is full.
      Scroll shows the pages coming; One page shows one at a time. The cards are
      built by app.js. -->
-<div id="practice" class="practice" hidden data-layout="scroll">
+<div id="practice" class="practice" hidden data-layout="scroll" role="dialog" aria-modal="true" aria-label="Practice" tabindex="-1">
   <div class="practice-page" id="practiceSingle"></div>
   <div class="practice-scroll" id="practiceScroll"></div>
   <div class="pr-count" id="practiceCount" aria-live="assertive" hidden></div>
@@ -1309,7 +1323,7 @@ button.chip { cursor: pointer; }
 
 <!-- Fix-by-click: what was read off a page, as boxes over the page. Built and
      driven by tabedit.js. -->
-<div id="tabEdit" class="tab-edit" hidden role="dialog" aria-label="Fix the notes">
+<div id="tabEdit" class="tab-edit" hidden role="dialog" aria-modal="true" aria-label="Fix the notes">
   <div class="te-bar">
     <button type="button" id="teClose">Done</button>
     <button type="button" id="tePrevPage" aria-label="Previous page">‹</button>
