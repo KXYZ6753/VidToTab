@@ -18,6 +18,10 @@
 <style>
 *, *::before, *::after { box-sizing: border-box; }
 * { margin: 0; padding: 0; }
+/* Decisions this sheet keeps to, so later changes do not drift:
+   one accent; --radius-sm for controls, --radius for cards; depth is a border
+   plus a small shadow, with big shadows only on things that float over the
+   page (popovers, the toast); mono only for data. */
 :root {
   color-scheme: light dark;
   --bg: #f6f3ee;

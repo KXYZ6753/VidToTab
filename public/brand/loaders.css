@@ -369,8 +369,7 @@
 }
 
 .vtt-mark-bg { fill: var(--accent); }
-.vtt-mark-line { stroke: var(--accent-ink); stroke-width: 1.6; stroke-linecap: round; fill: none; }
-.vtt-mark-dot { fill: var(--accent-ink); }
+.vtt-mark-line { stroke: var(--accent-ink); stroke-width: 1.75; stroke-linecap: round; fill: none; }
 
 .vtt-loader--scan .vtt-loader-text {
   font-size: max(11px, calc(var(--vtt-size) / 11));

@@ -195,15 +195,14 @@ const scanStage = () =>
     h('i', { class: 'vtt-scan-head' }),
   ]);
 
-// The app's own icon, drawn from the same path data as the favicon in
-// index.html so the thing that breathes here is recognisably the thing in the
-// tab strip — in --accent, so it is the right orange in either theme.
+// The app's own mark, drawn from the same path data as the one in the top bar
+// of index.html (six strings tapering into a play triangle), so the thing that
+// breathes here is recognisably the thing in the header. In --accent, so it is
+// the right orange in either theme.
 const mark = () =>
   s('svg', { class: 'vtt-mark', viewBox: '0 0 32 32', 'aria-hidden': 'true' }, [
-    s('rect', { class: 'vtt-mark-bg', width: 32, height: 32, rx: 8 }),
-    s('path', { class: 'vtt-mark-line', d: 'M7 9h18M7 13h18M7 17h18M7 21h18' }),
-    s('circle', { class: 'vtt-mark-dot', cx: 13, cy: 13, r: 2.6 }),
-    s('circle', { class: 'vtt-mark-dot', cx: 20, cy: 19, r: 2.6 }),
+    s('rect', { class: 'vtt-mark-bg', width: 32, height: 32, rx: 9 }),
+    s('path', { class: 'vtt-mark-line', d: 'M8.92 8.71h6.66M8.92 11.63h10.83M8.92 14.54h14.16M8.92 17.46h14.16M8.92 20.37h10.83M8.92 23.29h6.66' }),
   ]);
 
 /* ---------- assembly ---------- */

@@ -39,9 +39,9 @@ const STARTING_PAGE = `data:text/html;charset=utf-8,${encodeURIComponent(`
 <!doctype html><meta charset="utf-8"><title>VidToTab</title>
 <style>
   :root { color-scheme: light dark }
-  body { margin:0; height:100vh; display:grid; place-items:center; background:#faf7f2; color:#2b2724;
+  body { margin:0; height:100vh; display:grid; place-items:center; background:#f6f3ee; color:#1d1b18;
          font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif }
-  @media (prefers-color-scheme: dark) { body { background:#161513; color:#e9e4dc } }
+  @media (prefers-color-scheme: dark) { body { background:#121315; color:#eeebe6 } }
   p { opacity:.75 }
 </style>
 <p>Starting VidToTab…</p>
